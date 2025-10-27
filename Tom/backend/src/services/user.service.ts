@@ -83,55 +83,79 @@ export class UserService {
     name: string;
     role?: 'admin' | 'user';
   }): Promise<UserResponse> {
-    const bcrypt = require('bcrypt');
-    
-    // Verificar se email já existe
-    const existing = await this.prisma.user.findUnique({
-      where: { email: data.email },
-    });
-
-    if (existing) {
-      throw new ConflictError('Email already in use');
-    }
-
-    // Hash da senha
-    const hashedPassword = await bcrypt.hash(data.password, 10);
-
-    // Criar usuário
-    const user = await this.prisma.user.create({
-      data: {
-        email: data.email,
-        password: hashedPassword,
-        name: data.name,
-        isActive: true,
-      },
-      include: {
-        roles: {
-          include: {
-            role: true,
-          },
-        },
-      },
-    });
-
-    // Atribuir role
-    const roleName = data.role || 'user';
-    const role = await this.prisma.role.findUnique({
-      where: { name: roleName },
-    });
-
-    if (role) {
-      await this.prisma.userRole.create({
-        data: {
-          userId: user.id,
-          roleId: role.id,
-        },
+    try {
+      const bcrypt = require('bcrypt');
+      
+      logger.info(`Creating user: ${data.email} with role ${data.role || 'user'}`);
+      
+      // Verificar se email já existe
+      const existing = await this.prisma.user.findUnique({
+        where: { email: data.email },
       });
+
+      if (existing) {
+        logger.warn(`Email already exists: ${data.email}`);
+        throw new ConflictError('Email already in use');
+      }
+
+      // Verificar se a role existe antes de criar o usuário
+      const roleName = data.role || 'user';
+      const role = await this.prisma.role.findUnique({
+        where: { name: roleName },
+      });
+
+      if (!role) {
+        logger.error(`Role not found: ${roleName}`);
+        throw new Error(`Role '${roleName}' not found. Please run database seed.`);
+      }
+
+      // Hash da senha
+      const hashedPassword = await bcrypt.hash(data.password, 10);
+
+      // Criar usuário em uma transação
+      const result = await this.prisma.$transaction(async (tx) => {
+        // Criar usuário
+        const user = await tx.user.create({
+          data: {
+            email: data.email,
+            password: hashedPassword,
+            name: data.name,
+            isActive: true,
+          },
+        });
+
+        // Atribuir role
+        await tx.userRole.create({
+          data: {
+            userId: user.id,
+            roleId: role.id,
+          },
+        });
+
+        // Buscar usuário completo com roles
+        return await tx.user.findUnique({
+          where: { id: user.id },
+          include: {
+            roles: {
+              include: {
+                role: true,
+              },
+            },
+          },
+        });
+      });
+
+      if (!result) {
+        throw new Error('Failed to create user');
+      }
+
+      logger.info(`✅ User created successfully: ${result.email} with role ${roleName}`);
+
+      return this.formatUserResponse(result);
+    } catch (error: any) {
+      logger.error(`❌ Error creating user ${data.email}:`, error);
+      throw error;
     }
-
-    logger.info(`User created: ${user.email} with role ${roleName}`);
-
-    return this.formatUserResponse(user);
   }
 
   /**

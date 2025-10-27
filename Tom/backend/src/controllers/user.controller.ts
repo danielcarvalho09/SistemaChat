@@ -32,14 +32,65 @@ export class UserController {
    * Cria novo usuário (apenas admin)
    */
   createUser = async (request: FastifyRequest, reply: FastifyReply) => {
-    const data = request.body as { email: string; password: string; name: string; role?: 'admin' | 'user' };
-    const user = await this.userService.createUser(data);
+    try {
+      const data = request.body as { email: string; password: string; name: string; role?: 'admin' | 'user' };
+      
+      // Validação básica
+      if (!data.email || !data.password || !data.name) {
+        return reply.status(400).send({
+          success: false,
+          message: 'Email, password and name are required',
+        });
+      }
 
-    return reply.status(201).send({
-      success: true,
-      message: 'User created successfully',
-      data: user,
-    });
+      // Validar formato do email
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(data.email)) {
+        return reply.status(400).send({
+          success: false,
+          message: 'Invalid email format',
+        });
+      }
+
+      // Validar tamanho da senha
+      if (data.password.length < 6) {
+        return reply.status(400).send({
+          success: false,
+          message: 'Password must be at least 6 characters long',
+        });
+      }
+
+      const user = await this.userService.createUser(data);
+
+      return reply.status(201).send({
+        success: true,
+        message: 'User created successfully',
+        data: user,
+      });
+    } catch (error: any) {
+      console.error('❌ Erro ao criar usuário:', error);
+      
+      // Tratar erros específicos
+      if (error.message === 'Email already in use') {
+        return reply.status(409).send({
+          success: false,
+          message: 'Email already in use',
+        });
+      }
+      
+      if (error.message?.includes('Role') && error.message?.includes('not found')) {
+        return reply.status(500).send({
+          success: false,
+          message: 'System roles not configured. Please run database seed.',
+        });
+      }
+
+      return reply.status(500).send({
+        success: false,
+        message: 'Internal server error',
+        error: process.env.NODE_ENV === 'development' ? error.message : undefined,
+      });
+    }
   };
 
   /**

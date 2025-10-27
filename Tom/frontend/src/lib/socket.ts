@@ -11,26 +11,31 @@ class SocketService {
     this.token = token;
 
     if (this.socket?.connected) {
+      console.log('✅ Socket já conectado, reutilizando...');
       return this.socket;
     }
 
     // Desconectar socket antigo se existir
     if (this.socket) {
+      console.log('🔄 Desconectando socket antigo...');
       this.socket.removeAllListeners();
       this.socket.disconnect();
     }
 
+    console.log(`🔌 Conectando ao WebSocket: ${WS_URL}`);
+    
     this.socket = io(WS_URL, {
       auth: {
         token,
       },
       transports: ['websocket', 'polling'],
       reconnection: true,
-      reconnectionDelay: 500,        // Tentar reconectar após 500ms
-      reconnectionDelayMax: 3000,    // Máximo de 3 segundos entre tentativas
-      reconnectionAttempts: Infinity, // Tentar reconectar infinitamente
-      timeout: 10000,                // Timeout de 10 segundos
+      reconnectionDelay: 1000,        // Tentar reconectar após 1s
+      reconnectionDelayMax: 5000,    // Máximo de 5 segundos entre tentativas
+      reconnectionAttempts: 10,      // Tentar reconectar até 10 vezes
+      timeout: 15000,                // Timeout de 15 segundos
       autoConnect: true,             // Conectar automaticamente
+      forceNew: true,                // Forçar nova conexão
     });
 
     this.socket.on('connect', () => {
