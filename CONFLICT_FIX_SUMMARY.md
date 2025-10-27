@@ -71,6 +71,17 @@ Updated all `removeClient()` calls to explicitly pass `doLogout: true`:
 - `disconnectConnection()`: `removeClient(connectionId, true)`
 - `deleteConnection()`: `removeClient(connectionId, true)`
 
+### Additional Fix: Missing Method
+
+Added missing `isConnectionActive()` method to `BaileysManager`:
+```typescript
+isConnectionActive(connectionId: string): boolean {
+  const client = this.clients.get(connectionId);
+  return client ? client.status === 'connected' : false;
+}
+```
+This method is used by `message.service.ts` to verify connection status before sending messages.
+
 ## Expected Behavior After Fix
 
 1. **No More Conflict Errors**: Only one connection attempt at a time per account

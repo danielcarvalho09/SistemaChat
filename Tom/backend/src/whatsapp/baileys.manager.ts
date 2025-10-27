@@ -990,6 +990,14 @@ class BaileysManager {
   }
 
   /**
+   * Verifica se uma conexão está ativa e conectada
+   */
+  isConnectionActive(connectionId: string): boolean {
+    const client = this.clients.get(connectionId);
+    return client ? client.status === 'connected' : false;
+  }
+
+  /**
    * Desconecta uma conexão
    */
   async disconnectConnection(connectionId: string) {
