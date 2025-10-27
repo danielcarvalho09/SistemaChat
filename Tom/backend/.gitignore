@@ -1,0 +1,63 @@
+# Dependencies
+node_modules/
+package-lock.json
+
+# Build output
+dist/
+build/
+*.tsbuildinfo
+
+# Environment files
+.env
+.env.local
+.env.production
+.env.railway
+*.env
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# OS Files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*.swn
+.project
+
+# WhatsApp Sessions
+whatsapp-sessions/
+*.session.json
+
+# Uploads
+uploads/
+temp/
+
+# Testing
+coverage/
+.nyc_output/
+
+# Database
+prisma/migrations/migration_lock.toml
+*.db
+*.db-journal
+
+# Cache
+.cache/
+*.cache
+
+# Scripts temporários
+fix-imports.js
+railway-vars.txt
+
+# Redis dump
+dump.rdb

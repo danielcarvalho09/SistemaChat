@@ -19,6 +19,10 @@ export async function buildApp(): Promise<FastifyInstance> {
     trustProxy: true,
     requestIdHeader: 'x-request-id',
     requestIdLogLabel: 'requestId',
+    connectionTimeout: 60000, // 60 segundos
+    keepAliveTimeout: 65000, // 65 segundos (deve ser maior que connectionTimeout)
+    requestTimeout: 30000, // 30 segundos para timeout de requisição
+    bodyLimit: 10 * 1024 * 1024, // 10MB máximo para body
   });
 
   // Compressão GZIP para respostas (70-90% menos dados)
@@ -30,11 +34,29 @@ export async function buildApp(): Promise<FastifyInstance> {
 
   // Registrar plugins de segurança
   await app.register(helmet, {
-    contentSecurityPolicy: false,
-    crossOriginResourcePolicy: false,
-    frameguard: false,
-    crossOriginOpenerPolicy: false,
-    crossOriginEmbedderPolicy: false,
+    contentSecurityPolicy: config.server.isProduction ? {
+      directives: {
+        defaultSrc: ["'self'"],
+        styleSrc: ["'self'", "'unsafe-inline'"],
+        scriptSrc: ["'self'"],
+        imgSrc: ["'self'", "data:", "https:"],
+        connectSrc: ["'self'"],
+        fontSrc: ["'self'"],
+        objectSrc: ["'none'"],
+        mediaSrc: ["'self'"],
+        frameSrc: ["'none'"],
+      },
+    } : false,
+    crossOriginResourcePolicy: { policy: "cross-origin" },
+    crossOriginOpenerPolicy: { policy: "same-origin-allow-popups" },
+    crossOriginEmbedderPolicy: false, // Necessário para uploads
+    hsts: config.server.isProduction ? {
+      maxAge: 31536000,
+      includeSubDomains: true,
+      preload: true
+    } : false,
+    noSniff: true,
+    referrerPolicy: { policy: "strict-origin-when-cross-origin" },
   });
 
   await app.register(cors, {
@@ -65,7 +87,10 @@ export async function buildApp(): Promise<FastifyInstance> {
     prefix: '/uploads/',
     setHeaders: (res, path) => {
       // Configurar CORS para arquivos estáticos
-      res.setHeader('Access-Control-Allow-Origin', config.security.corsOrigin || '*')
+      const allowedOrigin = Array.isArray(config.security.corsOrigin) 
+        ? config.security.corsOrigin[0] 
+        : config.security.corsOrigin;
+      res.setHeader('Access-Control-Allow-Origin', allowedOrigin)
       res.setHeader('Access-Control-Allow-Credentials', 'true')
       
       // Configurar MIME types corretos

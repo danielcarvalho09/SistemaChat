@@ -11,20 +11,14 @@ import { monitorRoutes } from './monitor.routes.js';
 import { broadcastRoutes } from './broadcast.routes.js';
 import { contactListRoutes } from './contact-list.routes.js';
 import { kanbanRoutes } from './kanban.routes.js';
+import { healthRoutes } from './health.routes.js';
 import { config } from '../config/env.js';
 
 export async function registerRoutes(fastify: FastifyInstance) {
   const apiPrefix = config.server.apiPrefix;
 
-  // Health check
-  fastify.get('/health', async (request, reply) => {
-    return reply.status(200).send({
-      status: 'ok',
-      timestamp: new Date().toISOString(),
-      uptime: process.uptime(),
-      environment: config.server.env,
-    });
-  });
+  // Health check routes
+  await fastify.register(healthRoutes);
 
   // Registrar rotas da API
   await fastify.register(authRoutes, { prefix: `${apiPrefix}/auth` });

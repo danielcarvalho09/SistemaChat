@@ -54,6 +54,7 @@
     "cobe": "^0.6.5",
     "dotenv": "^16.4.7",
     "fastify": "^5.2.0",
+    "file-type": "^19.6.0",
     "ioredis": "^5.4.2",
     "joi": "^17.13.3",
     "jsonwebtoken": "^9.0.2",
