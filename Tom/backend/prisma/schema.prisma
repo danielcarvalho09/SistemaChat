@@ -1,0 +1,591 @@
+// Prisma Schema para Sistema de Atendimento WhatsApp Multi-Tenant
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ==================== AUTENTICAÇÃO E USUÁRIOS ====================
+
+model User {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  password  String
+  name      String
+  avatar    String?
+  status    String   @default("offline") // online, offline, away
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relações
+  roles                   UserRole[]
+  whatsappConnections     WhatsAppConnection[] // Conexões WhatsApp do usuário
+  conversations           Conversation[]
+  messages                Message[]
+  transfersFrom           ConversationTransfer[] @relation("TransferFrom")
+  transfersTo             ConversationTransfer[] @relation("TransferTo")
+  departmentAccess        UserDepartmentAccess[]
+  notifications           Notification[]
+  auditLogs               AuditLog[]
+  refreshTokens           RefreshToken[]
+  notificationPreferences NotificationPreference?
+  conversationHistory     ConversationHistory[]
+
+  @@index([email])
+  @@index([isActive])
+  @@map("users")
+}
+
+model Role {
+  id          String   @id @default(uuid())
+  name        String   @unique // admin, user
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relações
+  users       UserRole[]
+  permissions RolePermission[]
+
+  @@map("roles")
+}
+
+model Permission {
+  id          String   @id @default(uuid())
+  name        String   @unique // manage_connections, view_all_conversations, manage_users, etc.
+  description String?
+  resource    String // connections, conversations, users, departments, etc.
+  action      String // create, read, update, delete, manage
+  createdAt   DateTime @default(now())
+
+  // Relações
+  roles RolePermission[]
+
+  @@unique([resource, action])
+  @@map("permissions")
+}
+
+model UserRole {
+  id        String   @id @default(uuid())
+  userId    String
+  roleId    String
+  createdAt DateTime @default(now())
+
+  // Relações
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, roleId])
+  @@index([userId])
+  @@index([roleId])
+  @@map("user_roles")
+}
+
+model RolePermission {
+  id           String   @id @default(uuid())
+  roleId       String
+  permissionId String
+  createdAt    DateTime @default(now())
+
+  // Relações
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@unique([roleId, permissionId])
+  @@index([roleId])
+  @@index([permissionId])
+  @@map("role_permissions")
+}
+
+model RefreshToken {
+  id        String   @id @default(uuid())
+  token     String   @unique
+  userId    String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  // Relações
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([token])
+  @@index([expiresAt])
+  @@map("refresh_tokens")
+}
+
+// ==================== CONEXÕES WHATSAPP ====================
+
+model WhatsAppConnection {
+  id            String   @id @default(uuid())
+  name          String // Nome personalizado da conexão
+  phoneNumber   String   @unique
+  status        String   @default("disconnected") // disconnected, connecting, connected, failed
+  qrCode        String?
+  avatar        String?
+  sessionData   String? // Dados criptografados da sessão (deprecated)
+  authData      String? // Auth state do Baileys (credenciais + keys)
+  lastConnected DateTime?
+  isActive      Boolean  @default(true)
+  isMatriz      Boolean  @default(false) // Conexão matriz vê todas as conversas
+  userId        String?  // Conexão agora pertence a um usuário específico
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Relações
+  user          User?              @relation(fields: [userId], references: [id], onDelete: SetNull)
+  conversations Conversation[]
+  messages      Message[]
+
+  @@index([phoneNumber])
+  @@index([status])
+  @@index([isActive])
+  @@index([isMatriz])
+  @@index([userId])
+  @@map("whatsapp_connections")
+}
+
+// ==================== SETORES/DEPARTAMENTOS ====================
+
+model Department {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  description String?
+  color       String   @default("#3B82F6") // Hex color
+  icon        String   @default("folder")
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relações
+  conversations        Conversation[]
+  userAccess           UserDepartmentAccess[]
+  transfersTo          ConversationTransfer[] @relation("TransferToDepartment")
+  messageTemplates     MessageTemplate[]
+
+  @@index([isActive])
+  @@map("departments")
+}
+
+model UserDepartmentAccess {
+  id           String   @id @default(uuid())
+  userId       String
+  departmentId String
+  createdAt    DateTime @default(now())
+
+  // Relações
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  department Department @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, departmentId])
+  @@index([userId])
+  @@index([departmentId])
+  @@map("user_department_access")
+}
+
+// ==================== CONVERSAS E MENSAGENS ====================
+
+model Contact {
+  id           String   @id @default(uuid())
+  phoneNumber  String   @unique
+  name         String?
+  avatar       String?
+  email        String?
+  tags         String[] // Tags personalizadas
+  metadata     Json? // Dados adicionais customizáveis
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // Relações
+  conversations Conversation[]
+
+  @@index([phoneNumber])
+  @@map("contacts")
+}
+
+model Conversation {
+  id                 String    @id @default(uuid())
+  contactId          String
+  connectionId       String
+  departmentId       String?
+  assignedUserId     String? // Usuário atualmente atendendo
+  kanbanStageId      String? // Etapa atual no Kanban
+  status             String    @default("waiting") // waiting, transferred, in_progress, resolved, closed
+  lastMessageAt      DateTime  @default(now())
+  firstResponseAt    DateTime? // Timestamp da primeira resposta do atendente
+  resolvedAt         DateTime?
+  unreadCount        Int       @default(0)
+  internalNotes      String? // Notas internas visíveis apenas para atendentes
+  metadata           Json? // Dados adicionais
+  isMonitored        Boolean   @default(false) // Admin espionando conversa (invisível)
+  monitoredBy        String? // ID do admin monitorando
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  // Relações
+  contact       Contact                  @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  connection    WhatsAppConnection       @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  department    Department?              @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  assignedUser  User?                    @relation(fields: [assignedUserId], references: [id], onDelete: SetNull)
+  kanbanStage   KanbanStage?             @relation(fields: [kanbanStageId], references: [id], onDelete: SetNull)
+  messages      Message[]
+  transfers     ConversationTransfer[]
+  attachments   Attachment[]
+  tags          ConversationTag[]
+  history       ConversationHistory[]
+
+  @@index([contactId])
+  @@index([connectionId])
+  @@index([departmentId])
+  @@index([assignedUserId])
+  @@index([kanbanStageId])
+  @@index([status])
+  @@index([lastMessageAt])
+  @@index([isMonitored])
+  @@map("conversations")
+}
+
+model Message {
+  id             String   @id @default(uuid())
+  conversationId String
+  connectionId   String
+  senderId       String? // Null se mensagem foi recebida do contato
+  content        String   @db.Text
+  messageType    String   @default("text") // text, image, video, audio, document, location
+  mediaUrl       String?
+  status         String   @default("sent") // sent, delivered, read, failed
+  isFromContact  Boolean  @default(false) // true se mensagem veio do contato, false se do atendente
+  timestamp      DateTime @default(now())
+  metadata       Json? // Dados adicionais (ex: localização, duração de áudio)
+  externalId     String? // ID da mensagem no WhatsApp (para evitar duplicatas)
+  createdAt      DateTime @default(now())
+
+  // Relações
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  connection   WhatsAppConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  sender       User?        @relation(fields: [senderId], references: [id], onDelete: SetNull)
+
+  @@index([conversationId])
+  @@index([connectionId])
+  @@index([senderId])
+  @@index([timestamp])
+  @@index([isFromContact])
+  @@index([externalId])
+  @@unique([conversationId, externalId])
+  @@map("messages")
+}
+
+model Attachment {
+  id             String   @id @default(uuid())
+  conversationId String
+  fileName       String
+  fileType       String
+  fileSize       Int
+  fileUrl        String
+  uploadedAt     DateTime @default(now())
+
+  // Relações
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId])
+  @@map("attachments")
+}
+
+// ==================== TRANSFERÊNCIAS ====================
+
+model ConversationTransfer {
+  id             String    @id @default(uuid())
+  conversationId String
+  fromUserId     String
+  toUserId       String?
+  toDepartmentId String?
+  reason         String?   @db.VarChar(200)
+  transferredAt  DateTime  @default(now())
+
+  // Relações
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  fromUser     User         @relation("TransferFrom", fields: [fromUserId], references: [id], onDelete: Cascade)
+  toUser       User?        @relation("TransferTo", fields: [toUserId], references: [id], onDelete: SetNull)
+  toDepartment Department?  @relation("TransferToDepartment", fields: [toDepartmentId], references: [id], onDelete: SetNull)
+
+  @@index([conversationId])
+  @@index([fromUserId])
+  @@index([toUserId])
+  @@index([toDepartmentId])
+  @@index([transferredAt])
+  @@map("conversation_transfers")
+}
+
+// ==================== TEMPLATES E RESPOSTAS RÁPIDAS ====================
+
+model MessageTemplate {
+  id           String   @id @default(uuid())
+  departmentId String?
+  name         String
+  content      String   @db.Text
+  shortcut     String? // Atalho para acesso rápido (ex: /ola)
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // Relações
+  department Department? @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+
+  @@index([departmentId])
+  @@index([shortcut])
+  @@map("message_templates")
+}
+
+// ==================== NOTIFICAÇÕES ====================
+
+model Notification {
+  id        String   @id @default(uuid())
+  userId    String
+  type      String // new_message, transfer, mention, system
+  title     String
+  content   String
+  data      Json? // Dados adicionais (ex: conversationId)
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  // Relações
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([isRead])
+  @@index([createdAt])
+  @@map("notifications")
+}
+
+model NotificationPreference {
+  id                    String   @id @default(uuid())
+  userId                String   @unique
+  soundEnabled          Boolean  @default(true)
+  desktopEnabled        Boolean  @default(true)
+  newMessageSound       Boolean  @default(true)
+  transferSound         Boolean  @default(true)
+  mentionSound          Boolean  @default(true)
+  silentHoursStart      String? // HH:MM format
+  silentHoursEnd        String? // HH:MM format
+  notifyOnlyDepartments String[] // Array de IDs de departamentos
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  // Relações
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("notification_preferences")
+}
+
+// ==================== AUDITORIA E LOGS ====================
+
+model AuditLog {
+  id          String   @id @default(uuid())
+  userId      String?
+  action      String // login, logout, create_connection, delete_user, etc.
+  resource    String // users, connections, conversations, etc.
+  resourceId  String?
+  details     Json? // Detalhes adicionais da ação
+  ipAddress   String?
+  userAgent   String?
+  timestamp   DateTime @default(now())
+
+  // Relações
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([action])
+  @@index([resource])
+  @@index([timestamp])
+  @@map("audit_logs")
+}
+
+// ==================== MÉTRICAS E ANALYTICS ====================
+
+model ConversationMetric {
+  id                   String    @id @default(uuid())
+  conversationId       String    @unique
+  firstResponseTime    Int? // Segundos até primeira resposta
+  resolutionTime       Int? // Segundos até resolução
+  messageCount         Int       @default(0)
+  transferCount        Int       @default(0)
+  satisfactionRating   Int? // 1-5 estrelas
+  satisfactionComment  String?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  @@index([firstResponseTime])
+  @@index([resolutionTime])
+  @@index([satisfactionRating])
+  @@map("conversation_metrics")
+}
+
+// ==================== TAGS PERSONALIZADAS ====================
+
+model Tag {
+  id          String   @id @default(uuid())
+  name        String
+  color       String   @default("#3b82f6") // Cor em hexadecimal
+  createdBy   String? // ID do usuário que criou
+  isGlobal    Boolean  @default(false) // Tags globais são visíveis para todos
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relações
+  conversations ConversationTag[]
+
+  @@unique([name, createdBy])
+  @@index([isGlobal])
+  @@index([createdBy])
+  @@map("tags")
+}
+
+model ConversationTag {
+  id             String   @id @default(uuid())
+  conversationId String
+  tagId          String
+  addedBy        String // ID do usuário que adicionou a tag
+  createdAt      DateTime @default(now())
+
+  // Relações
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  tag          Tag          @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@unique([conversationId, tagId])
+  @@index([conversationId])
+  @@index([tagId])
+  @@map("conversation_tags")
+}
+
+// ==================== BROADCAST E LISTAS DE CONTATOS ====================
+
+model ContactList {
+  id          String   @id @default(uuid())
+  name        String
+  description String?
+  userId      String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relações
+  contacts   ListContact[]
+  broadcasts Broadcast[]
+
+  @@index([userId])
+  @@map("contact_lists")
+}
+
+model ListContact {
+  id        String   @id @default(uuid())
+  listId    String
+  name      String?
+  phone     String
+  createdAt DateTime @default(now())
+
+  // Relações
+  list          ContactList    @relation(fields: [listId], references: [id], onDelete: Cascade)
+  broadcastLogs BroadcastLog[]
+
+  @@index([listId])
+  @@index([phone])
+  @@map("list_contacts")
+}
+
+model Broadcast {
+  id           String    @id @default(uuid())
+  userId       String
+  connectionId String
+  listId       String
+  message      String    @db.Text
+  mediaUrl     String?
+  mediaType    String? // image, video, document
+  totalContacts Int      @default(0)
+  sentCount    Int       @default(0)
+  failedCount  Int       @default(0)
+  status       String    @default("pending") // pending, in_progress, completed, cancelled, failed
+  startedAt    DateTime?
+  completedAt  DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  // Relações
+  list ContactList     @relation(fields: [listId], references: [id], onDelete: Cascade)
+  logs BroadcastLog[]
+
+  @@index([userId])
+  @@index([connectionId])
+  @@index([listId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("broadcasts")
+}
+
+model BroadcastLog {
+  id          String    @id @default(uuid())
+  broadcastId String
+  contactId   String
+  status      String // sent, failed
+  error       String?
+  sentAt      DateTime  @default(now())
+
+  // Relações
+  broadcast Broadcast    @relation(fields: [broadcastId], references: [id], onDelete: Cascade)
+  contact   ListContact  @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  @@index([broadcastId])
+  @@index([contactId])
+  @@index([status])
+  @@map("broadcast_logs")
+}
+
+model BroadcastConfig {
+  id          String   @id @default(uuid())
+  userId      String   @unique
+  minInterval Int      @default(5) // Intervalo mínimo em segundos
+  maxInterval Int      @default(15) // Intervalo máximo em segundos
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("broadcast_configs")
+}
+
+// ==================== KANBAN DE CONVERSAS ====================
+
+model KanbanStage {
+  id          String   @id @default(uuid())
+  name        String   // Ex: "Novo", "Em Atendimento", "Aguardando Cliente", "Resolvido"
+  description String?
+  color       String   @default("#3B82F6") // Cor da coluna (hex)
+  order       Int      // Ordem de exibição (0, 1, 2, 3...)
+  isDefault   Boolean  @default(false) // Etapa padrão para novas conversas
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relações
+  conversations Conversation[]
+
+  @@index([order])
+  @@map("kanban_stages")
+}
+
+model ConversationHistory {
+  id             String       @id @default(uuid())
+  conversationId String
+  fromStageId    String?
+  toStageId      String
+  userId         String       // Quem moveu
+  notes          String?      // Observações sobre a movimentação
+  createdAt      DateTime     @default(now())
+
+  // Relações
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id])
+
+  @@index([conversationId])
+  @@index([createdAt])
+  @@map("conversation_history")
+}

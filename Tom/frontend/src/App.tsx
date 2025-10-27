@@ -1,0 +1,74 @@
+import { Routes, Route, Navigate } from 'react-router-dom';
+import { useEffect, useRef } from 'react';
+import { useAuthStore } from './store/authStore';
+import LoginPage from './pages/LoginPage';
+import RegisterPage from './pages/RegisterPage';
+import { Dashboard } from './pages/Dashboard';
+import { DashboardLayout } from './pages/dashboard/DashboardLayout';
+import { Kanban } from './pages/dashboard/Kanban';
+import { AdminRoutes } from './routes/AdminRoutes';
+import { Toaster } from './components/ui/toaster';
+
+function App() {
+  const { isAuthenticated, fetchMe, logout } = useAuthStore();
+  const hasCheckedAuth = useRef(false);
+
+  // Verificar autenticação ao carregar (apenas uma vez)
+  useEffect(() => {
+    if (hasCheckedAuth.current) return;
+    hasCheckedAuth.current = true;
+
+    const token = localStorage.getItem('accessToken');
+    
+    // Se tem token, validar
+    if (token) {
+      fetchMe();
+    } else if (isAuthenticated) {
+      // Se não tem token mas está marcado como autenticado, fazer logout
+      logout();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Executar apenas uma vez ao montar
+
+  return (
+    <>
+      <Routes>
+        {/* Rotas públicas */}
+        <Route
+          path="/login"
+          element={!isAuthenticated ? <LoginPage /> : <Navigate to="/dashboard" />}
+        />
+        <Route
+          path="/register"
+          element={!isAuthenticated ? <RegisterPage /> : <Navigate to="/dashboard" />}
+        />
+
+        {/* Rotas protegidas - Dashboard do Atendente */}
+        <Route
+          path="/dashboard"
+          element={isAuthenticated ? <DashboardLayout /> : <Navigate to="/login" />}
+        >
+          <Route index element={<Dashboard />} />
+          <Route path="kanban" element={<Kanban />} />
+        </Route>
+        
+        {/* Rotas Admin */}
+        <Route
+          path="/admin/*"
+          element={isAuthenticated ? <AdminRoutes /> : <Navigate to="/login" />}
+        />
+
+        {/* Redirect padrão */}
+        <Route
+          path="/"
+          element={<Navigate to={isAuthenticated ? '/dashboard' : '/login'} />}
+        />
+        <Route path="*" element={<Navigate to="/" />} />
+      </Routes>
+
+      <Toaster />
+    </>
+  );
+}
+
+export default App;
