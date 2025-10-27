@@ -122,6 +122,7 @@ export class KanbanService {
         _count: {
           select: { conversations: true },
         },
+        conversations: true,
       },
     });
 
@@ -129,11 +130,30 @@ export class KanbanService {
       throw new AppError('Etapa não encontrada', 404);
     }
 
+    // Se houver conversas, mover para a etapa anterior
     if (stage._count.conversations > 0) {
-      throw new AppError(
-        `Não é possível excluir esta etapa pois existem ${stage._count.conversations} conversas associadas`,
-        400
-      );
+      // Buscar etapa anterior (menor order)
+      const previousStage = await this.prisma.kanbanStage.findFirst({
+        where: {
+          order: { lt: stage.order },
+        },
+        orderBy: { order: 'desc' },
+      });
+
+      if (!previousStage) {
+        throw new AppError(
+          'Não é possível excluir a primeira etapa com conversas. Mova as conversas manualmente primeiro.',
+          400
+        );
+      }
+
+      // Mover todas as conversas para a etapa anterior
+      await this.prisma.conversation.updateMany({
+        where: { kanbanStageId: stageId },
+        data: { kanbanStageId: previousStage.id },
+      });
+
+      console.log(`✅ Moved ${stage._count.conversations} conversations from "${stage.name}" to "${previousStage.name}"`);
     }
 
     await this.prisma.kanbanStage.delete({

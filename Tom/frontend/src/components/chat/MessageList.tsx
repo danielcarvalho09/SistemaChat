@@ -4,32 +4,131 @@ import { Check, CheckCheck, FileText, Download, ExternalLink, Image as ImageIcon
 import { cn } from '../../lib/utils';
 
 // Componente para carregar imagem sob demanda
-function ImageMessage({ mediaUrl, toAbsoluteUrl }: { mediaUrl: string; toAbsoluteUrl: (url: string) => string }) {
+function ImageMessage({ mediaUrl, toAbsoluteUrl, messageId }: { mediaUrl: string; toAbsoluteUrl: (url: string) => string; messageId: string }) {
   const [loaded, setLoaded] = useState(false);
+  const [imageExists, setImageExists] = useState<boolean | null>(null);
+  const [isRedownloading, setIsRedownloading] = useState(false);
+
+  // Verificar se imagem existe no servidor
+  const checkImageExists = async () => {
+    try {
+      const filename = mediaUrl.split('/').pop();
+      const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+      const token = localStorage.getItem('accessToken');
+      
+      const response = await fetch(`${API_URL}/api/v1/upload/check/${filename}`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      });
+      
+      const data = await response.json();
+      setImageExists(data.data?.exists || false);
+    } catch (error) {
+      console.error('Error checking image:', error);
+      setImageExists(false);
+    }
+  };
+
+  const handleDownload = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    
+    // Se imagem não existe, tentar re-baixar do WhatsApp
+    if (imageExists === false) {
+      setIsRedownloading(true);
+      try {
+        const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+        const token = localStorage.getItem('accessToken');
+        
+        const response = await fetch(`${API_URL}/api/v1/upload/redownload/${messageId}`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+          },
+        });
+        
+        const data = await response.json();
+        
+        if (response.ok) {
+          // Imagem re-baixada com sucesso
+          setImageExists(true);
+          alert('Imagem baixada com sucesso!');
+          // Recarregar para mostrar a imagem
+          window.location.reload();
+        } else {
+          alert(data.message || 'Não foi possível baixar a imagem novamente');
+        }
+      } catch (error) {
+        console.error('Error re-downloading:', error);
+        alert('Erro ao tentar baixar imagem novamente');
+      } finally {
+        setIsRedownloading(false);
+      }
+      return;
+    }
+    
+    // Download normal
+    const url = toAbsoluteUrl(mediaUrl);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = mediaUrl.split('/').pop() || 'imagem.jpg';
+    link.target = '_blank';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
 
   if (!loaded) {
+    // Verificar se imagem existe ao montar
+    if (imageExists === null) {
+      checkImageExists();
+    }
+
     return (
       <div 
-        className="mb-1 bg-gray-800 rounded-t-lg flex items-center justify-center cursor-pointer hover:bg-gray-700 transition-colors"
+        className="mb-1 bg-gray-800 rounded-t-lg flex flex-col items-center justify-center cursor-pointer hover:bg-gray-700 transition-colors relative group"
         style={{ minHeight: '200px', minWidth: '250px' }}
-        onClick={() => setLoaded(true)}
       >
-        <div className="text-center text-gray-400">
+        <div className="text-center text-gray-400" onClick={() => setLoaded(true)}>
           <ImageIcon className="w-12 h-12 mx-auto mb-2" />
-          <p className="text-sm">Clique para carregar imagem</p>
+          <p className="text-sm">
+            {imageExists === false ? '⚠️ Imagem expirada (7+ dias)' : 'Clique para visualizar'}
+          </p>
+          {imageExists === false && (
+            <p className="text-xs mt-1">Clique no botão de download para baixar novamente</p>
+          )}
         </div>
+        <button
+          onClick={handleDownload}
+          disabled={isRedownloading}
+          className="absolute top-2 right-2 bg-gray-900/80 hover:bg-gray-900 text-white p-2 rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          title={imageExists === false ? 'Baixar novamente do WhatsApp' : 'Baixar imagem'}
+        >
+          {isRedownloading ? (
+            <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+          ) : (
+            <Download className="w-4 h-4" />
+          )}
+        </button>
       </div>
     );
   }
 
   return (
-    <div className="mb-1">
+    <div className="mb-1 relative group">
       <img
         src={toAbsoluteUrl(mediaUrl)}
         alt="Imagem"
         className="max-w-full h-auto rounded-t-lg"
         style={{ maxHeight: '300px', objectFit: 'cover' }}
       />
+      <button
+        onClick={handleDownload}
+        className="absolute top-2 right-2 bg-gray-900/80 hover:bg-gray-900 text-white p-2 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
+        title="Baixar imagem"
+      >
+        <Download className="w-4 h-4" />
+      </button>
     </div>
   );
 }
@@ -126,7 +225,7 @@ export function MessageList({ messages }: MessageListProps) {
             >
               {/* Renderizar mídia */}
               {message.messageType === 'image' && message.mediaUrl && (
-                <ImageMessage mediaUrl={message.mediaUrl} toAbsoluteUrl={toAbsoluteUrl} />
+                <ImageMessage mediaUrl={message.mediaUrl} toAbsoluteUrl={toAbsoluteUrl} messageId={message.id} />
               )}
 
               {message.messageType === 'audio' && message.mediaUrl && (

@@ -6,6 +6,8 @@ import makeWASocket, {
   SignalDataTypeMap,
   initAuthCreds,
   BufferJSON,
+  downloadMediaMessage,
+  proto,
 } from '@whiskeysockets/baileys';
 import { Boom } from '@hapi/boom';
 import pino from 'pino';
@@ -1055,6 +1057,36 @@ class BaileysManager {
       logger.info('[Baileys] ✅ Reconnection process completed');
     } catch (error) {
       logger.error('[Baileys] ❌ Error reconnecting active connections:', error);
+    }
+  }
+
+  /**
+   * Baixar mídia de uma mensagem do WhatsApp
+   * Nota: Requer que a mensagem original ainda esteja disponível no WhatsApp
+   */
+  async downloadMedia(
+    connectionId: string,
+    externalId: string,
+    remoteJid: string
+  ): Promise<Buffer | null> {
+    try {
+      const client = this.clients.get(connectionId);
+      if (!client || !client.socket) {
+        logger.error(`[Baileys] Client ${connectionId} not found or not connected`);
+        return null;
+      }
+
+      logger.info(`[Baileys] Attempting to download media for message ${externalId}`);
+
+      // LIMITAÇÃO: Baileys não permite baixar mídia de mensagens antigas facilmente
+      // A mensagem precisa estar no cache ou ser recebida novamente
+      // Por enquanto, retornar null e informar que não é possível
+      
+      logger.warn('[Baileys] Media re-download not available - message may be too old or not in cache');
+      return null;
+    } catch (error) {
+      logger.error('[Baileys] Error downloading media:', error);
+      return null;
     }
   }
 }

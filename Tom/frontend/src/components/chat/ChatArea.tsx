@@ -98,14 +98,10 @@ export function ChatArea({ conversationId, onToggleDetails }: ChatAreaProps) {
           }),
         });
 
-        if (messageResponse.ok) {
-          const messageData = await messageResponse.json();
-          // Adicionar mensagem ao store ao invés de recarregar tudo
-          if (messageData.data) {
-            const { addMessage } = useConversationStore.getState();
-            addMessage(conversationId, messageData.data);
-          }
+        if (!messageResponse.ok) {
+          throw new Error('Erro ao enviar mensagem');
         }
+        // Não adicionar manualmente - deixar o WebSocket fazer isso para evitar duplicação
       } else {
         await sendMessage(conversationId, content);
       }

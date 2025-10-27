@@ -12,4 +12,14 @@ export async function uploadRoutes(fastify: FastifyInstance) {
   fastify.post('/', {
     handler: uploadController.uploadFile,
   });
+
+  // Verificar se arquivo existe
+  fastify.get('/check/:filename', {
+    handler: uploadController.checkFile,
+  });
+
+  // Re-baixar mídia do WhatsApp
+  fastify.post('/redownload/:messageId', {
+    handler: uploadController.redownloadMedia,
+  });
 }

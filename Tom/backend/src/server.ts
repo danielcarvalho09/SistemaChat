@@ -6,6 +6,7 @@ import { connectRedis, disconnectRedis } from './config/redis.js';
 import { seedDatabase } from './utils/seed.js';
 import { initializeSocketServer } from './websocket/socket.server.js';
 import { baileysManager } from './whatsapp/baileys.manager.js';
+import { CleanupService } from './services/cleanup.service.js';
 
 async function start() {
   try {
@@ -40,6 +41,10 @@ async function start() {
     logger.info(`📚 API Docs: http://localhost:${config.server.port}/docs`);
     logger.info(`🏥 Health Check: http://localhost:${config.server.port}/health`);
     logger.info(`🌍 Environment: ${config.server.env}`);
+
+    // Iniciar serviço de limpeza automática de arquivos antigos
+    const cleanupService = new CleanupService();
+    cleanupService.startAutomaticCleanup();
 
     // Reconectar conexões WhatsApp que estavam ativas
     logger.info('⏳ Aguardando 3 segundos antes de reconectar WhatsApp...');
