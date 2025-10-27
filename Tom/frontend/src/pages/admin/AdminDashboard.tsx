@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { MessageSquare, Users, Building, Smartphone, TrendingUp, Clock, BarChart } from 'lucide-react';
 import { api } from '../../lib/axios';
-import { io } from 'socket.io-client';
+import socketService from '../../lib/socket';
 import { cn } from '../../lib/utils';
 
 interface Stats {
@@ -25,17 +25,14 @@ export function AdminDashboard() {
   useEffect(() => {
     fetchStats();
 
-    // Conectar ao WebSocket
-    const WS_URL = import.meta.env.VITE_WS_URL || 'http://localhost:3000';
-    const socket = io(WS_URL, {
-      auth: {
-        token: localStorage.getItem('token'),
-      },
-    });
+    // Usar socket global
+    const socket = socketService.getSocket();
+    if (!socket) {
+      console.error('❌ Socket não está conectado');
+      return;
+    }
 
-    socket.on('connect', () => {
-      console.log('✅ Socket conectado no dashboard');
-    });
+    console.log('✅ Usando WebSocket global no AdminDashboard');
 
     // Escutar novas conversas
     socket.on('new_conversation', (conversation) => {
@@ -45,7 +42,7 @@ export function AdminDashboard() {
     });
 
     return () => {
-      socket.disconnect();
+      socket.off('new_conversation');
     };
   }, []);
 

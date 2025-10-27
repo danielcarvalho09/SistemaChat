@@ -3,7 +3,7 @@ import { Plus, Smartphone, QrCode, Power, Trash2, RefreshCw, X, Edit } from 'luc
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import { api } from '../../lib/axios';
-import { io } from 'socket.io-client';
+import socketService from '../../lib/socket';
 
 interface Department {
   id: string;
@@ -55,31 +55,19 @@ export function Connections() {
     if (hasSetupListeners.current) return;
     hasSetupListeners.current = true;
     
-    // Conectar ao WebSocket
-    const WS_URL = import.meta.env.VITE_WS_URL || 'http://localhost:3000';
-    const newSocket = io(WS_URL, {
-      auth: {
-        token: localStorage.getItem('token'),
-      },
-      transports: ['websocket'],
-    });
+    // Usar socket global
+    const socket = socketService.getSocket();
+    if (!socket) {
+      console.error('❌ Socket não está conectado');
+      return;
+    }
 
-    socketRef.current = newSocket;
+    socketRef.current = socket;
 
-    newSocket.on('connect', () => {
-      console.log('✅ WebSocket conectado');
-    });
-
-    newSocket.on('connect_error', (error) => {
-      console.error('❌ Erro ao conectar WebSocket:', error);
-    });
-
-    newSocket.on('disconnect', (reason) => {
-      console.log('⚠️ WebSocket desconectado:', reason);
-    });
+    console.log('✅ Usando WebSocket global');
 
     // Evento: QR Code gerado
-    newSocket.on('whatsapp_qr_code', (data: { connectionId: string; qrCode: string }) => {
+    socket.on('whatsapp_qr_code', (data: { connectionId: string; qrCode: string }) => {
       console.log('✅ QR Code recebido para:', data.connectionId);
 
       // Atualizar conexões
@@ -104,7 +92,7 @@ export function Connections() {
     });
 
     // Evento: WhatsApp conectando
-    newSocket.on('whatsapp_connecting', (data: { connectionId: string }) => {
+    socket.on('whatsapp_connecting', (data: { connectionId: string }) => {
       console.log('🔄 WhatsApp conectando:', data.connectionId);
       setConnections((prev) =>
         prev.map((conn) =>
@@ -119,7 +107,7 @@ export function Connections() {
     });
 
     // Evento: WhatsApp conectado
-    newSocket.on('whatsapp_connected', (data: { connectionId: string }) => {
+    socket.on('whatsapp_connected', (data: { connectionId: string }) => {
       console.log('✅ WhatsApp conectado:', data.connectionId);
       
       setConnections((prev) =>
@@ -140,7 +128,7 @@ export function Connections() {
     });
 
     // Evento: WhatsApp desconectado
-    newSocket.on('whatsapp_disconnected', (data: { connectionId: string }) => {
+    socket.on('whatsapp_disconnected', (data: { connectionId: string }) => {
       console.log('❌ WhatsApp desconectado:', data.connectionId);
       
       setConnections((prev) =>
@@ -160,10 +148,11 @@ export function Connections() {
     });
 
     return () => {
-      if (socketRef.current) {
-        socketRef.current.disconnect();
-        socketRef.current = null;
-      }
+      // Remover listeners ao desmontar
+      socket.off('whatsapp_qr_code');
+      socket.off('whatsapp_connecting');
+      socket.off('whatsapp_connected');
+      socket.off('whatsapp_disconnected');
       hasSetupListeners.current = false;
     };
   }, []);

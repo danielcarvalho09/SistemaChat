@@ -1,5 +1,7 @@
 #!/bin/bash
 
 echo "🚀 Starting application..."
-echo "ℹ️  Migrations should be applied manually before deploy"
+echo "📦 Running database migrations..."
+npx prisma migrate deploy
+echo "✅ Migrations completed"
 node dist/server.js
