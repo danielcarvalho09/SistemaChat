@@ -11,7 +11,7 @@ import path from 'path';
 import { config } from './config/env.js';
 import { logger } from './config/logger.js';
 import { errorHandler, notFoundHandler } from './middlewares/error.middleware.js';
-import { registerRoutes } from './routes.js';
+import { registerRoutes } from './routes/index.js';
 
 export async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify({
