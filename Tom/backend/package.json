@@ -1,6 +1,7 @@
 {
   "name": "whatsapp-system-backend",
   "version": "1.0.0",
+  "type": "module",
   "description": "Backend do Sistema de Atendimento WhatsApp Multi-Tenant",
   "main": "dist/server.js",
   "scripts": {
