@@ -8,55 +8,93 @@ Monorepo com Backend (Node.js) e Frontend (React/Vite)
 /
 ├── Tom/
 │   ├── backend/    # API Node.js + Prisma
+│   │   ├── railway.toml
+│   │   └── package.json
 │   └── frontend/   # React + Vite
-├── railway.toml    # Configuração Railway
-└── package.json    # Monorepo config
+│       ├── railway.toml
+│       └── package.json
+└── README.md
 ```
 
-## 🚂 Deploy no Railway
+## 🚂 Deploy no Railway (IMPORTANTE!)
 
-Este projeto está configurado para deploy automático no Railway!
+### ⚠️ ATENÇÃO: Fazer 2 deploys SEPARADOS!
 
-### Opção 1: Deploy Direto (Recomendado)
+Railway precisa deployar Backend e Frontend SEPARADAMENTE.
 
-1. Conecte seu GitHub ao Railway
-2. New Project → Deploy from GitHub
-3. Selecione este repositório
-4. Railway vai detectar automaticamente 2 serviços:
-   - `backend` (Tom/backend)
-   - `frontend` (Tom/frontend)
-5. Configure as variáveis de ambiente (ver abaixo)
+---
 
-### Opção 2: CLI
+### 1️⃣ Deploy do BACKEND:
 
-```bash
-railway login
-railway init
-railway up
-```
+1. Acesse https://railway.app
+2. Clique em "New Project"
+3. Escolha "Deploy from GitHub repo"
+4. Selecione este repositório
+5. **IMPORTANTE**: Configure:
+   - **Root Directory**: `Tom/backend`
+   - Build Command: (deixe automático)
+   - Start Command: `npm start`
 
-## 🔧 Variáveis de Ambiente
+6. Adicione as Variáveis de Ambiente:
+   ```
+   DATABASE_URL=postgresql://...
+   REDIS_URL=redis://...
+   JWT_SECRET=...
+   JWT_REFRESH_SECRET=...
+   PORT=3000
+   NODE_ENV=production
+   CORS_ORIGIN=https://seu-frontend.railway.app
+   ```
+
+7. Deploy! ✅
+
+8. Copie a URL do backend: `https://seu-backend.railway.app`
+
+---
+
+### 2️⃣ Deploy do FRONTEND:
+
+1. No Railway, clique em "New Project" novamente
+2. Escolha o mesmo repositório
+3. **IMPORTANTE**: Configure:
+   - **Root Directory**: `Tom/frontend`
+   - Build Command: (deixe automático)
+   - Start Command: `npm start`
+
+4. Adicione as Variáveis de Ambiente:
+   ```
+   VITE_API_URL=https://seu-backend.railway.app
+   VITE_WS_URL=wss://seu-backend.railway.app
+   ```
+
+5. Deploy! ✅
+
+---
+
+## ✅ Pronto!
+
+Agora você tem 2 serviços no Railway:
+- Backend: `https://seu-backend.railway.app`
+- Frontend: `https://seu-frontend.railway.app`
+
+## 🔧 Variáveis de Ambiente Completas
 
 ### Backend
-
-Copie de `Tom/backend/.env.railway`:
-
 ```env
-DATABASE_URL=...
-REDIS_URL=...
-JWT_SECRET=...
-JWT_REFRESH_SECRET=...
+DATABASE_URL=postgresql://postgres.krrzypdydjoyiueyuuzh:Dcarv09!@aws-1-us-east-2.pooler.supabase.com:6543/postgres?pgbouncer=true
+REDIS_URL=redis://default:maiA52v2R2sInELaKkYHIPu4tnldGpP8@redis-13341.crce196.sa-east-1-2.ec2.redns.redis-cloud.com:13341
+REDIS_PASSWORD=maiA52v2R2sInELaKkYHIPu4tnldGpP8
+JWT_SECRET=nWg8NWuUqngqwS755Gm8ok8ghNNn/vw85ZR8VcoU4No=
+JWT_REFRESH_SECRET=hafF8ikqydB22nQq6l6QAYsELcwvqTGnEIpZytwYoe0=
+JWT_EXPIRES_IN=7d
+JWT_REFRESH_EXPIRES_IN=30d
 PORT=3000
 NODE_ENV=production
+CORS_ORIGIN=https://seu-frontend.railway.app
 ```
 
 ### Frontend
-
 ```env
 VITE_API_URL=https://seu-backend.railway.app
 VITE_WS_URL=wss://seu-backend.railway.app
 ```
-
-## ✅ Pronto!
-
-Railway vai fazer build e deploy automaticamente! 🎉
