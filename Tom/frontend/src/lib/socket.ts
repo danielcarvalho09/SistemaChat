@@ -26,10 +26,11 @@ class SocketService {
       },
       transports: ['websocket', 'polling'],
       reconnection: true,
-      reconnectionDelay: 1000,
-      reconnectionDelayMax: 5000,
+      reconnectionDelay: 500,        // Tentar reconectar após 500ms
+      reconnectionDelayMax: 3000,    // Máximo de 3 segundos entre tentativas
       reconnectionAttempts: Infinity, // Tentar reconectar infinitamente
-      timeout: 20000,
+      timeout: 10000,                // Timeout de 10 segundos
+      autoConnect: true,             // Conectar automaticamente
     });
 
     this.socket.on('connect', () => {

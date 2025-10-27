@@ -25,25 +25,30 @@ export function AdminDashboard() {
   useEffect(() => {
     fetchStats();
 
-    // Usar socket global
-    const socket = socketService.getSocket();
-    if (!socket) {
-      console.error('❌ Socket não está conectado');
-      return;
-    }
+    // Aguardar socket estar pronto
+    const setupSocket = () => {
+      const socket = socketService.getSocket();
+      if (!socket) {
+        console.warn('⚠️ Socket ainda não está conectado, aguardando...');
+        setTimeout(setupSocket, 500);
+        return;
+      }
 
-    console.log('✅ Usando WebSocket global no AdminDashboard');
+      console.log('✅ Usando WebSocket global no AdminDashboard');
 
-    // Escutar novas conversas
-    socket.on('new_conversation', (conversation) => {
-      console.log('🆕 Nova conversa recebida:', conversation);
-      // Atualizar estatísticas
-      fetchStats();
-    });
+      // Escutar novas conversas
+      socket.on('new_conversation', (conversation) => {
+        console.log('🆕 Nova conversa recebida:', conversation);
+        // Atualizar estatísticas
+        fetchStats();
+      });
 
-    return () => {
-      socket.off('new_conversation');
+      return () => {
+        socket.off('new_conversation');
+      };
     };
+
+    setupSocket();
   }, []);
 
   const fetchStats = async () => {

@@ -8,6 +8,7 @@ import { DashboardLayout } from './pages/dashboard/DashboardLayout';
 import { Kanban } from './pages/dashboard/Kanban';
 import { AdminRoutes } from './routes/AdminRoutes';
 import { Toaster } from './components/ui/toaster';
+import { ConnectionStatus } from './components/ConnectionStatus';
 
 function App() {
   const { isAuthenticated, fetchMe, logout } = useAuthStore();
@@ -67,6 +68,7 @@ function App() {
       </Routes>
 
       <Toaster />
+      {isAuthenticated && <ConnectionStatus />}
     </>
   );
 }

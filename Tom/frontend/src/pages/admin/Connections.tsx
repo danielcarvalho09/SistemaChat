@@ -55,16 +55,17 @@ export function Connections() {
     if (hasSetupListeners.current) return;
     hasSetupListeners.current = true;
     
-    // Usar socket global
-    const socket = socketService.getSocket();
-    if (!socket) {
-      console.error('❌ Socket não está conectado');
-      return;
-    }
+    // Aguardar socket estar pronto
+    const setupSocket = () => {
+      const socket = socketService.getSocket();
+      if (!socket) {
+        console.warn('⚠️ Socket ainda não está conectado, aguardando...');
+        setTimeout(setupSocket, 500);
+        return;
+      }
 
-    socketRef.current = socket;
-
-    console.log('✅ Usando WebSocket global');
+      socketRef.current = socket;
+      console.log('✅ Usando WebSocket global');
 
     // Evento: QR Code gerado
     socket.on('whatsapp_qr_code', (data: { connectionId: string; qrCode: string }) => {
@@ -147,12 +148,19 @@ export function Connections() {
       });
     });
 
+      return () => {
+        // Remover listeners ao desmontar
+        socket.off('whatsapp_qr_code');
+        socket.off('whatsapp_connecting');
+        socket.off('whatsapp_connected');
+        socket.off('whatsapp_disconnected');
+      };
+    };
+
+    // Iniciar setup
+    setupSocket();
+
     return () => {
-      // Remover listeners ao desmontar
-      socket.off('whatsapp_qr_code');
-      socket.off('whatsapp_connecting');
-      socket.off('whatsapp_connected');
-      socket.off('whatsapp_disconnected');
       hasSetupListeners.current = false;
     };
   }, []);
