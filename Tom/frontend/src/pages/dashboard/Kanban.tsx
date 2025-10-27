@@ -136,16 +136,46 @@ export function Kanban() {
     const conversationId = active.id as string;
     const toStageId = over.id as string;
 
+    // Optimistic Update: Atualizar UI imediatamente
+    const conversationToMove = board
+      .flatMap((col) => col.conversations)
+      .find((conv) => conv.id === conversationId);
+
+    if (!conversationToMove) return;
+
+    // Remover da coluna atual e adicionar na nova
+    const newBoard = board.map((col) => {
+      if (col.stage.id === toStageId) {
+        // Adicionar na nova coluna
+        return {
+          ...col,
+          conversations: [...col.conversations, conversationToMove],
+        };
+      } else {
+        // Remover da coluna antiga
+        return {
+          ...col,
+          conversations: col.conversations.filter((c) => c.id !== conversationId),
+        };
+      }
+    });
+
+    // Atualizar UI imediatamente
+    setBoard(newBoard);
+
     try {
       await api.put(`/kanban/conversations/${conversationId}/move`, {
         toStageId,
       });
 
       toast.success('Conversa movida com sucesso!');
+      // Recarregar para garantir sincronização
       loadBoard();
     } catch (error) {
       console.error('Erro ao mover conversa:', error);
       toast.error('Erro ao mover conversa');
+      // Reverter em caso de erro
+      loadBoard();
     }
   };
 
@@ -225,10 +255,19 @@ export function Kanban() {
     return (
       <div className="flex flex-col items-center justify-center h-full gap-4 bg-white">
         <div className="text-gray-900">Nenhuma etapa encontrada</div>
-        <GlassButton onClick={initializeStages}>
-          <Plus className="w-4 h-4 mr-2" />
-          Criar Etapa Padrão
-        </GlassButton>
+        <div className="flex gap-3">
+          <GlassButton onClick={initializeStages}>
+            <Plus className="w-4 h-4 mr-2" />
+            Criar Etapa Padrão
+          </GlassButton>
+          <button
+            onClick={() => setShowCreateModal(true)}
+            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+          >
+            <Plus className="w-4 h-4" />
+            Nova Etapa
+          </button>
+        </div>
       </div>
     );
   }
@@ -242,10 +281,16 @@ export function Kanban() {
             <h1 className="text-3xl font-bold text-gray-900">Minhas Conversas - Kanban</h1>
             <p className="text-gray-600 mt-1">Gerencie suas conversas em atendimento</p>
           </div>
-          <GlassButton onClick={() => setShowCreateModal(true)}>
-            <Plus className="w-4 h-4 mr-2" />
-            Nova Coluna
-          </GlassButton>
+          <div className="flex gap-2">
+            {/* Botão principal */}
+            <button
+              onClick={() => setShowCreateModal(true)}
+              className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+            >
+              <Plus className="w-4 h-4" />
+              Nova Etapa
+            </button>
+          </div>
         </div>
       </div>
 
