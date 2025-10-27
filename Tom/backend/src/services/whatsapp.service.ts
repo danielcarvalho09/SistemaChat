@@ -185,7 +185,7 @@ export class WhatsAppService {
    */
   async disconnectConnection(connectionId: string) {
     try {
-      await baileysManager.removeClient(connectionId);
+      await baileysManager.removeClient(connectionId, true); // true = fazer logout
 
       await this.prisma.whatsAppConnection.update({
         where: { id: connectionId },
@@ -207,7 +207,7 @@ export class WhatsAppService {
       logger.info(`[WhatsApp] Deleting connection ${connectionId} and all related data...`);
 
       // 1. Desconectar se estiver conectado
-      await baileysManager.removeClient(connectionId);
+      await baileysManager.removeClient(connectionId, true); // true = fazer logout
 
       // 2. Deletar todas as mensagens desta conexão
       const deletedMessages = await this.prisma.message.deleteMany({

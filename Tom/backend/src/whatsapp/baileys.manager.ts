@@ -40,6 +40,7 @@ export interface BaileysClient {
 class BaileysManager {
   private clients: Map<string, BaileysClient> = new Map();
   private prisma = getPrismaClient();
+  private reconnectionLocks: Map<string, boolean> = new Map(); // Previne reconexões simultâneas
 
   /**
    * Cria um novo cliente Baileys para uma conexão
@@ -49,11 +50,20 @@ class BaileysManager {
     try {
       logger.info(`[Baileys] Creating client for connection: ${connectionId}`);
 
+      // Verificar se já está em processo de criação/reconexão
+      if (this.reconnectionLocks.get(connectionId)) {
+        logger.warn(`[Baileys] Client ${connectionId} is already being created/reconnected, skipping...`);
+        throw new Error('Client creation already in progress');
+      }
+
+      // Marcar como em processo de criação
+      this.reconnectionLocks.set(connectionId, true);
+
       // Remover cliente existente se houver
       const existingClient = this.clients.get(connectionId);
       if (existingClient) {
         logger.warn(`[Baileys] Client ${connectionId} already exists, removing...`);
-        await this.removeClient(connectionId);
+        await this.removeClient(connectionId, false); // false = não fazer logout
       }
 
       // Carregar ou criar auth state do banco de dados
@@ -121,9 +131,17 @@ class BaileysManager {
       this.startActiveHeartbeat(connectionId);
 
       logger.info(`[Baileys] ✅ Client created successfully: ${connectionId}`);
+      
+      // Liberar lock após criação bem-sucedida
+      this.reconnectionLocks.delete(connectionId);
+      
       return client;
     } catch (error) {
       logger.error(`[Baileys] Error creating client ${connectionId}:`, error);
+      
+      // Liberar lock em caso de erro
+      this.reconnectionLocks.delete(connectionId);
+      
       throw error;
     }
   }
@@ -269,20 +287,27 @@ class BaileysManager {
       // Restart required (normal após QR scan)
       if (statusCode === DisconnectReason.restartRequired) {
         logger.info(`[Baileys] Restart required for ${connectionId} (normal after QR scan)`);
+        
+        // Aguardar 3 segundos antes de reiniciar para evitar conflitos
         setTimeout(async () => {
           try {
-            await this.createClient(connectionId);
+            // Verificar se não está já reconectando
+            if (!this.reconnectionLocks.get(connectionId)) {
+              await this.createClient(connectionId);
+            } else {
+              logger.info(`[Baileys] Skipping restart for ${connectionId} - already reconnecting`);
+            }
           } catch (error) {
             logger.error(`[Baileys] Error restarting ${connectionId}:`, error);
           }
-        }, 2000);
+        }, 3000);
         return;
       }
 
       // Logout
       if (statusCode === DisconnectReason.loggedOut) {
         logger.warn(`[Baileys] Logged out: ${connectionId}`);
-        await this.removeClient(connectionId);
+        await this.removeClient(connectionId, false); // Não fazer logout, já foi deslogado
         await this.updateConnectionStatus(connectionId, 'disconnected');
         this.emitStatus(connectionId, 'disconnected');
         return;
@@ -520,25 +545,31 @@ class BaileysManager {
       return;
     }
 
+    // Verificar se já está reconectando (dupla verificação)
+    if (client.isReconnecting || this.reconnectionLocks.get(connectionId)) {
+      logger.info(`[Baileys] ⏭️ Reconnection already in progress for ${connectionId}, skipping...`);
+      return;
+    }
+
     // Marcar como reconectando
     client.isReconnecting = true;
     client.reconnectAttempts = (client.reconnectAttempts || 0) + 1;
 
-    // Estratégia de reconexão mais agressiva:
-    // - Primeira tentativa: imediato (1s)
-    // - Primeiras 5 tentativas: 2s entre cada
-    // - Tentativas 6-15: 5s entre cada
-    // - Após 15 tentativas: 20s entre cada (para não sobrecarregar)
-    let delay = 1000; // Padrão: 1 segundo
+    // Estratégia de reconexão com delays maiores para evitar conflitos:
+    // - Primeira tentativa: 3s (dar tempo para a conexão anterior fechar completamente)
+    // - Primeiras 5 tentativas: 5s entre cada
+    // - Tentativas 6-15: 10s entre cada
+    // - Após 15 tentativas: 30s entre cada (para não sobrecarregar)
+    let delay = 3000; // Padrão: 3 segundos
     
     if (client.reconnectAttempts === 1) {
-      delay = 1000; // 1ª tentativa: 1s
+      delay = 3000; // 1ª tentativa: 3s
     } else if (client.reconnectAttempts <= 5) {
-      delay = 2000; // Tentativas 2-5: 2s
+      delay = 5000; // Tentativas 2-5: 5s
     } else if (client.reconnectAttempts <= 15) {
-      delay = 5000; // Tentativas 6-15: 5s
+      delay = 10000; // Tentativas 6-15: 10s
     } else {
-      delay = 20000; // Após 15 tentativas: 20s
+      delay = 30000; // Após 15 tentativas: 30s
     }
     
     logger.info(`[Baileys] 🔄 Reconnection attempt ${client.reconnectAttempts}/30 for ${connectionId} in ${delay}ms...`);
@@ -827,8 +858,10 @@ class BaileysManager {
 
   /**
    * Remove cliente
+   * @param connectionId - ID da conexão
+   * @param doLogout - Se deve fazer logout (padrão: true). Use false quando a conexão já foi fechada.
    */
-  async removeClient(connectionId: string): Promise<void> {
+  async removeClient(connectionId: string, doLogout: boolean = true): Promise<void> {
     const client = this.clients.get(connectionId);
     if (!client) return;
 
@@ -841,16 +874,21 @@ class BaileysManager {
       clearInterval(client.heartbeatInterval);
     }
 
-    try {
-      // Apenas fazer logout se estiver conectado
-      if (client.status === 'connected') {
-        await client.socket.logout();
-        logger.info(`[Baileys] Logged out from ${connectionId}`);
-      } else {
-        logger.info(`[Baileys] Skipping logout for ${connectionId} (not connected)`);
+    // Só fazer logout se solicitado E se estiver conectado
+    if (doLogout) {
+      try {
+        // Apenas fazer logout se estiver conectado
+        if (client.status === 'connected') {
+          await client.socket.logout();
+          logger.info(`[Baileys] Logged out from ${connectionId}`);
+        } else {
+          logger.info(`[Baileys] Skipping logout for ${connectionId} (not connected)`);
+        }
+      } catch (error) {
+        logger.warn(`[Baileys] Error logging out ${connectionId} (ignoring):`, error);
       }
-    } catch (error) {
-      logger.warn(`[Baileys] Error logging out ${connectionId} (ignoring):`, error);
+    } else {
+      logger.info(`[Baileys] Skipping logout for ${connectionId} (doLogout=false)`);
     }
 
     this.clients.delete(connectionId);
@@ -952,11 +990,14 @@ class BaileysManager {
   }
 
   /**
-   * Verifica se conexão está ativa
+   * Desconecta uma conexão
    */
-  isConnectionActive(connectionId: string): boolean {
-    const client = this.clients.get(connectionId);
-    return client?.status === 'connected';
+  async disconnectConnection(connectionId: string) {
+    try {
+      await this.removeClient(connectionId, true); // true = fazer logout
+    } catch (error) {
+      logger.error(`[Baileys] Error disconnecting ${connectionId}:`, error);
+    }
   }
 
   /**
