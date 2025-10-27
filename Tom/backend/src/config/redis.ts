@@ -5,6 +5,72 @@ let redisClient: Redis;
 let redisPubClient: Redis;
 let redisSubClient: Redis;
 
+/**
+ * Testa conexão Redis
+ */
+async function testRedisConnection(url: string): Promise<boolean> {
+  const testClient = new Redis(url, {
+    maxRetriesPerRequest: 1,
+    connectTimeout: 5000,
+    lazyConnect: true,
+  });
+
+  try {
+    await testClient.connect();
+    await testClient.ping();
+    testClient.disconnect();
+    return true;
+  } catch (error) {
+    testClient.disconnect();
+    return false;
+  }
+}
+
+/**
+ * Seleciona URL do Redis com fallback
+ */
+async function selectRedisUrl(): Promise<string> {
+  const useSimpleFallback = process.env.USE_SIMPLE_FALLBACK !== 'false';
+
+  if (!useSimpleFallback) {
+    return process.env.REDIS_URL || 'redis://localhost:6379';
+  }
+
+  const redisConfigs = [
+    {
+      url: process.env.REDIS_URL,
+      name: 'Redis Cloud',
+    },
+    {
+      url: process.env.REDIS_FALLBACK_URL || 'redis://:redis_password@localhost:6380',
+      name: 'Redis Local (Docker)',
+    },
+  ];
+
+  logger.info('🔍 Testando conexões Redis...');
+
+  for (const redis of redisConfigs) {
+    if (!redis.url) {
+      logger.warn(`⚠️  ${redis.name}: URL não configurada, pulando...`);
+      continue;
+    }
+
+    logger.info(`🔌 Tentando conectar em: ${redis.name}...`);
+
+    const isConnected = await testRedisConnection(redis.url);
+
+    if (isConnected) {
+      logger.info(`✅ Redis: ${redis.name} disponível`);
+      return redis.url;
+    } else {
+      logger.warn(`❌ Redis: ${redis.name} não disponível`);
+    }
+  }
+
+  logger.warn('⚠️  Nenhum Redis disponível, usando URL padrão');
+  return process.env.REDIS_URL || 'redis://localhost:6379';
+}
+
 export const getRedisClient = (): Redis => {
   if (!redisClient) {
     const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
@@ -61,11 +127,15 @@ export const getRedisSubClient = (): Redis => {
 
 export const connectRedis = async (): Promise<void> => {
   try {
+    // Selecionar melhor URL disponível com fallback
+    const selectedUrl = await selectRedisUrl();
+    process.env.REDIS_URL = selectedUrl;
+    
     const client = getRedisClient();
     await client.ping();
-    logger.info('Redis connection verified');
+    logger.info('✅ Redis connection verified');
   } catch (error) {
-    logger.error('Redis connection failed:', error);
+    logger.error('❌ Redis connection failed:', error);
     throw error;
   }
 };

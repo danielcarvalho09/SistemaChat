@@ -1,0 +1,34 @@
+===========================================
+🚀 COMANDOS RÁPIDOS - MIGRAÇÃO CLOUD
+===========================================
+
+1. EDITAR O .env (backend/.env)
+   - Substitua [SUA-SENHA], [SEU-PROJECT-REF], [SEU-ENDPOINT], [PORTA]
+   - Obtenha credenciais em:
+     * Supabase: Dashboard > Settings > Database > Connection string
+     * Redis Cloud: Dashboard > Database > Configuration
+
+2. APLICAR MIGRATIONS (criar tabelas automaticamente)
+   cd backend
+   npx prisma generate
+   npx prisma migrate deploy
+
+3. TESTAR CONEXÕES
+   node test-connections.js
+
+4. INICIAR SISTEMA
+   # Terminal 1
+   cd backend && npm run dev
+   
+   # Terminal 2
+   cd frontend && npm run dev
+
+===========================================
+✅ PRONTO! Sistema rodando com:
+   - Supabase (PostgreSQL)
+   - Redis Cloud
+   - Fallback automático para Docker local
+===========================================
+
+📖 Guia completo: RESOLVER_ERRO_MIGRATION.md
+📖 Documentação: GUIA_MIGRACAO_SUPABASE_REDIS.md
