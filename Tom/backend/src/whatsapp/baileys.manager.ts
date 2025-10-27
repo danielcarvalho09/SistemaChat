@@ -397,7 +397,7 @@ class BaileysManager {
 
         // Processar mensagem (criar contato, conversa e salvar)
         try {
-          const { MessageService } = await import('../services/message.service');
+          const { MessageService } = await import('../services/message.service.js');
           const messageService = new MessageService();
           await messageService.processIncomingMessage(
             connectionId,
