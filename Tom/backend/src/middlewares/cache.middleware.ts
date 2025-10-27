@@ -10,8 +10,9 @@ import { logger } from '../config/logger';
  * Gerar chave de cache baseada na requisição
  */
 function generateCacheKey(req: Request, prefix: string = 'route'): string {
-  const { method, originalUrl, user } = req;
-  const userId = (user as any)?.id || 'anonymous';
+  const { method, originalUrl } = req;
+  const user = (req as any).user;
+  const userId = user?.id || 'anonymous';
   
   // Incluir query params na chave
   const queryString = JSON.stringify(req.query);

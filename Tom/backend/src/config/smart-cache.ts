@@ -122,7 +122,7 @@ export function WithSmartCache(
         ttl
       );
 
-      return { ...data, _fromCache: fromCache };
+      return { ...(data as object), _fromCache: fromCache } as any;
     };
 
     return descriptor;
