@@ -187,10 +187,27 @@ git push origin main
 #    - Inicialização do servidor
 ```
 
-Variáveis necessárias no Railway:
-- Todas do `.env.example`
-- `NODE_ENV=production`
-- `CORS_ORIGIN=<url-do-frontend>`
+**Variáveis OBRIGATÓRIAS no Railway:**
+
+```env
+# Banco de dados (fornecido pelo Supabase/Railway)
+DATABASE_URL=postgresql://...
+
+# Redis (fornecido pelo Redis Cloud/Railway)
+REDIS_URL=redis://...
+
+# JWT Secrets (gere com: node -e "console.log(require('crypto').randomBytes(32).toString('base64'))")
+JWT_SECRET=<seu-secret-aqui>
+JWT_REFRESH_SECRET=<seu-secret-aqui>
+
+# CORS - CRÍTICO! Adicione a URL do seu frontend
+CORS_ORIGIN=https://sistemachat-production.up.railway.app
+
+# Ambiente
+NODE_ENV=production
+```
+
+**⚠️ IMPORTANTE:** Se o CORS_ORIGIN não estiver configurado corretamente, você terá erros de WebSocket e requisições HTTP bloqueadas!
 
 #### ✨ Seed Automático
 

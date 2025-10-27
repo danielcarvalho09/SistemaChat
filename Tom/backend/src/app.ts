@@ -59,12 +59,31 @@ export async function buildApp(): Promise<FastifyInstance> {
     referrerPolicy: { policy: "strict-origin-when-cross-origin" },
   });
 
+  // CORS configurado de forma robusta
   await app.register(cors, {
-    origin: config.security.corsOrigin,
+    origin: (origin, callback) => {
+      const allowedOrigins = config.security.corsOrigin;
+      
+      // Permitir requisições sem origin (mobile apps, Postman, etc)
+      if (!origin) {
+        return callback(null, true);
+      }
+      
+      // Verificar se a origin está na lista permitida
+      if (allowedOrigins.includes(origin) || allowedOrigins.includes('*')) {
+        callback(null, true);
+      } else {
+        logger.warn(`HTTP request rejected from origin: ${origin}`);
+        logger.warn(`Allowed origins: ${allowedOrigins.join(', ')}`);
+        callback(new Error('Not allowed by CORS'), false);
+      }
+    },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
     exposedHeaders: ['Content-Type', 'Content-Length'],
+    preflightContinue: false,
+    optionsSuccessStatus: 204,
   });
 
   // Rate limiting global (mais permissivo que o específico de auth)

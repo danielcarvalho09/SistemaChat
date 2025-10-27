@@ -3,6 +3,7 @@ import { Server as SocketIOServer, Socket } from 'socket.io';
 import { verifyAccessToken } from '../utils/jwt.js';
 import { logger } from '../config/logger.js';
 import { SocketEvent } from '../models/types.js';
+import { config } from '../config/env.js';
 
 interface AuthenticatedSocket extends Socket {
   userId?: string;
@@ -14,12 +15,37 @@ export class SocketServer {
   private connectedUsers: Map<string, Set<string>> = new Map(); // userId -> Set<socketId>
 
   constructor(httpServer: HTTPServer) {
+    // Configuração robusta de CORS para WebSocket
+    const allowedOrigins = config.security.corsOrigin;
+    
+    logger.info(`🔌 Initializing WebSocket with CORS origins: ${allowedOrigins.join(', ')}`);
+    
     this.io = new SocketIOServer(httpServer, {
       cors: {
-        origin: process.env.CORS_ORIGIN?.split(',') || ['http://localhost:5173'],
+        origin: (origin, callback) => {
+          // Permitir requisições sem origin (mobile apps, Postman, etc)
+          if (!origin) {
+            return callback(null, true);
+          }
+          
+          // Verificar se a origin está na lista permitida
+          if (allowedOrigins.includes(origin) || allowedOrigins.includes('*')) {
+            callback(null, true);
+          } else {
+            logger.warn(`WebSocket connection rejected from origin: ${origin}`);
+            callback(new Error('Not allowed by CORS'));
+          }
+        },
         credentials: true,
+        methods: ['GET', 'POST'],
+        allowedHeaders: ['Content-Type', 'Authorization'],
       },
       transports: ['websocket', 'polling'],
+      pingTimeout: 60000,
+      pingInterval: 25000,
+      upgradeTimeout: 30000,
+      maxHttpBufferSize: 1e6, // 1MB
+      allowEIO3: true, // Compatibilidade com versões antigas
     });
 
     this.setupMiddleware();
