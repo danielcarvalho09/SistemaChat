@@ -1,7 +1,7 @@
 import { FastifyInstance } from 'fastify';
-import { UserController } from '../controllers/user.controller';
-import { authenticate } from '../middlewares/auth.middleware';
-import { requireAdmin, requireOwnershipOrAdmin } from '../middlewares/authorization.middleware';
+import { UserController } from '../controllers/user.controller.js';
+import { authenticate } from '../middlewares/auth.middleware.js';
+import { requireAdmin, requireOwnershipOrAdmin } from '../middlewares/authorization.middleware.js';
 
 export async function userRoutes(fastify: FastifyInstance) {
   const userController = new UserController();

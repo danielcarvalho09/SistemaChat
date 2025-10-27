@@ -1,6 +1,6 @@
-import { getPrismaClient } from '../config/database';
-import { AppError } from '../middlewares/error.middleware';
-import { baileysManager } from '../whatsapp/baileys.manager';
+import { getPrismaClient } from '../config/database.js';
+import { AppError } from '../middlewares/error.middleware.js';
+import { baileysManager } from '../whatsapp/baileys.manager.js';
 
 interface BroadcastData {
   userId: string;

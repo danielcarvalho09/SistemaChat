@@ -1,6 +1,6 @@
 import { FastifyInstance } from 'fastify';
-import { getPrismaClient } from '../config/database';
-import { authenticate } from '../middlewares/auth.middleware';
+import { getPrismaClient } from '../config/database.js';
+import { authenticate } from '../middlewares/auth.middleware.js';
 import { z } from 'zod';
 
 const monitorConversationSchema = z.object({

@@ -1,8 +1,8 @@
 import { FastifyRequest, FastifyReply } from 'fastify';
-import { AuthService } from '../services/auth.service';
-import { validate } from '../utils/validators';
-import { loginSchema, registerSchema, refreshTokenSchema } from '../utils/validators';
-import { logger } from '../config/logger';
+import { AuthService } from '../services/auth.service.js';
+import { validate } from '../utils/validators.js';
+import { loginSchema, registerSchema, refreshTokenSchema } from '../utils/validators.js';
+import { logger } from '../config/logger.js';
 
 export class AuthController {
   private authService = new AuthService();

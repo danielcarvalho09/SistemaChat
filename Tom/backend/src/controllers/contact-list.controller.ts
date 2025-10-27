@@ -1,6 +1,6 @@
 import { FastifyRequest, FastifyReply } from 'fastify';
-import { ContactListService } from '../services/contact-list.service';
-import { logger } from '../config/logger';
+import { ContactListService } from '../services/contact-list.service.js';
+import { logger } from '../config/logger.js';
 
 interface CreateListBody {
   name: string;

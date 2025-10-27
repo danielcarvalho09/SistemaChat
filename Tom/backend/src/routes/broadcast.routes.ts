@@ -1,6 +1,6 @@
 import { FastifyInstance } from 'fastify';
-import { BroadcastController } from '../controllers/broadcast.controller';
-import { authenticate } from '../middlewares/auth.middleware';
+import { BroadcastController } from '../controllers/broadcast.controller.js';
+import { authenticate } from '../middlewares/auth.middleware.js';
 
 export async function broadcastRoutes(fastify: FastifyInstance) {
   const broadcastController = new BroadcastController();

@@ -1,5 +1,5 @@
-import { getPrismaClient } from '../config/database';
-import { logger } from '../config/logger';
+import { getPrismaClient } from '../config/database.js';
+import { logger } from '../config/logger.js';
 
 /**
  * Seed inicial do banco de dados

@@ -2,7 +2,7 @@
  * Helpers para otimização de queries
  */
 
-import { logger } from '../config/logger';
+import { logger } from '../config/logger.js';
 import { performance } from 'perf_hooks';
 
 /**

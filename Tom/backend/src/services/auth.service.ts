@@ -1,19 +1,19 @@
-import { getPrismaClient } from '../config/database';
-import { hashPassword, comparePassword } from '../utils/password';
-import { generateTokens, verifyRefreshToken } from '../utils/jwt';
+import { getPrismaClient } from '../config/database.js';
+import { hashPassword, comparePassword } from '../utils/password.js';
+import { generateTokens, verifyRefreshToken } from '../utils/jwt.js';
 import {
   LoginRequest,
   RegisterRequest,
   AuthTokens,
   UserResponse,
   JWTPayload,
-} from '../models/types';
+} from '../models/types.js';
 import {
   UnauthorizedError,
   ConflictError,
   NotFoundError,
-} from '../middlewares/error.middleware';
-import { logger } from '../config/logger';
+} from '../middlewares/error.middleware.js';
+import { logger } from '../config/logger.js';
 
 export class AuthService {
   private prisma = getPrismaClient();

@@ -1,6 +1,6 @@
 import { FastifyInstance } from 'fastify';
-import { KanbanController } from '../controllers/kanban.controller';
-import { authenticate } from '../middlewares/auth.middleware';
+import { KanbanController } from '../controllers/kanban.controller.js';
+import { authenticate } from '../middlewares/auth.middleware.js';
 
 export async function kanbanRoutes(fastify: FastifyInstance) {
   const controller = new KanbanController();

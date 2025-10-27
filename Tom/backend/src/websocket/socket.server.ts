@@ -1,8 +1,8 @@
 import { Server as HTTPServer } from 'http';
 import { Server as SocketIOServer, Socket } from 'socket.io';
-import { verifyAccessToken } from '../utils/jwt';
-import { logger } from '../config/logger';
-import { SocketEvent } from '../models/types';
+import { verifyAccessToken } from '../utils/jwt.js';
+import { logger } from '../config/logger.js';
+import { SocketEvent } from '../models/types.js';
 
 interface AuthenticatedSocket extends Socket {
   userId?: string;

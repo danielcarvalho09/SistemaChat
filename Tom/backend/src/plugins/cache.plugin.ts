@@ -5,8 +5,8 @@
 
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import fp from 'fastify-plugin';
-import { cache, CacheKeys, CacheTTL } from '../config/cache';
-import { logger } from '../config/logger';
+import { cache, CacheKeys, CacheTTL } from '../config/cache.js';
+import { logger } from '../config/logger.js';
 
 /**
  * Gerar chave de cache baseada na requisição

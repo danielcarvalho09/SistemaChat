@@ -1,6 +1,6 @@
 import bcrypt from 'bcrypt';
-import { config } from '../config/env';
-import { logger } from '../config/logger';
+import { config } from '../config/env.js';
+import { logger } from '../config/logger.js';
 
 /**
  * Hash de senha usando bcrypt

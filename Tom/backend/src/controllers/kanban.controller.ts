@@ -1,6 +1,6 @@
 import { FastifyRequest, FastifyReply } from 'fastify';
-import { KanbanService } from '../services/kanban.service';
-import { validate } from '../utils/validation';
+import { KanbanService } from '../services/kanban.service.js';
+import { validate } from '../utils/validation.js';
 import { z } from 'zod';
 
 // Schemas de validação

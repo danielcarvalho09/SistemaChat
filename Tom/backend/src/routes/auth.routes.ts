@@ -1,7 +1,7 @@
 import { FastifyInstance } from 'fastify';
-import { AuthController } from '../controllers/auth.controller';
-import { authenticate } from '../middlewares/auth.middleware';
-import { authRateLimit } from '../middlewares/rateLimit.middleware';
+import { AuthController } from '../controllers/auth.controller.js';
+import { authenticate } from '../middlewares/auth.middleware.js';
+import { authRateLimit } from '../middlewares/rateLimit.middleware.js';
 
 export async function authRoutes(fastify: FastifyInstance) {
   const authController = new AuthController();

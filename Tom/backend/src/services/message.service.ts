@@ -1,9 +1,9 @@
-import { getPrismaClient } from '../config/database';
-import { baileysManager } from '../whatsapp/baileys.manager';
-import { getSocketServer } from '../websocket/socket.server';
-import { MessageResponse, SendMessageRequest, PaginatedResponse, PaginationParams } from '../models/types';
-import { NotFoundError, ForbiddenError } from '../middlewares/error.middleware';
-import { logger } from '../config/logger';
+import { getPrismaClient } from '../config/database.js';
+import { baileysManager } from '../whatsapp/baileys.manager.js';
+import { getSocketServer } from '../websocket/socket.server.js';
+import { MessageResponse, SendMessageRequest, PaginatedResponse, PaginationParams } from '../models/types.js';
+import { NotFoundError, ForbiddenError } from '../middlewares/error.middleware.js';
+import { logger } from '../config/logger.js';
 
 export class MessageService {
   private prisma = getPrismaClient();

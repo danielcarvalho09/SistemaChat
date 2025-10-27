@@ -1,6 +1,6 @@
 import { FastifyInstance } from 'fastify';
-import { ContactListController } from '../controllers/contact-list.controller';
-import { authenticate } from '../middlewares/auth.middleware';
+import { ContactListController } from '../controllers/contact-list.controller.js';
+import { authenticate } from '../middlewares/auth.middleware.js';
 
 export async function contactListRoutes(fastify: FastifyInstance) {
   const contactListController = new ContactListController();

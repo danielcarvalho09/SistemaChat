@@ -1,14 +1,14 @@
-import { getPrismaClient } from '../config/database';
+import { getPrismaClient } from '../config/database.js';
 import {
   DepartmentResponse,
   CreateDepartmentRequest,
   UpdateDepartmentRequest,
   PaginatedResponse,
   PaginationParams,
-} from '../models/types';
-import { NotFoundError, ConflictError } from '../middlewares/error.middleware';
-import { logger } from '../config/logger';
-import { cacheGet, cacheSet, cacheDel, cacheDelPattern } from '../config/redis';
+} from '../models/types.js';
+import { NotFoundError, ConflictError } from '../middlewares/error.middleware.js';
+import { logger } from '../config/logger.js';
+import { cacheGet, cacheSet, cacheDel, cacheDelPattern } from '../config/redis.js';
 
 export class DepartmentService {
   private prisma = getPrismaClient();

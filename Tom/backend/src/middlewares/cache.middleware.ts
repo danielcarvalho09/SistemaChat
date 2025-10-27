@@ -3,8 +3,8 @@
  */
 
 import { Request, Response, NextFunction } from 'express';
-import { cache } from '../config/cache';
-import { logger } from '../config/logger';
+import { cache } from '../config/cache.js';
+import { logger } from '../config/logger.js';
 
 /**
  * Gerar chave de cache baseada na requisição

@@ -1,7 +1,7 @@
-import { getPrismaClient } from '../config/database';
-import { baileysManager } from '../whatsapp/baileys.manager';
-import { logger } from '../config/logger';
-import { NotFoundError, ConflictError } from '../middlewares/error.middleware';
+import { getPrismaClient } from '../config/database.js';
+import { baileysManager } from '../whatsapp/baileys.manager.js';
+import { logger } from '../config/logger.js';
+import { NotFoundError, ConflictError } from '../middlewares/error.middleware.js';
 
 /**
  * Serviço de gerenciamento de conexões WhatsApp

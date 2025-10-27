@@ -3,8 +3,8 @@
  * Centraliza a lógica de limpeza de cache
  */
 
-import { cache } from '../config/cache';
-import { logger } from '../config/logger';
+import { cache } from '../config/cache.js';
+import { logger } from '../config/logger.js';
 
 /**
  * Invalidar cache relacionado a conversas

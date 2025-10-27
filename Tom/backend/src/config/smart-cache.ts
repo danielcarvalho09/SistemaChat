@@ -3,8 +3,8 @@
  * Carrega 1x, usa sempre. Só recarrega quando há mudanças.
  */
 
-import { cache, CacheTTL } from './cache';
-import { logger } from './logger';
+import { cache, CacheTTL } from './cache.js';
+import { logger } from './logger.js';
 
 export class SmartCache {
   /**

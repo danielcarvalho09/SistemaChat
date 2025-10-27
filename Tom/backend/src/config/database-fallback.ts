@@ -3,7 +3,7 @@
  * Tenta conectar no Supabase primeiro, se falhar usa Docker local
  */
 
-import { logger } from './logger';
+import { logger } from './logger.js';
 
 interface DatabaseConfig {
   url: string;

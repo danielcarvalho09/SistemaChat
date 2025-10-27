@@ -1,11 +1,11 @@
 import { FastifyRequest, FastifyReply } from 'fastify';
-import { DepartmentService } from '../services/department.service';
-import { validate } from '../utils/validators';
+import { DepartmentService } from '../services/department.service.js';
+import { validate } from '../utils/validators.js';
 import {
   createDepartmentSchema,
   updateDepartmentSchema,
   paginationSchema,
-} from '../utils/validators';
+} from '../utils/validators.js';
 
 export class DepartmentController {
   private departmentService = new DepartmentService();

@@ -1,5 +1,5 @@
 import { FastifyRequest, FastifyReply } from 'fastify';
-import { logger } from '../config/logger';
+import { logger } from '../config/logger.js';
 
 /**
  * Middleware de autorização baseado em roles

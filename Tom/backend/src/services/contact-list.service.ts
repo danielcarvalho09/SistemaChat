@@ -1,5 +1,5 @@
-import { getPrismaClient } from '../config/database';
-import { AppError } from '../middlewares/error.middleware';
+import { getPrismaClient } from '../config/database.js';
+import { AppError } from '../middlewares/error.middleware.js';
 
 interface CreateListData {
   name: string;

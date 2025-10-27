@@ -1,17 +1,17 @@
 import { FastifyInstance } from 'fastify';
-import { authRoutes } from './auth.routes';
-import { userRoutes } from './user.routes';
-import { departmentRoutes } from './department.routes';
-import { whatsappRoutes } from './whatsapp.routes';
-import { conversationRoutes } from './conversation.routes';
-import { uploadRoutes } from './upload.routes';
-import { syncRoutes } from './sync.routes';
-import { tagRoutes } from './tag.routes';
-import { monitorRoutes } from './monitor.routes';
-import { broadcastRoutes } from './broadcast.routes';
-import { contactListRoutes } from './contact-list.routes';
-import { kanbanRoutes } from './kanban.routes';
-import { config } from '../config/env';
+import { authRoutes } from './auth.routes.js';
+import { userRoutes } from './user.routes.js';
+import { departmentRoutes } from './department.routes.js';
+import { whatsappRoutes } from './whatsapp.routes.js';
+import { conversationRoutes } from './conversation.routes.js';
+import { uploadRoutes } from './upload.routes.js';
+import { syncRoutes } from './sync.routes.js';
+import { tagRoutes } from './tag.routes.js';
+import { monitorRoutes } from './monitor.routes.js';
+import { broadcastRoutes } from './broadcast.routes.js';
+import { contactListRoutes } from './contact-list.routes.js';
+import { kanbanRoutes } from './kanban.routes.js';
+import { config } from '../config/env.js';
 
 export async function registerRoutes(fastify: FastifyInstance) {
   const apiPrefix = config.server.apiPrefix;

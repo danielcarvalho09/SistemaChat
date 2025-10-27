@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { AppError } from '../middlewares/error.middleware';
+import { AppError } from '../middlewares/error.middleware.js';
 
 export function validate<T extends z.ZodType>(schema: T, data: unknown): z.infer<T> {
   try {

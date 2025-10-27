@@ -1,11 +1,11 @@
-import { buildApp } from './app';
-import { config } from './config/env';
-import { logger } from './config/logger';
-import { connectDatabase, disconnectDatabase } from './config/database';
-import { connectRedis, disconnectRedis } from './config/redis';
-import { seedDatabase } from './utils/seed';
-import { initializeSocketServer } from './websocket/socket.server';
-import { baileysManager } from './whatsapp/baileys.manager';
+import { buildApp } from './app.js';
+import { config } from './config/env.js';
+import { logger } from './config/logger.js';
+import { connectDatabase, disconnectDatabase } from './config/database.js';
+import { connectRedis, disconnectRedis } from './config/redis.js';
+import { seedDatabase } from './utils/seed.js';
+import { initializeSocketServer } from './websocket/socket.server.js';
+import { baileysManager } from './whatsapp/baileys.manager.js';
 
 async function start() {
   try {

@@ -1,5 +1,5 @@
 import { FastifyRequest, FastifyReply } from 'fastify';
-import { WhatsAppService } from '../services/whatsapp.service';
+import { WhatsAppService } from '../services/whatsapp.service.js';
 
 /**
  * Controller de conexões WhatsApp

@@ -1,7 +1,7 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
-// import { SyncService } from '../services/sync.service'; // DESABILITADO - serviço removido
-import { authenticate } from '../middlewares/auth.middleware';
-import { logger } from '../config/logger';
+// import { SyncService } from '../services/sync.service.js'; // DESABILITADO - serviço removido
+import { authenticate } from '../middlewares/auth.middleware.js';
+import { logger } from '../config/logger.js';
 
 export async function syncRoutes(fastify: FastifyInstance) {
   /**

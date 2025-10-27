@@ -1,7 +1,7 @@
 import { FastifyRequest, FastifyReply } from 'fastify';
-import { ConversationService } from '../services/conversation.service';
-import { MessageService } from '../services/message.service';
-import { validate } from '../utils/validators';
+import { ConversationService } from '../services/conversation.service.js';
+import { MessageService } from '../services/message.service.js';
+import { validate } from '../utils/validators.js';
 import {
   conversationFilterSchema,
   acceptConversationSchema,
@@ -10,9 +10,9 @@ import {
   updateConversationNotesSchema,
   sendMessageSchema,
   paginationSchema,
-} from '../utils/validators';
-import { getSocketServer } from '../websocket/socket.server';
-import { ConversationStatus, MessageType } from '../models/types';
+} from '../utils/validators.js';
+import { getSocketServer } from '../websocket/socket.server.js';
+import { ConversationStatus, MessageType } from '../models/types.js';
 
 export class ConversationController {
   private conversationService = new ConversationService();

@@ -1,6 +1,6 @@
 import { FastifyInstance } from 'fastify';
-import { WhatsAppController } from '../controllers/whatsapp.controller';
-import { requireAuth, requireAdmin } from '../middlewares/auth.middleware';
+import { WhatsAppController } from '../controllers/whatsapp.controller.js';
+import { requireAuth, requireAdmin } from '../middlewares/auth.middleware.js';
 
 export async function whatsappRoutes(fastify: FastifyInstance) {
   const whatsappController = new WhatsAppController();

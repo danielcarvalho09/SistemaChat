@@ -1,5 +1,5 @@
 import { FastifyRequest, FastifyReply } from 'fastify';
-import { logger } from '../config/logger';
+import { logger } from '../config/logger.js';
 import path from 'path';
 import fs from 'fs';
 import { pipeline } from 'stream/promises';

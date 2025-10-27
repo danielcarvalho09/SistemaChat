@@ -1,13 +1,13 @@
-import { getPrismaClient } from '../config/database';
-import { baileysManager } from '../whatsapp/baileys.manager';
+import { getPrismaClient } from '../config/database.js';
+import { baileysManager } from '../whatsapp/baileys.manager.js';
 import {
   ConversationResponse,
   ConversationStatus,
   PaginatedResponse,
   PaginationParams,
-} from '../models/types';
-import { NotFoundError, ConflictError, ForbiddenError } from '../middlewares/error.middleware';
-import { logger } from '../config/logger';
+} from '../models/types.js';
+import { NotFoundError, ConflictError, ForbiddenError } from '../middlewares/error.middleware.js';
+import { logger } from '../config/logger.js';
 
 export class ConversationService {
   private prisma = getPrismaClient();

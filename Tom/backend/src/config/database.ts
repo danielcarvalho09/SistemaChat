@@ -1,5 +1,5 @@
 import { PrismaClient } from '@prisma/client';
-import { logger } from './logger';
+import { logger } from './logger.js';
 
 // Singleton instance do Prisma Client
 let prisma: PrismaClient;

@@ -1,6 +1,6 @@
 import { FastifyError, FastifyRequest, FastifyReply } from 'fastify';
-import { logger } from '../config/logger';
-import { ApiError } from '../models/types';
+import { logger } from '../config/logger.js';
+import { ApiError } from '../models/types.js';
 import { ZodError } from 'zod';
 
 /**

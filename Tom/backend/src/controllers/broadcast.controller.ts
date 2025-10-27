@@ -1,6 +1,6 @@
 import { FastifyRequest, FastifyReply } from 'fastify';
-import { BroadcastService } from '../services/broadcast.service';
-import { logger } from '../config/logger';
+import { BroadcastService } from '../services/broadcast.service.js';
+import { logger } from '../config/logger.js';
 
 interface SendBroadcastBody {
   connectionId: string;

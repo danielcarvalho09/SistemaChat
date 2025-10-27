@@ -10,9 +10,9 @@ import makeWASocket, {
 import { Boom } from '@hapi/boom';
 import pino from 'pino';
 import QRCode from 'qrcode';
-import { logger } from '../config/logger';
-import { getSocketServer } from '../websocket/socket.server';
-import { getPrismaClient } from '../config/database';
+import { logger } from '../config/logger.js';
+import { getSocketServer } from '../websocket/socket.server.js';
+import { getPrismaClient } from '../config/database.js';
 
 /**
  * Interface do cliente Baileys

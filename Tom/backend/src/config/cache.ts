@@ -3,8 +3,8 @@
  * Melhora performance armazenando resultados de queries frequentes
  */
 
-import { getRedisClient } from './redis';
-import { logger } from './logger';
+import { getRedisClient } from './redis.js';
+import { logger } from './logger.js';
 
 export class CacheService {
   private redis = getRedisClient();

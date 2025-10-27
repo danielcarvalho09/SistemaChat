@@ -1,7 +1,7 @@
 import { FastifyRequest, FastifyReply } from 'fastify';
-import { verifyAccessToken, extractTokenFromHeader } from '../utils/jwt';
-import { getPrismaClient } from '../config/database';
-import { logger } from '../config/logger';
+import { verifyAccessToken, extractTokenFromHeader } from '../utils/jwt.js';
+import { getPrismaClient } from '../config/database.js';
+import { logger } from '../config/logger.js';
 
 // Estender FastifyRequest para incluir user
 declare module 'fastify' {

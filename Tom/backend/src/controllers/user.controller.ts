@@ -1,13 +1,13 @@
 import { FastifyRequest, FastifyReply } from 'fastify';
-import { UserService } from '../services/user.service';
-import { validate } from '../utils/validators';
+import { UserService } from '../services/user.service.js';
+import { validate } from '../utils/validators.js';
 import {
   updateUserSchema,
   assignUserRoleSchema,
   assignUserConnectionSchema,
   assignUserDepartmentSchema,
   paginationSchema,
-} from '../utils/validators';
+} from '../utils/validators.js';
 
 export class UserController {
   private userService = new UserService();

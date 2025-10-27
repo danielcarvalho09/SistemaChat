@@ -1,6 +1,7 @@
 {
   "name": "whatsapp-system-backend",
   "version": "1.0.0",
+  "type": "module",
   "description": "Backend do Sistema de Atendimento WhatsApp Multi-Tenant",
   "main": "dist/server.js",
   "scripts": {
@@ -47,7 +48,7 @@
     "@fastify/swagger-ui": "^5.0.1",
     "@hapi/boom": "^10.0.1",
     "@prisma/client": "^5.22.0",
-    "@whiskeysockets/baileys": "^6.7.20",
+    "@whiskeysockets/baileys": "^7.0.0-rc.6",
     "bcrypt": "^5.1.1",
     "bullmq": "^5.28.2",
     "cobe": "^0.6.5",

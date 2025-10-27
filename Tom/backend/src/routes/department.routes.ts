@@ -1,7 +1,7 @@
 import { FastifyInstance } from 'fastify';
-import { DepartmentController } from '../controllers/department.controller';
-import { authenticate } from '../middlewares/auth.middleware';
-import { requireAdmin } from '../middlewares/authorization.middleware';
+import { DepartmentController } from '../controllers/department.controller.js';
+import { authenticate } from '../middlewares/auth.middleware.js';
+import { requireAdmin } from '../middlewares/authorization.middleware.js';
 
 export async function departmentRoutes(fastify: FastifyInstance) {
   const departmentController = new DepartmentController();

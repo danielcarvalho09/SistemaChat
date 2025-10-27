@@ -1,6 +1,6 @@
 import { FastifyInstance } from 'fastify';
-import { ConversationController } from '../controllers/conversation.controller';
-import { authenticate } from '../middlewares/auth.middleware';
+import { ConversationController } from '../controllers/conversation.controller.js';
+import { authenticate } from '../middlewares/auth.middleware.js';
 
 export async function conversationRoutes(fastify: FastifyInstance) {
   const conversationController = new ConversationController();

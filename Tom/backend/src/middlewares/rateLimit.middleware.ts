@@ -1,7 +1,7 @@
 import { FastifyRequest, FastifyReply } from 'fastify';
-import { getRedisClient } from '../config/redis';
-import { config } from '../config/env';
-import { logger } from '../config/logger';
+import { getRedisClient } from '../config/redis.js';
+import { config } from '../config/env.js';
+import { logger } from '../config/logger.js';
 
 interface RateLimitOptions {
   max: number; // Máximo de requisições
