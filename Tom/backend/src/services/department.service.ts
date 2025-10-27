@@ -41,9 +41,9 @@ export class DepartmentService {
           _count: {
             select: { 
               conversations: true,
-              userAccess: true,
             },
           },
+          userAccess: true,
         },
       }),
       this.prisma.department.count({ where }),
@@ -59,7 +59,7 @@ export class DepartmentService {
         isActive: dept.isActive,
         conversationCount: dept._count.conversations,
         _count: {
-          users: dept._count.userAccess,
+          users: dept.userAccess.length,
         },
         createdAt: dept.createdAt,
         updatedAt: dept.updatedAt,
@@ -89,9 +89,9 @@ export class DepartmentService {
         _count: {
           select: { 
             conversations: true,
-            userAccess: true,
           },
         },
+        userAccess: true,
       },
     });
 
@@ -109,7 +109,7 @@ export class DepartmentService {
       isPrimary: department.isPrimary || false,
       conversationCount: department._count.conversations,
       _count: {
-        users: department._count.userAccess,
+        users: department.userAccess.length,
       },
       createdAt: department.createdAt,
       updatedAt: department.updatedAt,

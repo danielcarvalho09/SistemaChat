@@ -56,7 +56,8 @@ export function Connections() {
     hasSetupListeners.current = true;
     
     // Conectar ao WebSocket
-    const newSocket = io('http://localhost:3000', {
+    const WS_URL = import.meta.env.VITE_WS_URL || 'http://localhost:3000';
+    const newSocket = io(WS_URL, {
       auth: {
         token: localStorage.getItem('token'),
       },

@@ -26,7 +26,8 @@ export function AdminDashboard() {
     fetchStats();
 
     // Conectar ao WebSocket
-    const socket = io('http://localhost:3000', {
+    const WS_URL = import.meta.env.VITE_WS_URL || 'http://localhost:3000';
+    const socket = io(WS_URL, {
       auth: {
         token: localStorage.getItem('token'),
       },

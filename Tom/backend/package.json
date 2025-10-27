@@ -18,6 +18,8 @@
     "clean:connections": "tsx scripts/delete-inactive-connections.ts",
     "reset:core": "tsx scripts/reset-core.ts",
     "reset:all": "tsx scripts/reset-all-data.ts",
+    "seed": "tsx src/utils/runSeed.ts",
+    "promote-admin": "tsx src/utils/promoteAdmin.ts",
     "test": "jest --coverage",
     "test:watch": "jest --watch",
     "test:e2e": "jest --config jest.e2e.config.js",

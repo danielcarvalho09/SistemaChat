@@ -58,7 +58,8 @@ export function ChatArea({ conversationId, onToggleDetails }: ChatAreaProps) {
           throw new Error('Token não encontrado. Faça login novamente.');
         }
 
-        const uploadResponse = await fetch('http://localhost:3000/api/v1/upload', {
+        const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+        const uploadResponse = await fetch(`${API_URL}/api/v1/upload`, {
           method: 'POST',
           headers: {
             'Authorization': `Bearer ${token}`,
@@ -71,7 +72,7 @@ export function ChatArea({ conversationId, onToggleDetails }: ChatAreaProps) {
         }
 
         const uploadData = await uploadResponse.json();
-        const mediaUrl = `http://localhost:3000${uploadData.data.url}`;
+        const mediaUrl = `${API_URL}${uploadData.data.url}`;
 
         // Determinar tipo de mensagem
         let messageType = 'document';
@@ -84,7 +85,7 @@ export function ChatArea({ conversationId, onToggleDetails }: ChatAreaProps) {
         }
 
         // Enviar mensagem com mídia
-        const messageResponse = await fetch(`http://localhost:3000/api/v1/conversations/${conversationId}/messages`, {
+        const messageResponse = await fetch(`${API_URL}/api/v1/conversations/${conversationId}/messages`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',

@@ -45,7 +45,7 @@ export function MessageList({ messages }: MessageListProps) {
   };
 
   // Normalizar URL absoluta para mídias
-  const apiBase = (import.meta as any).env?.VITE_API_URL || 'http://localhost:3000';
+  const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:3000';
   const toAbsoluteUrl = (url?: string | null) => {
     if (!url) return '';
     if (/^https?:\/\//i.test(url)) return url; // já é absoluta
