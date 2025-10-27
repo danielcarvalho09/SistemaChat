@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build && node replace-env.js",
+    "build": "vite build",
+    "postbuild": "node replace-env.js",
     "build:only": "vite build",
     "start": "node server.js",
     "preview": "vite preview",
