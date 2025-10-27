@@ -48,7 +48,7 @@ whatsapp-sessions/
 *.sqlite3
 
 # Prisma
-prisma/migrations/
+# prisma/migrations/ - MANTER migrations no git!
 
 # Docker
 .docker/
@@ -61,3 +61,17 @@ temp/
 # Uploads
 uploads/
 public/uploads/
+
+# Arquivos de documentação e scripts temporários
+*.md
+!README.md
+*.sql
+*.ps1
+*.bat
+*.sh
+!start.sh
+!migrate.sh
+*.txt
+!railway.toml
+!package.json
+!package-lock.json
