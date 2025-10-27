@@ -41,7 +41,7 @@ async function seedRailway() {
     });
     console.log('✅ Role "user" criada/atualizada\n');
 
-    // Definir permissões
+    // Definir permissões (usando resource+action únicos)
     console.log('🔐 Criando permissões...');
     const permissions = [
       // Conexões
@@ -50,18 +50,20 @@ async function seedRailway() {
       
       // Conversas
       { name: 'view_all_conversations', resource: 'conversations', action: 'read', description: 'View all conversations' },
-      { name: 'view_own_conversations', resource: 'conversations', action: 'read', description: 'View own conversations' },
       { name: 'manage_conversations', resource: 'conversations', action: 'manage', description: 'Manage conversations' },
       { name: 'accept_conversations', resource: 'conversations', action: 'create', description: 'Accept conversations from queue' },
       { name: 'transfer_conversations', resource: 'conversations', action: 'update', description: 'Transfer conversations' },
+      { name: 'delete_conversations', resource: 'conversations', action: 'delete', description: 'Delete conversations' },
       
       // Mensagens
       { name: 'send_messages', resource: 'messages', action: 'create', description: 'Send messages' },
       { name: 'view_messages', resource: 'messages', action: 'read', description: 'View messages' },
+      { name: 'delete_messages', resource: 'messages', action: 'delete', description: 'Delete messages' },
       
       // Usuários
       { name: 'manage_users', resource: 'users', action: 'manage', description: 'Manage users' },
       { name: 'view_users', resource: 'users', action: 'read', description: 'View users' },
+      { name: 'create_users', resource: 'users', action: 'create', description: 'Create users' },
       
       // Departamentos
       { name: 'manage_departments', resource: 'departments', action: 'manage', description: 'Manage departments' },
@@ -111,7 +113,7 @@ async function seedRailway() {
     console.log('🔗 Atribuindo permissões ao user...');
     const userPermissionNames = [
       'view_connections',
-      'view_own_conversations',
+      'view_all_conversations',
       'accept_conversations',
       'transfer_conversations',
       'send_messages',
