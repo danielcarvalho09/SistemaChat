@@ -11,7 +11,7 @@ numReplicas = 1
 [[services]]
 name = "backend"
 root = "Tom/backend"
-buildCommand = "npm ci && npm run build"
+buildCommand = "npm install && npm run build"
 startCommand = "npm start"
 
 # Frontend Service  
