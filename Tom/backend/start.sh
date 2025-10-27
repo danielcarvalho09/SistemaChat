@@ -1,8 +1,5 @@
 #!/bin/bash
-set -e
-
-echo "🔄 Applying database migrations..."
-npx prisma migrate deploy --schema=./prisma/schema.prisma || echo "⚠️ Migrations failed, continuing anyway..."
 
 echo "🚀 Starting application..."
+echo "ℹ️  Migrations should be applied manually before deploy"
 node dist/server.js

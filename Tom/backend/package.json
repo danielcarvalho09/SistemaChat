@@ -11,6 +11,7 @@
     "postinstall": "prisma generate",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
+    "prisma:migrate:prod": "./migrate-production.sh",
     "prisma:studio": "prisma studio",
     "clear:messages": "tsx scripts/clear-all-messages.ts",
     "check:data": "tsx scripts/check-data.ts",
