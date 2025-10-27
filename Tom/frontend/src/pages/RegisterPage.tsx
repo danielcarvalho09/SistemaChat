@@ -15,6 +15,28 @@ export default function RegisterPage() {
   const { toast } = useToast();
   const navigate = useNavigate();
 
+  const validatePassword = (pwd: string): { valid: boolean; errors: string[] } => {
+    const errors: string[] = [];
+    
+    if (pwd.length < 8) {
+      errors.push('Mínimo 8 caracteres');
+    }
+    if (!/[A-Z]/.test(pwd)) {
+      errors.push('Pelo menos 1 letra maiúscula');
+    }
+    if (!/[a-z]/.test(pwd)) {
+      errors.push('Pelo menos 1 letra minúscula');
+    }
+    if (!/[0-9]/.test(pwd)) {
+      errors.push('Pelo menos 1 número');
+    }
+    if (!/[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(pwd)) {
+      errors.push('Pelo menos 1 caractere especial (!@#$%^&* etc)');
+    }
+    
+    return { valid: errors.length === 0, errors };
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -36,10 +58,11 @@ export default function RegisterPage() {
       return;
     }
 
-    if (password.length < 8) {
+    const passwordValidation = validatePassword(password);
+    if (!passwordValidation.valid) {
       toast({
-        title: 'Erro',
-        description: 'A senha deve ter no mínimo 8 caracteres',
+        title: 'Senha inválida',
+        description: passwordValidation.errors.join(', '),
         variant: 'destructive',
       });
       return;
@@ -132,7 +155,26 @@ export default function RegisterPage() {
                 disabled={isLoading}
                 required
               />
-              <p className="mt-1 text-xs text-gray-500">Mínimo 8 caracteres</p>
+              <div className="mt-2 space-y-1">
+                <p className="text-xs font-medium text-gray-700">A senha deve conter:</p>
+                <ul className="text-xs text-gray-600 space-y-0.5 ml-4">
+                  <li className={password.length >= 8 ? 'text-green-600' : ''}>
+                    {password.length >= 8 ? '✓' : '•'} Mínimo 8 caracteres
+                  </li>
+                  <li className={/[A-Z]/.test(password) ? 'text-green-600' : ''}>
+                    {/[A-Z]/.test(password) ? '✓' : '•'} 1 letra maiúscula
+                  </li>
+                  <li className={/[a-z]/.test(password) ? 'text-green-600' : ''}>
+                    {/[a-z]/.test(password) ? '✓' : '•'} 1 letra minúscula
+                  </li>
+                  <li className={/[0-9]/.test(password) ? 'text-green-600' : ''}>
+                    {/[0-9]/.test(password) ? '✓' : '•'} 1 número
+                  </li>
+                  <li className={/[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(password) ? 'text-green-600' : ''}>
+                    {/[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(password) ? '✓' : '•'} 1 caractere especial
+                  </li>
+                </ul>
+              </div>
             </div>
 
             <div>

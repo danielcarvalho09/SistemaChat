@@ -62,6 +62,7 @@ export const useAuthStore = create<AuthState>()(
       register: async (email: string, password: string, name: string) => {
         set({ isLoading: true, error: null });
         try {
+          console.log('Enviando dados de registro:', { email, name, passwordLength: password.length });
           const response = await api.post('/auth/register', { email, password, name });
           const { user, tokens } = response.data.data;
 
@@ -80,7 +81,21 @@ export const useAuthStore = create<AuthState>()(
           // Conectar WebSocket
           socketService.connect(tokens.accessToken);
         } catch (error: any) {
-          const errorMessage = error.response?.data?.message || 'Erro ao registrar';
+          console.error('Erro no registro:', error.response?.data);
+          
+          // Capturar erros de validação do Zod
+          let errorMessage = 'Erro ao registrar';
+          
+          if (error.response?.data?.message) {
+            errorMessage = error.response.data.message;
+          } else if (error.response?.data?.errors) {
+            // Se houver múltiplos erros de validação
+            const errors = error.response.data.errors;
+            if (Array.isArray(errors)) {
+              errorMessage = errors.map((e: any) => e.message).join(', ');
+            }
+          }
+          
           set({ error: errorMessage, isLoading: false });
           throw error;
         }
