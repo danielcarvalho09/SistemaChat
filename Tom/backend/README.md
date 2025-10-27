@@ -170,7 +170,7 @@ Swagger/OpenAPI disponível automaticamente.
 
 ### Railway (Recomendado)
 
-O projeto está configurado para deploy no Railway:
+O projeto está configurado para deploy automático no Railway com **seed automático**:
 
 ```bash
 # 1. Certifique-se de ter as configurações corretas
@@ -181,13 +181,38 @@ O projeto está configurado para deploy no Railway:
 # 2. Faça commit e push
 git push origin main
 
-# 3. Railway fará deploy automático
+# 3. Railway fará deploy automático e executará:
+#    - Migrações do banco (prisma migrate deploy)
+#    - Seed automático (railway-seed.js)
+#    - Inicialização do servidor
 ```
 
 Variáveis necessárias no Railway:
 - Todas do `.env.example`
 - `NODE_ENV=production`
 - `CORS_ORIGIN=<url-do-frontend>`
+
+#### ✨ Seed Automático
+
+O sistema agora executa automaticamente o seed após cada deploy, criando:
+- ✅ Roles (admin, user)
+- ✅ Permissões do sistema
+- ✅ Departamentos padrão
+- ✅ Associações role-permissão
+
+**Arquivos relacionados:**
+- `railway-seed.js` - Script de seed para produção
+- `migrate.sh` - Script que executa migrações + seed
+- `railway.toml` - Configuração do Railway
+
+**Comandos manuais (se necessário):**
+```bash
+# Executar seed manualmente no Railway
+npm run seed:railway
+
+# Executar migrações + seed
+npm run deploy:railway
+```
 
 ## 🧪 Testes
 

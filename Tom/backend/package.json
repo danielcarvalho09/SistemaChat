@@ -19,6 +19,8 @@
     "reset:core": "tsx scripts/reset-core.ts",
     "reset:all": "tsx scripts/reset-all-data.ts",
     "seed": "tsx src/utils/runSeed.ts",
+    "seed:railway": "node railway-seed.js",
+    "deploy:railway": "npx prisma migrate deploy && node railway-seed.js",
     "promote-admin": "tsx src/utils/promoteAdmin.ts",
     "test": "jest --coverage",
     "test:watch": "jest --watch",
