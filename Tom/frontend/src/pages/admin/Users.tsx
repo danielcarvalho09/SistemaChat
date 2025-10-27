@@ -267,14 +267,6 @@ export function Users() {
         </div>
       </div>
 
-      {/* Branding */}
-      <div className="bg-white border-b border-gray-200 px-6 py-6">
-        <div className="text-center">
-          <div style={{ fontFamily: 'Bebas Neue, sans-serif' }} className="text-5xl md:text-6xl tracking-wide text-gray-900">AutoChat</div>
-          <div className="mt-1 text-xs md:text-sm tracking-[.3em] text-gray-500 font-light uppercase">powered by Daniel de Carvalho</div>
-        </div>
-      </div>
-
       {/* Search */}
       <div className="bg-white border-b border-gray-200 px-6 py-3">
         <Input

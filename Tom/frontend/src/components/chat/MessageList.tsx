@@ -1,6 +1,38 @@
+import { useState } from 'react';
 import { format } from 'date-fns';
-import { Check, CheckCheck, FileText, Download, ExternalLink } from 'lucide-react';
+import { Check, CheckCheck, FileText, Download, ExternalLink, Image as ImageIcon } from 'lucide-react';
 import { cn } from '../../lib/utils';
+
+// Componente para carregar imagem sob demanda
+function ImageMessage({ mediaUrl, toAbsoluteUrl }: { mediaUrl: string; toAbsoluteUrl: (url: string) => string }) {
+  const [loaded, setLoaded] = useState(false);
+
+  if (!loaded) {
+    return (
+      <div 
+        className="mb-1 bg-gray-800 rounded-t-lg flex items-center justify-center cursor-pointer hover:bg-gray-700 transition-colors"
+        style={{ minHeight: '200px', minWidth: '250px' }}
+        onClick={() => setLoaded(true)}
+      >
+        <div className="text-center text-gray-400">
+          <ImageIcon className="w-12 h-12 mx-auto mb-2" />
+          <p className="text-sm">Clique para carregar imagem</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mb-1">
+      <img
+        src={toAbsoluteUrl(mediaUrl)}
+        alt="Imagem"
+        className="max-w-full h-auto rounded-t-lg"
+        style={{ maxHeight: '300px', objectFit: 'cover' }}
+      />
+    </div>
+  );
+}
 
 interface Message {
   id: string;
@@ -94,14 +126,7 @@ export function MessageList({ messages }: MessageListProps) {
             >
               {/* Renderizar mídia */}
               {message.messageType === 'image' && message.mediaUrl && (
-                <div className="mb-1">
-                  <img
-                    src={toAbsoluteUrl(message.mediaUrl)}
-                    alt="Imagem"
-                    className="max-w-full h-auto rounded-t-lg"
-                    style={{ maxHeight: '300px', objectFit: 'cover' }}
-                  />
-                </div>
+                <ImageMessage mediaUrl={message.mediaUrl} toAbsoluteUrl={toAbsoluteUrl} />
               )}
 
               {message.messageType === 'audio' && message.mediaUrl && (

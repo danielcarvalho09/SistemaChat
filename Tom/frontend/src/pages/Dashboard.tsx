@@ -35,14 +35,14 @@ export function Dashboard() {
           ) : (
             <div className="flex-1 flex flex-col items-center justify-center bg-white relative">
               <BackgroundPaths />
-              <div className="z-10 text-center space-y-6">
-                <h1 className="text-6xl font-bold text-gray-800 tracking-tight">
-                  AutoChat
+              <div className="z-10 text-center space-y-3">
+                <h1 className="text-[120px] font-bold text-gray-800 tracking-[0.02em] leading-none" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
+                  AUTOCHAT
                 </h1>
-                <p className="text-lg text-gray-500 font-medium">
-                  Powered by Daniel
+                <p className="text-xl text-gray-500 tracking-wide" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
+                  POWERED BY DANIEL DE CARVALHO
                 </p>
-                <p className="text-sm text-gray-400 max-w-md">
+                <p className="text-sm text-gray-400 max-w-md mt-6">
                   Selecione uma conversa para começar o atendimento
                 </p>
               </div>
