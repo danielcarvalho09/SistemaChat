@@ -86,9 +86,9 @@ export default function RegisterPage() {
 
   return (
     <div className="relative flex min-h-screen w-full flex-col items-center justify-center overflow-hidden bg-white">
-      {/* Globe Background - Parte inferior, bem maior, mostrando apenas o topo */}
-      <div className="absolute bottom-0 left-1/2 -translate-x-1/2 translate-y-[90%] opacity-25 z-0">
-        <div className="w-[3000px] h-[3000px]">
+      {/* Globe Background - Menor e um pouco mais acima */}
+      <div className="absolute bottom-0 left-1/2 -translate-x-1/2 translate-y-[65%] opacity-15 z-0">
+        <div className="w-[800px] h-[800px]">
           <Globe />
         </div>
       </div>
