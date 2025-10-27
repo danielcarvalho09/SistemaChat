@@ -83,9 +83,13 @@ export function useWebSocket() {
       // TODO: Implementar updateMessage no store se necessário
     });
 
-    // Cleanup ao desmontar
+    // Cleanup ao desmontar - apenas remover listeners, NÃO desconectar
     return () => {
-      socketService.disconnect();
+      socketService.off('new_message');
+      socketService.off('new_conversation');
+      socketService.off('conversation_update');
+      socketService.off('conversation_assigned');
+      socketService.off('message_status_update');
     };
   }, [addMessage, addConversation, updateConversation, fetchConversations]);
 }
