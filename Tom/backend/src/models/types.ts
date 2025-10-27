@@ -185,6 +185,7 @@ export interface DepartmentResponse {
   color: string;
   icon: string;
   isActive: boolean;
+  isPrimary?: boolean;
   conversationCount?: number;
   _count?: {
     users: number;
@@ -198,6 +199,7 @@ export interface CreateDepartmentRequest {
   description?: string;
   color?: string;
   icon?: string;
+  isPrimary?: boolean;
 }
 
 export interface UpdateDepartmentRequest {
@@ -205,6 +207,7 @@ export interface UpdateDepartmentRequest {
   description?: string;
   color?: string;
   icon?: string;
+  isPrimary?: boolean;
   isActive?: boolean;
 }
 

@@ -106,6 +106,7 @@ export class DepartmentService {
       color: department.color,
       icon: department.icon,
       isActive: department.isActive,
+      isPrimary: department.isPrimary || false,
       conversationCount: department._count.conversations,
       _count: {
         users: department._count.userAccess,
@@ -122,13 +123,61 @@ export class DepartmentService {
    * Cria novo departamento
    */
   async createDepartment(data: CreateDepartmentRequest): Promise<DepartmentResponse> {
-    // Verificar se nome já existe
-    const existing = await this.prisma.department.findUnique({
-      where: { name: data.name },
+    // Verificar se nome já existe (apenas entre ativos)
+    const existing = await this.prisma.department.findFirst({
+      where: { 
+        name: data.name,
+        isActive: true,
+      },
     });
 
     if (existing) {
       throw new ConflictError('Department with this name already exists');
+    }
+
+    // Se existe um departamento inativo com o mesmo nome, reativá-lo
+    const inactive = await this.prisma.department.findFirst({
+      where: {
+        name: data.name,
+        isActive: false,
+      },
+    });
+
+    if (inactive) {
+      logger.info(`Reactivating existing department: ${inactive.name}`);
+      
+      const reactivated = await this.prisma.department.update({
+        where: { id: inactive.id },
+        data: {
+          isActive: true,
+          description: data.description || inactive.description,
+          color: data.color || inactive.color,
+          icon: data.icon || inactive.icon,
+        },
+        include: {
+          _count: {
+            select: { conversations: true, userAccess: true },
+          },
+        },
+      });
+
+      // Invalidar cache de lista
+      await cacheDelPattern('departments:*');
+
+      return {
+        id: reactivated.id,
+        name: reactivated.name,
+        description: reactivated.description,
+        color: reactivated.color,
+        icon: reactivated.icon,
+        isActive: reactivated.isActive,
+        conversationCount: reactivated._count.conversations,
+        _count: {
+          users: reactivated._count.userAccess,
+        },
+        createdAt: reactivated.createdAt,
+        updatedAt: reactivated.updatedAt,
+      };
     }
 
     const department = await this.prisma.department.create({
@@ -157,6 +206,7 @@ export class DepartmentService {
       color: department.color,
       icon: department.icon,
       isActive: department.isActive,
+      isPrimary: department.isPrimary || false,
       conversationCount: department._count.conversations,
       createdAt: department.createdAt,
       updatedAt: department.updatedAt,
@@ -179,10 +229,14 @@ export class DepartmentService {
       throw new NotFoundError('Department not found');
     }
 
-    // Se está alterando o nome, verificar se novo nome já existe
+    // Se está alterando o nome, verificar se novo nome já existe (apenas entre ativos)
     if (data.name && data.name !== existing.name) {
-      const nameExists = await this.prisma.department.findUnique({
-        where: { name: data.name },
+      const nameExists = await this.prisma.department.findFirst({
+        where: { 
+          name: data.name,
+          isActive: true,
+          id: { not: departmentId }, // Excluir o próprio departamento
+        },
       });
 
       if (nameExists) {
@@ -213,6 +267,7 @@ export class DepartmentService {
       color: department.color,
       icon: department.icon,
       isActive: department.isActive,
+      isPrimary: department.isPrimary || false,
       conversationCount: department._count.conversations,
       createdAt: department.createdAt,
       updatedAt: department.updatedAt,

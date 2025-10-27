@@ -8,12 +8,12 @@ export async function conversationRoutes(fastify: FastifyInstance) {
   // Todas as rotas requerem autenticação
   fastify.addHook('preHandler', authenticate);
 
-  // Listar conversas
+  // Listar conversas (cache implementado no controller)
   fastify.get('/', {
     handler: conversationController.listConversations,
   });
 
-  // Buscar conversa por ID
+  // Buscar conversa por ID (cache implementado no controller)
   fastify.get('/:conversationId', {
     handler: conversationController.getConversationById,
   });
@@ -47,7 +47,7 @@ export async function conversationRoutes(fastify: FastifyInstance) {
     handler: conversationController.markAsRead,
   });
 
-  // Listar mensagens
+  // Listar mensagens (cache implementado no controller)
   fastify.get('/:conversationId/messages', {
     handler: conversationController.listMessages,
   });

@@ -6,6 +6,7 @@ import multipart from '@fastify/multipart';
 import fastifyStatic from '@fastify/static';
 import swagger from '@fastify/swagger';
 import swaggerUi from '@fastify/swagger-ui';
+import compress from '@fastify/compress';
 import path from 'path';
 import { config } from './config/env';
 import { logger } from './config/logger';
@@ -18,6 +19,13 @@ export async function buildApp(): Promise<FastifyInstance> {
     trustProxy: true,
     requestIdHeader: 'x-request-id',
     requestIdLogLabel: 'requestId',
+  });
+
+  // Compressão GZIP para respostas (70-90% menos dados)
+  await app.register(compress, {
+    global: true,
+    threshold: 1024, // Comprimir respostas > 1KB
+    encodings: ['gzip', 'deflate'],
   });
 
   // Registrar plugins de segurança

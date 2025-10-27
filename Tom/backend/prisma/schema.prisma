@@ -158,6 +158,7 @@ model Department {
   color       String   @default("#3B82F6") // Hex color
   icon        String   @default("folder")
   isActive    Boolean  @default(true)
+  isPrimary   Boolean  @default(false) // Setor principal/exclusivo - usuários só podem estar neste setor
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
