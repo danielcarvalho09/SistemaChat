@@ -33,8 +33,19 @@ export function Dashboard() {
               onToggleDetails={() => setShowContactDetails(!showContactDetails)}
             />
           ) : (
-            <div className="flex-1 flex items-center justify-center bg-white relative">
+            <div className="flex-1 flex flex-col items-center justify-center bg-white relative">
               <BackgroundPaths />
+              <div className="z-10 text-center space-y-6">
+                <h1 className="text-6xl font-bold text-gray-800 tracking-tight">
+                  AutoChat
+                </h1>
+                <p className="text-lg text-gray-500 font-medium">
+                  Powered by Daniel
+                </p>
+                <p className="text-sm text-gray-400 max-w-md">
+                  Selecione uma conversa para começar o atendimento
+                </p>
+              </div>
             </div>
           )}
         </div>
