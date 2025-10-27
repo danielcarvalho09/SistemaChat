@@ -3,6 +3,7 @@ import { UserResponse, PaginatedResponse, PaginationParams } from '../models/typ
 import { NotFoundError, ConflictError } from '../middlewares/error.middleware.js';
 import { logger } from '../config/logger.js';
 import { cacheGet, cacheSet, cacheDel } from '../config/redis.js';
+import bcrypt from 'bcrypt';
 
 export class UserService {
   private prisma = getPrismaClient();
@@ -84,8 +85,6 @@ export class UserService {
     role?: 'admin' | 'user';
   }): Promise<UserResponse> {
     try {
-      const bcrypt = require('bcrypt');
-      
       logger.info(`Creating user: ${data.email} with role ${data.role || 'user'}`);
       
       // Verificar se email já existe

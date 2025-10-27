@@ -81,14 +81,16 @@ export class UserController {
       if (error.message?.includes('Role') && error.message?.includes('not found')) {
         return reply.status(500).send({
           success: false,
-          message: 'System roles not configured. Please run database seed.',
+          message: 'System roles not configured. Please contact administrator.',
+          details: 'The required roles (admin/user) are not set up in the database.',
+          action: 'Administrator should run: node create-roles-only.js',
         });
       }
 
       return reply.status(500).send({
         success: false,
-        message: 'Internal server error',
-        error: process.env.NODE_ENV === 'development' ? error.message : undefined,
+        message: 'Failed to create user',
+        error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error',
       });
     }
   };

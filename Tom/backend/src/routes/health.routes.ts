@@ -113,4 +113,42 @@ export async function healthRoutes(fastify: FastifyInstance) {
       uptime: process.uptime(),
     });
   });
+
+  /**
+   * GET /health/roles - Verifica se as roles estão configuradas
+   */
+  fastify.get('/health/roles', async (request, reply) => {
+    try {
+      const prisma = getPrismaClient();
+      const roles = await prisma.role.findMany({
+        select: {
+          id: true,
+          name: true,
+          description: true,
+        },
+      });
+
+      const hasAdmin = roles.some(r => r.name === 'admin');
+      const hasUser = roles.some(r => r.name === 'user');
+      const isConfigured = hasAdmin && hasUser;
+
+      return reply.send({
+        status: isConfigured ? 'configured' : 'missing_roles',
+        timestamp: new Date().toISOString(),
+        roles: roles,
+        hasAdmin,
+        hasUser,
+        message: isConfigured 
+          ? 'Roles configured correctly' 
+          : 'Missing required roles. Run: node create-roles-only.js',
+      });
+    } catch (error) {
+      logger.error('Roles check failed:', error);
+      return reply.status(500).send({
+        status: 'error',
+        timestamp: new Date().toISOString(),
+        error: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
+  });
 }
