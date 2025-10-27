@@ -9,10 +9,13 @@ const app = express();
 const PORT = process.env.PORT || 8080;
 
 // Serve static files from dist folder
-app.use(express.static(path.join(__dirname, 'dist')));
+app.use(express.static(path.join(__dirname, 'dist'), {
+  maxAge: '1d',
+  etag: true,
+}));
 
 // Handle React Router - send all requests to index.html
-app.get('*', (req, res) => {
+app.use((req, res) => {
   res.sendFile(path.join(__dirname, 'dist', 'index.html'));
 });
 
