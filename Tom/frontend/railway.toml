@@ -1,6 +1,6 @@
 [build]
 builder = "NIXPACKS"
-buildCommand = "npm install && chmod +x inject-env.sh && ./inject-env.sh"
+buildCommand = "npm install && npm run build"
 
 [deploy]
 startCommand = "npm start"
