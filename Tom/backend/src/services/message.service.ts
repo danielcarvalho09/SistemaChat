@@ -211,7 +211,7 @@ export class MessageService {
       },
     });
 
-    logger.info(`Message sent in conversation ${conversationId} by user ${userId}`);
+    logger.info(`[MessageService] ✅ Message processed for conversation ${conversation.id}`);
 
     // Emitir evento via Socket.IO para notificar frontend em tempo real
     try {
@@ -219,9 +219,9 @@ export class MessageService {
       const formattedMessage = this.formatMessageResponse(message);
       
       socketServer.emitNewMessage(conversationId, formattedMessage);
-      logger.info(`New message event emitted for sent message in conversation ${conversationId}`);
+      logger.info(`[MessageService] 📡 New message event emitted for conversation ${conversationId}`);
     } catch (socketError) {
-      logger.error('Error emitting socket event for sent message:', socketError);
+      logger.error('[MessageService] ❌ Error emitting socket event:', socketError);
     }
 
     return this.formatMessageResponse(message);
@@ -250,9 +250,26 @@ export class MessageService {
     messageType: string = 'text',
     mediaUrl: string | null = null,
     isFromMe: boolean = false,
-    externalId?: string
+    externalId?: string,
+    pushName?: string | null
   ): Promise<void> {
     try {
+      // 🔒 DEDUPLICAÇÃO: Verificar se mensagem já foi processada
+      if (externalId) {
+        const existingMessage = await this.prisma.message.findFirst({
+          where: {
+            externalId,
+            connectionId,
+          },
+        });
+
+        if (existingMessage) {
+          logger.info(`[MessageService] ⏭️ Message ${externalId} already exists, skipping duplicate`);
+          return; // Não processar duplicata
+        }
+      } else {
+        logger.warn(`[MessageService] ⚠️ Message without externalId received from ${from} - cannot deduplicate`);
+      }
       // Verificar se é um grupo
       const isGroup = from.endsWith('@g.us');
       
@@ -286,30 +303,55 @@ export class MessageService {
           data: {
             phoneNumber,
             name: contactName,
+            pushName: pushName || null, // Salvar pushName do WhatsApp
           },
         });
-        logger.info(`New contact created: ${phoneNumber} (${contactName})`);
+        logger.info(`New contact created: ${phoneNumber} (${contactName}) - pushName: ${pushName || 'N/A'}`);
+      } else if (pushName && contact.pushName !== pushName) {
+        // Atualizar pushName se mudou
+        await this.prisma.contact.update({
+          where: { id: contact.id },
+          data: { pushName },
+        });
+        logger.info(`[MessageService] 📝 Updated pushName for ${phoneNumber}: ${pushName}`);
+        contact.pushName = pushName; // Atualizar objeto em memória
       }
 
-      // Buscar conversa existente para este contato e conexão
-      // IMPORTANTE: Uma mensagem só deve criar UMA conversa por contato+conexão
+      // 🔍 Buscar conversa existente para este contato e conexão
+      // PRIORIDADE 1: Buscar por (contato + conexão + status ativo)
       let conversation = await this.prisma.conversation.findFirst({
         where: {
           contactId: contact.id,
           connectionId,
           status: { in: ['waiting', 'in_progress', 'transferred'] },
         },
+        orderBy: { lastMessageAt: 'desc' },
       });
 
-      // Se não encontrar por (contato + conexão), tentar por contato independentemente da conexão
+      // PRIORIDADE 2: Se não encontrar, buscar conversa fechada recente (últimas 24h)
+      // Isso permite reabrir conversas fechadas recentemente
       if (!conversation) {
+        const yesterday = new Date();
+        yesterday.setDate(yesterday.getDate() - 1);
+
         conversation = await this.prisma.conversation.findFirst({
           where: {
             contactId: contact.id,
-            status: { in: ['waiting', 'in_progress', 'transferred'] },
+            connectionId,
+            status: 'closed',
+            lastMessageAt: { gte: yesterday },
           },
           orderBy: { lastMessageAt: 'desc' },
         });
+
+        // Se encontrou conversa fechada, reabrir
+        if (conversation) {
+          logger.info(`[MessageService] 🔄 Reopening closed conversation ${conversation.id}`);
+          await this.prisma.conversation.update({
+            where: { id: conversation.id },
+            data: { status: 'waiting' },
+          });
+        }
       }
 
       // Flag para saber se é conversa nova
@@ -377,28 +419,22 @@ export class MessageService {
       }
 
       // Salvar mensagem
-      const savedMessage = await this.prisma.message.create({
+      // 💾 Salvar mensagem com proteção contra duplicatas
+      const message = await this.prisma.message.create({
         data: {
           conversationId: conversation.id,
           connectionId,
           content: messageText,
           messageType,
-          mediaUrl,
+          isFromContact: !isFromMe, // true se veio do contato, false se foi enviado pelo sistema
           status: 'delivered',
-          isFromContact: !isFromMe, // Se é do usuário, não é do contato
+          mediaUrl,
+          externalId: externalId || `generated-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
           timestamp: new Date(),
-          externalId: externalId || undefined,
-        },
-        include: {
-          sender: {
-            include: {
-              roles: {
-                include: { role: true },
-              },
-            },
-          },
         },
       });
+      
+      logger.info(`[MessageService] 💾 Message saved: ${message.id} (external: ${message.externalId})`);
 
       // Atualizar conversa
       await this.prisma.conversation.update({
@@ -410,16 +446,16 @@ export class MessageService {
         },
       });
 
-      logger.info(`Message processed for conversation ${conversation.id}`);
+      logger.info(`[MessageService] ✅ Message processed for conversation ${conversation.id}`);
 
       // Emitir evento via Socket.IO para notificar frontend
       try {
         const socketServer = getSocketServer();
-        const formattedMessage = this.formatMessageResponse(savedMessage);
+        const formattedMessage = this.formatMessageResponse(message);
         
         // Emitir nova mensagem formatada
         socketServer.emitNewMessage(conversation.id, formattedMessage);
-        logger.info(`New message event emitted for conversation ${conversation.id}`);
+        logger.info(`[MessageService] 📡 New message event emitted for conversation ${conversation.id}`);
         
         // Só emitir new_conversation se for realmente uma conversa nova
         if (isNewConversation) {
@@ -437,7 +473,7 @@ export class MessageService {
           if (fullConversation) {
             // Emitir nova conversa para todos os usuários
             socketServer.getIO().emit('new_conversation', fullConversation);
-            logger.info(`New conversation event emitted: ${conversation.id}`);
+            logger.info(`[MessageService] 🆕 New conversation event emitted: ${conversation.id}`);
           }
         } else {
           logger.info(`Existing conversation, skipping new_conversation event`);
@@ -447,7 +483,15 @@ export class MessageService {
         // Não falhar se socket não estiver disponível
       }
     } catch (error) {
-      logger.error('Error processing incoming message:', error);
+      logger.error(`[MessageService] ❌ Error processing incoming message from ${from}:`, error);
+      logger.error(`[MessageService] 📊 Error details:`, {
+        connectionId,
+        from,
+        messageType,
+        externalId,
+        isFromMe,
+        error: error instanceof Error ? error.message : String(error),
+      });
       throw error;
     }
   }

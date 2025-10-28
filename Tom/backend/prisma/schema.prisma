@@ -194,6 +194,7 @@ model Contact {
   id           String   @id @default(uuid())
   phoneNumber  String   @unique
   name         String?
+  pushName     String? // Nome do perfil do WhatsApp (push.name)
   avatar       String?
   email        String?
   tags         String[] // Tags personalizadas

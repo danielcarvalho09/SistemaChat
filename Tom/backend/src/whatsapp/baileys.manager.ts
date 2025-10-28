@@ -352,6 +352,15 @@ class BaileysManager {
         client.lastMessageReceived = new Date();
       }
 
+      // 📊 Estatísticas de sincronização
+      const syncStats = {
+        total: messages?.length || 0,
+        processed: 0,
+        skipped: 0,
+        errors: 0,
+        type,
+      };
+
       if (type !== 'notify' && type !== 'append') {
         logger.info(`[Baileys] ⏭️ Skipping message type: ${type}`);
         return;
@@ -361,26 +370,30 @@ class BaileysManager {
         const from = msg.key.remoteJid;
         const isFromMe = msg.key.fromMe || false;
         const externalId = msg.key.id;
+        const pushName = msg.pushName || null; // Capturar pushName do contato
 
-        logger.info(`[Baileys] 📱 Processing message from ${from}, isFromMe: ${isFromMe}`);
+        logger.info(`[Baileys] 📱 Processing message from ${from}, isFromMe: ${isFromMe}, pushName: ${pushName}`);
 
         // ===== FILTROS =====
         
         // 1. Filtrar STATUS do WhatsApp (status@broadcast)
         if (from === 'status@broadcast') {
-          logger.info(`[Baileys] ⏭️ Skipping WhatsApp Status message`);
+          logger.debug(`[Baileys] ⏭️ Skipping WhatsApp Status message`);
+          syncStats.skipped++;
           continue;
         }
 
         // 2. Filtrar CANAIS DE TRANSMISSÃO (newsletter)
         if (from?.includes('@newsletter')) {
-          logger.info(`[Baileys] ⏭️ Skipping WhatsApp Channel/Newsletter message`);
+          logger.debug(`[Baileys] ⏭️ Skipping WhatsApp Channel/Newsletter message`);
+          syncStats.skipped++;
           continue;
         }
 
         // 3. Filtrar LISTAS DE TRANSMISSÃO (broadcast)
         if (from?.includes('@broadcast')) {
-          logger.info(`[Baileys] ⏭️ Skipping Broadcast List message`);
+          logger.debug(`[Baileys] ⏭️ Skipping Broadcast List message`);
+          syncStats.skipped++;
           continue;
         }
 
@@ -417,6 +430,7 @@ class BaileysManager {
 
         if (!messageText) {
           logger.warn(`[Baileys] ⚠️ Empty message text, skipping. Message object:`, JSON.stringify(msg.message));
+          syncStats.skipped++;
           continue;
         }
 
@@ -433,13 +447,19 @@ class BaileysManager {
             messageType,
             null,
             isFromMe,
-            externalId
+            externalId,
+            pushName // Passar pushName para o service
           );
           logger.info(`[Baileys] 💾 Message saved successfully`);
+          syncStats.processed++;
         } catch (error) {
           logger.error(`[Baileys] ❌ Error processing message:`, error);
+          syncStats.errors++;
         }
       }
+
+      // 📊 Log de estatísticas de sincronização
+      logger.info(`[Baileys] 📊 Sync stats for ${connectionId}: Total=${syncStats.total}, Processed=${syncStats.processed}, Skipped=${syncStats.skipped}, Errors=${syncStats.errors}`);
     } catch (error) {
       logger.error(`[Baileys] Error handling messages for ${connectionId}:`, error);
     }
