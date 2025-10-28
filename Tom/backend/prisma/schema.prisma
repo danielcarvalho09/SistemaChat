@@ -118,6 +118,30 @@ model RefreshToken {
   @@map("refresh_tokens")
 }
 
+// ==================== ASSISTENTES DE IA ====================
+
+model AIAssistant {
+  id                String   @id @default(uuid())
+  name              String   @unique // Nome do assistente
+  apiKey            String // API Key da OpenAI (criptografada)
+  model             String   @default("gpt-4") // gpt-4, gpt-4-turbo, gpt-3.5-turbo, etc
+  instructions      String   @db.Text // Instruções de sistema para a IA
+  temperature       Float    @default(0.7) // Criatividade (0-2)
+  maxTokens         Int      @default(500) // Máximo de tokens por resposta
+  memoryContext     Int      @default(20) // Quantas mensagens manter em memória
+  memoryCacheDays   Int      @default(1) // Quantos dias manter cache no Redis
+  isActive          Boolean  @default(true)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  // Relações
+  connections WhatsAppConnection[]
+
+  @@index([isActive])
+  @@index([name])
+  @@map("ai_assistants")
+}
+
 // ==================== CONEXÕES WHATSAPP ====================
 
 model WhatsAppConnection {
@@ -133,11 +157,14 @@ model WhatsAppConnection {
   isActive      Boolean  @default(true)
   isMatriz      Boolean  @default(false) // Conexão matriz vê todas as conversas
   userId        String?  // Conexão agora pertence a um usuário específico
+  aiEnabled     Boolean  @default(false) // Se IA está ativada para esta conexão
+  aiAssistantId String?  // ID do assistente de IA associado
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
   // Relações
   user          User?              @relation(fields: [userId], references: [id], onDelete: SetNull)
+  aiAssistant   AIAssistant?       @relation(fields: [aiAssistantId], references: [id], onDelete: SetNull)
   conversations Conversation[]
   messages      Message[]
 
@@ -146,6 +173,8 @@ model WhatsAppConnection {
   @@index([isActive])
   @@index([isMatriz])
   @@index([userId])
+  @@index([aiEnabled])
+  @@index([aiAssistantId])
   @@map("whatsapp_connections")
 }
 

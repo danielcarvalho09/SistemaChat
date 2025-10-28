@@ -448,6 +448,49 @@ export class MessageService {
 
       logger.info(`[MessageService] ✅ Message processed for conversation ${conversation.id}`);
 
+      // 🤖 Verificar se deve responder com IA automaticamente
+      // IMPORTANTE: IA só responde conversas em atendimento (in_progress)
+      if (!isFromMe && conversation.status === 'in_progress') {
+        const connectionWithAI = await this.prisma.whatsAppConnection.findUnique({
+          where: { id: connectionId },
+          select: { aiEnabled: true, aiAssistantId: true },
+        });
+
+        if (connectionWithAI?.aiEnabled && connectionWithAI?.aiAssistantId) {
+          try {
+            logger.info(`[MessageService] 🤖 AI is enabled for connection ${connectionId} and conversation is in_progress, generating response...`);
+            
+            const { AIService } = await import('./ai.service.js');
+            const aiService = new AIService();
+            
+            const aiResponse = await aiService.generateResponse(
+              conversation.id,
+              messageText,
+              connectionWithAI.aiAssistantId
+            );
+            
+            // Enviar resposta da IA automaticamente
+            const { MessageType } = await import('../models/types.js');
+            await this.sendMessage(
+              {
+                conversationId: conversation.id,
+                content: aiResponse,
+                messageType: MessageType.TEXT,
+              },
+              'system', // Usuário "system" para identificar mensagens da IA
+              [] // Sem roles específicas
+            );
+            
+            logger.info(`[MessageService] 🤖 AI response sent successfully`);
+          } catch (aiError) {
+            logger.error(`[MessageService] ❌ Error generating AI response:`, aiError);
+            // Não falhar o processamento da mensagem se a IA falhar
+          }
+        }
+      } else if (!isFromMe && conversation.status !== 'in_progress') {
+        logger.debug(`[MessageService] ⏭️ Skipping AI response - conversation status is '${conversation.status}' (only responds to 'in_progress')`);
+      }
+
       // Emitir evento via Socket.IO para notificar frontend
       try {
         const socketServer = getSocketServer();

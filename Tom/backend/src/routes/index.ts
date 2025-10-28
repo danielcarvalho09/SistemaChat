@@ -12,6 +12,7 @@ import { broadcastRoutes } from './broadcast.routes.js';
 import { contactListRoutes } from './contact-list.routes.js';
 import { kanbanRoutes } from './kanban.routes.js';
 import { healthRoutes } from './health.routes.js';
+import { aiRoutes } from './ai.routes.js';
 import { config } from '../config/env.js';
 
 export async function registerRoutes(fastify: FastifyInstance) {
@@ -33,4 +34,5 @@ export async function registerRoutes(fastify: FastifyInstance) {
   await fastify.register(broadcastRoutes, { prefix: `${apiPrefix}/broadcast` });
   await fastify.register(contactListRoutes, { prefix: `${apiPrefix}/contact-lists` });
   await fastify.register(kanbanRoutes, { prefix: `${apiPrefix}/kanban` });
+  await fastify.register(aiRoutes, { prefix: `${apiPrefix}/ai` });
 }

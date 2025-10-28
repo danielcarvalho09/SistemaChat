@@ -64,6 +64,7 @@
     "joi": "^17.13.3",
     "jsonwebtoken": "^9.0.2",
     "multer": "^2.0.2",
+    "openai": "^6.7.0",
     "pino": "^10.1.0",
     "qrcode": "^1.5.4",
     "socket.io": "^4.8.1",
