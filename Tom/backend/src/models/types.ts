@@ -116,6 +116,7 @@ export interface ContactResponse {
   id: string;
   phoneNumber: string;
   name: string | null;
+  pushName?: string | null;
   avatar: string | null;
   email: string | null;
   tags: string[];

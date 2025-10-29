@@ -452,6 +452,7 @@ export class ConversationService {
         id: conversation.contact.id,
         phoneNumber: conversation.contact.phoneNumber,
         name: conversation.contact.name,
+        pushName: conversation.contact.pushName,
         avatar: conversation.contact.avatar,
         email: conversation.contact.email,
         tags: conversation.contact.tags,
