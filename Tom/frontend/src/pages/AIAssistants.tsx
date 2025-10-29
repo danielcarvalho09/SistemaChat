@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Plus, Edit, Trash2, Brain, Eye, EyeOff, Loader2 } from 'lucide-react';
 import api from '../lib/axios';
-import { toast } from 'react-hot-toast';
+import { toast } from 'sonner';
 
 interface AIAssistant {
   id: string;
