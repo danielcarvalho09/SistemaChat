@@ -8,6 +8,7 @@ import { TagManager } from '../components/tags/TagManager';
 import { Broadcast } from '../pages/admin/Broadcast';
 import { ContactLists } from '../pages/admin/ContactLists';
 import { BroadcastSettings } from '../pages/admin/BroadcastSettings';
+import { AIAssistants } from '../pages/AIAssistants';
 
 export function AdminRoutes() {
   return (
@@ -21,6 +22,7 @@ export function AdminRoutes() {
         <Route path="broadcast" element={<Broadcast />} />
         <Route path="contact-lists" element={<ContactLists />} />
         <Route path="broadcast-settings" element={<BroadcastSettings />} />
+        <Route path="ai-assistants" element={<AIAssistants />} />
         <Route path="*" element={<Navigate to="/admin" replace />} />
       </Route>
     </Routes>
