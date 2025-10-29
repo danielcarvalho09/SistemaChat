@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Plus, Edit, Trash2, Brain, Eye, EyeOff, Loader2 } from 'lucide-react';
+import { Plus, Edit, Trash2, Bot, Eye, EyeOff, Loader2 } from 'lucide-react';
 import api from '../lib/axios';
 import { toast } from 'sonner';
 
@@ -132,7 +132,7 @@ export function AIAssistants() {
     <div className="p-6">
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-3">
-          <Brain className="w-8 h-8 text-purple-500" />
+          <Bot className="w-8 h-8 text-blue-500" />
           <div>
             <h1 className="text-2xl font-bold text-gray-900">Assistentes de IA</h1>
             <p className="text-sm text-gray-500">Gerenciar inteligências artificiais</p>
@@ -141,7 +141,7 @@ export function AIAssistants() {
         {!showForm && (
           <button
             onClick={() => setShowForm(true)}
-            className="flex items-center gap-2 px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 transition-colors"
+            className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
           >
             <Plus className="w-5 h-5" />
             Novo Assistente
@@ -150,7 +150,7 @@ export function AIAssistants() {
       </div>
 
       {showForm ? (
-        <div className="bg-white rounded-lg shadow-sm p-6 mb-6">
+        <div className="bg-white rounded-lg shadow-sm p-6 mb-6 max-h-[calc(100vh-200px)] overflow-y-auto">
           <h2 className="text-lg font-semibold mb-4">
             {editingId ? 'Editar Assistente' : 'Novo Assistente'}
           </h2>
@@ -164,7 +164,7 @@ export function AIAssistants() {
                 type="text"
                 value={formData.name}
                 onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 placeholder="Ex: Atendente Virtual Loja"
                 required
               />
@@ -179,7 +179,7 @@ export function AIAssistants() {
                   type={showApiKey ? 'text' : 'password'}
                   value={formData.apiKey}
                   onChange={(e) => setFormData({ ...formData, apiKey: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent pr-10"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent pr-10"
                   placeholder="sk-proj-..."
                   required={!editingId}
                 />
@@ -205,7 +205,7 @@ export function AIAssistants() {
               <select
                 value={formData.model}
                 onChange={(e) => setFormData({ ...formData, model: e.target.value })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               >
                 {AI_MODELS.map((model) => (
                   <option key={model.value} value={model.value}>
@@ -223,7 +223,7 @@ export function AIAssistants() {
                 value={formData.instructions}
                 onChange={(e) => setFormData({ ...formData, instructions: e.target.value })}
                 rows={6}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent resize-none"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
                 placeholder="Ex: Você é um atendente virtual de uma loja online. Seja educado, prestativo e sempre termine oferecendo ajuda adicional."
                 required
               />
@@ -244,7 +244,7 @@ export function AIAssistants() {
                   max="2"
                   value={formData.temperature}
                   onChange={(e) => setFormData({ ...formData, temperature: parseFloat(e.target.value) })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 />
                 <p className="text-xs text-gray-500 mt-1">0 = Preciso, 2 = Criativo</p>
               </div>
@@ -259,7 +259,7 @@ export function AIAssistants() {
                   max="4000"
                   value={formData.maxTokens}
                   onChange={(e) => setFormData({ ...formData, maxTokens: parseInt(e.target.value) })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 />
                 <p className="text-xs text-gray-500 mt-1">Tamanho da resposta</p>
               </div>
@@ -276,7 +276,7 @@ export function AIAssistants() {
                   max="50"
                   value={formData.memoryContext}
                   onChange={(e) => setFormData({ ...formData, memoryContext: parseInt(e.target.value) })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 />
                 <p className="text-xs text-gray-500 mt-1">Mensagens lembradas (20 recomendado)</p>
               </div>
@@ -291,7 +291,7 @@ export function AIAssistants() {
                   max="7"
                   value={formData.memoryCacheDays}
                   onChange={(e) => setFormData({ ...formData, memoryCacheDays: parseInt(e.target.value) })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 />
                 <p className="text-xs text-gray-500 mt-1">Duração no Redis</p>
               </div>
@@ -300,7 +300,7 @@ export function AIAssistants() {
             <div className="flex gap-3 pt-4">
               <button
                 type="submit"
-                className="flex-1 px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 transition-colors"
+                className="flex-1 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
               >
                 {editingId ? 'Atualizar' : 'Criar'} Assistente
               </button>
@@ -320,12 +320,12 @@ export function AIAssistants() {
         {assistants.map((assistant) => (
           <div
             key={assistant.id}
-            className="bg-white rounded-lg shadow-sm p-6 border-2 border-gray-100 hover:border-purple-200 transition-all"
+            className="bg-white rounded-lg shadow-sm p-6 border-2 border-gray-100 hover:border-blue-200 transition-all"
           >
             <div className="flex items-start justify-between mb-4">
               <div className="flex items-center gap-3">
-                <div className="p-2 bg-purple-100 rounded-lg">
-                  <Brain className="w-6 h-6 text-purple-500" />
+                <div className="p-2 bg-blue-100 rounded-lg">
+                  <Bot className="w-6 h-6 text-blue-500" />
                 </div>
                 <div>
                   <h3 className="font-semibold text-gray-900">{assistant.name}</h3>
@@ -375,7 +375,7 @@ export function AIAssistants() {
 
       {assistants.length === 0 && !showForm && (
         <div className="text-center py-12">
-          <Brain className="w-16 h-16 text-gray-300 mx-auto mb-4" />
+          <Bot className="w-16 h-16 text-gray-300 mx-auto mb-4" />
           <h3 className="text-lg font-medium text-gray-900 mb-2">
             Nenhum assistente criado
           </h3>
@@ -384,7 +384,7 @@ export function AIAssistants() {
           </p>
           <button
             onClick={() => setShowForm(true)}
-            className="inline-flex items-center gap-2 px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 transition-colors"
+            className="inline-flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
           >
             <Plus className="w-5 h-5" />
             Criar Primeiro Assistente

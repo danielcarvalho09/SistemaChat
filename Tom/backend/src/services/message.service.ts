@@ -449,16 +449,19 @@ export class MessageService {
       logger.info(`[MessageService] ✅ Message processed for conversation ${conversation.id}`);
 
       // 🤖 Verificar se deve responder com IA automaticamente
-      // IMPORTANTE: IA só responde conversas em atendimento (in_progress)
+      // IMPORTANTE: IA só responde conversas em atendimento (in_progress) DA SUA PRÓPRIA CONEXÃO
       if (!isFromMe && conversation.status === 'in_progress') {
         const connectionWithAI = await this.prisma.whatsAppConnection.findUnique({
           where: { id: connectionId },
           select: { aiEnabled: true, aiAssistantId: true },
         });
 
-        if (connectionWithAI?.aiEnabled && connectionWithAI?.aiAssistantId) {
+        // Verificar se a conversa pertence à mesma conexão que tem IA habilitada
+        const conversationBelongsToConnection = conversation.connectionId === connectionId;
+
+        if (connectionWithAI?.aiEnabled && connectionWithAI?.aiAssistantId && conversationBelongsToConnection) {
           try {
-            logger.info(`[MessageService] 🤖 AI is enabled for connection ${connectionId} and conversation is in_progress, generating response...`);
+            logger.info(`[MessageService] 🤖 AI is enabled for connection ${connectionId}, conversation is in_progress and belongs to this connection, generating response...`);
             
             const { AIService } = await import('./ai.service.js');
             const aiService = new AIService();

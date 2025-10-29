@@ -371,8 +371,10 @@ export class ConversationService {
       throw new NotFoundError('Conversation not found');
     }
 
-    if (conversation.assignedUserId !== userId) {
-      throw new ForbiddenError('You can only update conversations assigned to you');
+    // Permitir fechar/recusar conversas em waiting (sem atribuição)
+    // Ou conversas atribuídas ao usuário
+    if (conversation.assignedUserId !== userId && conversation.status !== 'waiting') {
+      throw new ForbiddenError('You can only update conversations assigned to you or in waiting status');
     }
 
     const updateData: any = { status };
