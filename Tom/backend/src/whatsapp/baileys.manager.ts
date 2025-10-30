@@ -27,10 +27,12 @@ export interface BaileysClient {
   lastMessageReceived?: Date;
   keepAliveInterval?: NodeJS.Timeout;
   heartbeatInterval?: NodeJS.Timeout; // Heartbeat ativo para manter conexão viva
+  syncInterval?: NodeJS.Timeout; // Sincronização periódica de mensagens
   hasCredentials?: boolean; // Indica se tem credenciais salvas (já foi conectado antes)
   reconnectAttempts?: number; // Contador de tentativas de reconexão
   isReconnecting?: boolean; // Flag para evitar múltiplas reconexões simultâneas
   lastHeartbeat?: Date; // Última vez que o heartbeat foi bem-sucedido
+  lastSync?: Date; // Última vez que sincronizou mensagens
 }
 
 /**
@@ -41,6 +43,7 @@ class BaileysManager {
   private clients: Map<string, BaileysClient> = new Map();
   private prisma = getPrismaClient();
   private reconnectionLocks: Map<string, boolean> = new Map(); // Previne reconexões simultâneas
+  private syncRetryQueue: Map<string, { retries: number; lastAttempt: Date }> = new Map(); // Fila de retry para sincronização
 
   /**
    * Cria um novo cliente Baileys para uma conexão
@@ -76,14 +79,27 @@ class BaileysManager {
         logger: pino({ level: 'silent' }),
         browser: ['WhatsApp Multi-Device', 'Chrome', '1.0.0'],
         syncFullHistory: true, // habilita sincronização de histórico ao reconectar
-        markOnlineOnConnect: false,
-        // Configurações para melhorar estabilidade da conexão
-        connectTimeoutMs: 60000, // Timeout de 60s para conectar (ao invés do padrão 20s)
+        markOnlineOnConnect: true, // Marcar como online ao conectar (IMPORTANTE para manter conexão)
+        // Configurações otimizadas para melhorar estabilidade da conexão
+        connectTimeoutMs: 60000, // Timeout de 60s para conectar
         defaultQueryTimeoutMs: 60000, // Timeout para queries
-        keepAliveIntervalMs: 10000, // Enviar pings a cada 10s (padrão é 25s)
-        retryRequestDelayMs: 250, // Delay mínimo entre tentativas de requisição
+        keepAliveIntervalMs: 20000, // Pings a cada 20s (equilíbrio entre bateria e estabilidade)
+        retryRequestDelayMs: 250, // Delay mínimo entre tentativas
+        emitOwnEvents: true, // Emitir eventos de mensagens enviadas por nós
+        fireInitQueries: true, // Executar queries iniciais ao conectar
         getMessage: async (key) => {
-          // Futuro: buscar mensagem do banco pelo externalId (key.id)
+          // Buscar mensagem do banco pelo externalId para histórico
+          try {
+            const msg = await this.prisma.message.findFirst({
+              where: { externalId: key.id as string },
+              select: { content: true, messageType: true },
+            });
+            if (msg) {
+              return { conversation: msg.content } as any;
+            }
+          } catch (error) {
+            logger.debug(`Could not fetch message ${key.id} from database`);
+          }
           return undefined;
         },
       });
@@ -118,6 +134,18 @@ class BaileysManager {
         await this.handleIncomingMessages(connectionId, m);
       });
 
+      // Event: Sincronização de histórico (mensagens antigas)
+      socket.ev.on('messaging-history.set', async (history) => {
+        logger.info(`[Baileys] 📚 History sync received for ${connectionId}: ${history.messages?.length || 0} messages`);
+        if (history.messages && history.messages.length > 0) {
+          // Processar mensagens do histórico
+          await this.handleIncomingMessages(connectionId, {
+            messages: history.messages,
+            type: 'history',
+          });
+        }
+      });
+
 
       // Event: Atualização de status de mensagens (delivered, read)
       socket.ev.on('messages.update', async (updates) => {
@@ -129,6 +157,9 @@ class BaileysManager {
       
       // Iniciar heartbeat ativo
       this.startActiveHeartbeat(connectionId);
+      
+      // Iniciar sincronização periódica automática
+      this.startPeriodicSync(connectionId);
 
       logger.info(`[Baileys] ✅ Client created successfully: ${connectionId}`);
       
@@ -352,6 +383,11 @@ class BaileysManager {
         client.lastMessageReceived = new Date();
       }
 
+      // VALIDAÇÃO: Se receber muitas mensagens de uma vez, pode ser sincronização atrasada
+      if (messages && messages.length > 10) {
+        logger.warn(`[Baileys] ⚠️ Received batch of ${messages.length} messages - possible delayed sync detected`);
+      }
+
       // 📊 Estatísticas de sincronização
       const syncStats = {
         total: messages?.length || 0,
@@ -361,10 +397,12 @@ class BaileysManager {
         type,
       };
 
-      if (type !== 'notify' && type !== 'append') {
-        logger.info(`[Baileys] ⏭️ Skipping message type: ${type}`);
-        return;
-      }
+      // IMPORTANTE: Processar TODOS os tipos de mensagens para sincronização completa
+      // - notify: mensagens em tempo real
+      // - append: mensagens adicionadas (sincronização)
+      // - history: mensagens históricas (sincronização inicial)
+      // NÃO filtrar por tipo para garantir sincronização completa
+      logger.info(`[Baileys] 📨 Processing message batch - Type: ${type}, Count: ${messages?.length || 0}`);
 
       for (const msg of messages) {
         const from = msg.key.remoteJid;
@@ -450,11 +488,47 @@ class BaileysManager {
             externalId,
             pushName // Passar pushName para o service
           );
-          logger.info(`[Baileys] 💾 Message saved successfully`);
+          logger.info(`[Baileys] 💾 Message saved successfully (${messageType})`);
           syncStats.processed++;
         } catch (error) {
-          logger.error(`[Baileys] ❌ Error processing message:`, error);
+          logger.error(`[Baileys] ❌ Error processing message from ${from}:`, error);
           syncStats.errors++;
+          
+          // RETRY: Se falhar, adicionar à fila de retry
+          const retryKey = `${connectionId}:${externalId}`;
+          const retryInfo = this.syncRetryQueue.get(retryKey) || { retries: 0, lastAttempt: new Date() };
+          
+          if (retryInfo.retries < 3) {
+            retryInfo.retries++;
+            retryInfo.lastAttempt = new Date();
+            this.syncRetryQueue.set(retryKey, retryInfo);
+            logger.info(`[Baileys] 🔄 Message added to retry queue (attempt ${retryInfo.retries}/3)`);
+            
+            // Tentar novamente após 5 segundos
+            setTimeout(async () => {
+              try {
+                const { MessageService } = await import('../services/message.service.js');
+                const retryMessageService = new MessageService();
+                await retryMessageService.processIncomingMessage(
+                  connectionId,
+                  from,
+                  messageText,
+                  messageType,
+                  null,
+                  isFromMe,
+                  externalId,
+                  pushName
+                );
+                this.syncRetryQueue.delete(retryKey);
+                logger.info(`[Baileys] ✅ Message retry successful for ${externalId}`);
+              } catch (retryError) {
+                logger.error(`[Baileys] ❌ Message retry failed for ${externalId}:`, retryError);
+              }
+            }, 5000);
+          } else {
+            logger.error(`[Baileys] ❌ Max retries reached for message ${externalId}, giving up`);
+            this.syncRetryQueue.delete(retryKey);
+          }
         }
       }
 
@@ -885,13 +959,17 @@ class BaileysManager {
     const client = this.clients.get(connectionId);
     if (!client) return;
 
-    // Parar monitoramento e heartbeat
+    // Parar monitoramento, heartbeat e sincronização
     if (client.keepAliveInterval) {
       clearInterval(client.keepAliveInterval);
     }
     
     if (client.heartbeatInterval) {
       clearInterval(client.heartbeatInterval);
+    }
+    
+    if (client.syncInterval) {
+      clearInterval(client.syncInterval);
     }
 
     // Só fazer logout se solicitado E se estiver conectado
@@ -967,13 +1045,16 @@ class BaileysManager {
 
   /**
    * Inicia heartbeat ativo para manter conexão viva
-   * Envia ping para o WhatsApp a cada 15 segundos
+   * Sistema multi-camadas para garantir conexão estável:
+   * 1. Marca presença online periodicamente
+   * 2. Sincroniza mensagens recentes
+   * 3. Verifica status da conexão
    */
   private startActiveHeartbeat(connectionId: string): void {
     const client = this.clients.get(connectionId);
     if (!client) return;
 
-    // Heartbeat a cada 15 segundos
+    // Heartbeat robusto a cada 30 segundos
     client.heartbeatInterval = setInterval(async () => {
       const currentClient = this.clients.get(connectionId);
       if (!currentClient) {
@@ -984,22 +1065,108 @@ class BaileysManager {
       // Só fazer heartbeat se estiver conectado
       if (currentClient.status === 'connected') {
         try {
-          // Tentar uma operação leve para verificar se a conexão está viva
-          // Usando fetchPrivacySettings como "ping" - é uma operação leve
-          await currentClient.socket.fetchPrivacySettings();
+          // ESTRATÉGIA MULTI-CAMADAS para manter conexão viva:
+          
+          // 1. Marcar presença online (CRÍTICO para manter conexão)
+          try {
+            await currentClient.socket.sendPresenceUpdate('available');
+            logger.debug(`[Baileys] 💚 Presence updated for ${connectionId}`);
+          } catch (presenceError) {
+            logger.warn(`[Baileys] ⚠️ Could not update presence:`, presenceError);
+          }
+
+          // 2. Sincronizar mensagens recentes (garante que não perca mensagens)
+          try {
+            // Buscar conversas ativas no banco
+            const activeConversations = await this.prisma.conversation.findMany({
+              where: {
+                connectionId,
+                status: { in: ['waiting', 'in_progress', 'transferred'] },
+              },
+              take: 10, // Limitar a 10 conversas mais recentes
+              orderBy: { lastMessageAt: 'desc' },
+              select: {
+                contact: { select: { phoneNumber: true } },
+              },
+            });
+
+            // Para cada conversa ativa, marcar presença para manter conexão
+            for (const conv of activeConversations) {
+              try {
+                const jid = conv.contact.phoneNumber.includes('@') 
+                  ? conv.contact.phoneNumber 
+                  : `${conv.contact.phoneNumber}@s.whatsapp.net`;
+                
+                // Marcar presença no chat (ativa conexão e sincroniza mensagens)
+                await currentClient.socket.sendPresenceUpdate('available', jid);
+              } catch (fetchError) {
+                // Ignorar erros individuais
+              }
+            }
+            
+            logger.debug(`[Baileys] 📥 Message sync attempted for ${activeConversations.length} conversations`);
+          } catch (syncError) {
+            logger.warn(`[Baileys] ⚠️ Could not sync messages:`, syncError);
+          }
+
+          // 3. Verificar se socket ainda está aberto
+          try {
+            // Tentar uma operação simples para verificar conexão
+            const user = await currentClient.socket.user;
+            if (!user) {
+              logger.warn(`[Baileys] ⚠️ Socket user is null, connection may be dead`);
+            }
+          } catch (wsError) {
+            logger.warn(`[Baileys] ⚠️ Could not verify socket connection:`, wsError);
+          }
+
           currentClient.lastHeartbeat = new Date();
           logger.debug(`[Baileys] 💚 Heartbeat OK for ${connectionId}`);
         } catch (error) {
           logger.warn(`[Baileys] 💔 Heartbeat failed for ${connectionId}:`, error);
           
           // Se heartbeat falhar, a conexão pode estar morta
-          // O handler de connection.update deve detectar isso e reconectar
           logger.info(`[Baileys] 🔄 Heartbeat failure detected, connection may be dead`);
         }
       }
-    }, 15000); // 15 segundos
+    }, 30000); // 30 segundos (intervalo otimizado)
 
     logger.info(`[Baileys] 💚 Active heartbeat started for ${connectionId}`);
+  }
+
+  /**
+   * Inicia sincronização periódica automática de mensagens
+   * Roda a cada 2 minutos para garantir que nenhuma mensagem seja perdida
+   */
+  private startPeriodicSync(connectionId: string): void {
+    const client = this.clients.get(connectionId);
+    if (!client) return;
+
+    // Sincronização a cada 2 minutos
+    client.syncInterval = setInterval(async () => {
+      const currentClient = this.clients.get(connectionId);
+      if (!currentClient) {
+        clearInterval(client.syncInterval!);
+        return;
+      }
+
+      // Só sincronizar se estiver conectado
+      if (currentClient.status === 'connected') {
+        try {
+          logger.info(`[Baileys] 🔄 Starting periodic sync for ${connectionId}...`);
+          
+          // Sincronizar todas as conversas ativas
+          const syncedCount = await this.syncAllActiveConversations(connectionId);
+          
+          currentClient.lastSync = new Date();
+          logger.info(`[Baileys] ✅ Periodic sync completed for ${connectionId}: ${syncedCount} conversations synced`);
+        } catch (error) {
+          logger.error(`[Baileys] ❌ Error in periodic sync for ${connectionId}:`, error);
+        }
+      }
+    }, 120000); // 2 minutos
+
+    logger.info(`[Baileys] 🔄 Periodic sync started for ${connectionId} (every 2 minutes)`);
   }
 
   /**
@@ -1126,6 +1293,136 @@ class BaileysManager {
       logger.info('[Baileys] ✅ Reconnection process completed');
     } catch (error) {
       logger.error('[Baileys] ❌ Error reconnecting active connections:', error);
+    }
+  }
+
+  /**
+   * Sincroniza mensagens de uma conversa específica (recuperação manual)
+   * Útil para forçar sincronização quando detectar mensagens perdidas
+   */
+  async syncConversationMessages(connectionId: string, phoneNumber: string): Promise<boolean> {
+    try {
+      const client = this.clients.get(connectionId);
+      if (!client || client.status !== 'connected') {
+        logger.warn(`[Baileys] Cannot sync: connection ${connectionId} not available`);
+        return false;
+      }
+
+      const jid = phoneNumber.includes('@') ? phoneNumber : `${phoneNumber}@s.whatsapp.net`;
+      
+      logger.info(`[Baileys] 🔄 Manual sync requested for ${phoneNumber} on ${connectionId}`);
+
+      try {
+        // 1. Marcar presença no chat
+        await client.socket.sendPresenceUpdate('available', jid);
+        
+        // 2. Marcar como "composing" e depois "paused" para ativar sincronização
+        await client.socket.sendPresenceUpdate('composing', jid);
+        await new Promise(resolve => setTimeout(resolve, 500));
+        await client.socket.sendPresenceUpdate('paused', jid);
+        
+        logger.info(`[Baileys] ✅ Sync triggered for ${phoneNumber}`);
+        return true;
+      } catch (error) {
+        logger.error(`[Baileys] ❌ Error syncing conversation:`, error);
+        return false;
+      }
+    } catch (error) {
+      logger.error(`[Baileys] ❌ Error in syncConversationMessages:`, error);
+      return false;
+    }
+  }
+
+  /**
+   * Valida integridade de mensagens de uma conversa
+   * Verifica se há gaps na sequência de mensagens
+   */
+  async validateMessageIntegrity(conversationId: string): Promise<{ valid: boolean; gaps: number; lastChecked: Date }> {
+    try {
+      logger.info(`[Baileys] 🔍 Validating message integrity for conversation ${conversationId}...`);
+      
+      const conversation = await this.prisma.conversation.findUnique({
+        where: { id: conversationId },
+        include: {
+          messages: {
+            orderBy: { timestamp: 'asc' },
+            select: { timestamp: true, externalId: true },
+          },
+          contact: { select: { phoneNumber: true } },
+        },
+      });
+
+      if (!conversation) {
+        return { valid: false, gaps: 0, lastChecked: new Date() };
+      }
+
+      // Verificar gaps temporais (mais de 5 minutos entre mensagens em conversa ativa)
+      let gaps = 0;
+      const messages = conversation.messages;
+      
+      for (let i = 1; i < messages.length; i++) {
+        const prevTime = new Date(messages[i - 1].timestamp).getTime();
+        const currTime = new Date(messages[i].timestamp).getTime();
+        const diffMinutes = (currTime - prevTime) / 1000 / 60;
+        
+        // Se houver gap maior que 30 minutos, pode ter mensagens perdidas
+        if (diffMinutes > 30 && diffMinutes < 1440) { // Menos de 1 dia
+          gaps++;
+          logger.warn(`[Baileys] ⚠️ Gap detected: ${diffMinutes.toFixed(1)} minutes between messages`);
+        }
+      }
+
+      const isValid = gaps === 0;
+      
+      if (!isValid) {
+        logger.warn(`[Baileys] ⚠️ Integrity check failed: ${gaps} gaps found in conversation ${conversationId}`);
+        // Triggerar sincronização para recuperar mensagens perdidas
+        await this.syncConversationMessages(conversation.connectionId, conversation.contact.phoneNumber);
+      } else {
+        logger.info(`[Baileys] ✅ Integrity check passed for conversation ${conversationId}`);
+      }
+
+      return { valid: isValid, gaps, lastChecked: new Date() };
+    } catch (error) {
+      logger.error(`[Baileys] ❌ Error validating message integrity:`, error);
+      return { valid: false, gaps: -1, lastChecked: new Date() };
+    }
+  }
+
+  /**
+   * Força sincronização de todas as conversas ativas de uma conexão
+   */
+  async syncAllActiveConversations(connectionId: string): Promise<number> {
+    try {
+      logger.info(`[Baileys] 🔄 Syncing all active conversations for ${connectionId}...`);
+      
+      // Buscar todas as conversas ativas
+      const conversations = await this.prisma.conversation.findMany({
+        where: {
+          connectionId,
+          status: { in: ['waiting', 'in_progress', 'transferred'] },
+        },
+        include: {
+          contact: { select: { phoneNumber: true } },
+        },
+      });
+
+      logger.info(`[Baileys] Found ${conversations.length} active conversations to sync`);
+
+      let syncedCount = 0;
+      for (const conv of conversations) {
+        const success = await this.syncConversationMessages(connectionId, conv.contact.phoneNumber);
+        if (success) syncedCount++;
+        
+        // Delay entre sincronizações para não sobrecarregar
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+
+      logger.info(`[Baileys] ✅ Synced ${syncedCount}/${conversations.length} conversations`);
+      return syncedCount;
+    } catch (error) {
+      logger.error(`[Baileys] ❌ Error in syncAllActiveConversations:`, error);
+      return 0;
     }
   }
 

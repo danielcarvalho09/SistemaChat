@@ -5,6 +5,44 @@ import { logger } from '../config/logger.js';
 
 export async function healthRoutes(fastify: FastifyInstance) {
   /**
+   * GET /ping - Endpoint super leve para UptimeRobot/Cron-job
+   * Evita que Railway/Render/Fly.io entrem em sleep
+   * Use serviços como UptimeRobot, Cron-job.org ou BetterStack para pingar a cada 5 minutos
+   */
+  fastify.get('/ping', async (request, reply) => {
+    return reply.send('pong');
+  });
+
+  /**
+   * GET /keep-alive - Endpoint otimizado para manter servidor acordado
+   * Além de responder, aciona pequenas tarefas para manter conexões ativas
+   */
+  fastify.get('/keep-alive', async (request, reply) => {
+    try {
+      // Ping no banco para manter conexão ativa
+      const prisma = getPrismaClient();
+      await prisma.$queryRaw`SELECT 1`;
+
+      // Ping no Redis para manter conexão ativa
+      const redis = getRedisClient();
+      await redis.ping();
+
+      return reply.send({
+        status: 'alive',
+        timestamp: new Date().toISOString(),
+        uptime: Math.floor(process.uptime()),
+        message: 'Server is awake and all connections are active',
+      });
+    } catch (error) {
+      logger.error('Keep-alive check failed:', error);
+      return reply.status(500).send({
+        status: 'error',
+        message: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
+  });
+
+  /**
    * GET /health - Health check simples
    */
   fastify.get('/health', async (request, reply) => {
