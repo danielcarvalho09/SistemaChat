@@ -217,13 +217,21 @@ export class ConversationService {
       departmentId: departmentId || conversation.departmentId,
     };
 
-    // NOVA LÓGICA: Se o usuário tem uma conexão, trocar a conexão da conversa
-    if (userWithConnection?.whatsappConnections && userWithConnection.whatsappConnections.length > 0) {
-      const userConnection = userWithConnection.whatsappConnections[0];
-      updateData.connectionId = userConnection.id;
-      logger.info(`🔄 Conversation ${conversationId} connection changed from ${conversation.connectionId} to ${userConnection.id} (user ${userId})`);
+    // LÓGICA CORRETA: Trocar conexão APENAS se a conversa foi TRANSFERIDA
+    // - Se status = 'transferred': Trocar para a conexão do usuário que aceitou
+    // - Se status = 'waiting': Manter a conexão original (WhatsApp que recebeu)
+    if (conversation.status === 'transferred') {
+      // Conversa foi transferida - trocar para a conexão do usuário que está aceitando
+      if (userWithConnection?.whatsappConnections && userWithConnection.whatsappConnections.length > 0) {
+        const userConnection = userWithConnection.whatsappConnections[0];
+        updateData.connectionId = userConnection.id;
+        logger.info(`🔄 Transferred conversation ${conversationId}: connection changed from ${conversation.connectionId} to ${userConnection.id} (user ${userId})`);
+      } else {
+        logger.warn(`⚠️ User ${userId} has no active connection. Keeping current connection ${conversation.connectionId}`);
+      }
     } else {
-      logger.warn(`⚠️ User ${userId} has no active connection. Keeping current connection ${conversation.connectionId}`);
+      // Conversa nova (waiting) - manter conexão original
+      logger.info(`✅ Accepting new conversation ${conversationId} - keeping original connection ${conversation.connectionId}`);
     }
 
     // Só atualiza firstResponseAt se for a primeira vez (waiting)
