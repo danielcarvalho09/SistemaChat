@@ -6,15 +6,20 @@ import { useAuthStore } from '../store/authStore';
 
 interface WebSocketContextType {
   isConnected: boolean;
+  syncMessages: () => Promise<void>;
 }
 
-const WebSocketContext = createContext<WebSocketContextType>({ isConnected: false });
+const WebSocketContext = createContext<WebSocketContextType>({ 
+  isConnected: false,
+  syncMessages: async () => {},
+});
 
 export function WebSocketProvider({ children }: { children: React.ReactNode }) {
   const { addMessage, addConversation, updateConversation, fetchConversations } = useConversationStore();
   const { isAuthenticated } = useAuthStore();
   const [isConnected, setIsConnected] = React.useState(false);
   const hasInitialized = useRef(false);
+  const syncTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     // Só conectar se estiver autenticado
@@ -42,15 +47,39 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
     // Conectar ao WebSocket
     const socket = socketService.connect(token);
 
+    // Função para sincronizar mensagens e recarregar conversas
+    const syncAndReload = async () => {
+      try {
+        console.log('🔄 Sincronizando e recarregando conversações...');
+        // Aguardar sincronização pelo socketService (já acontece automaticamente)
+        // Esperar 2 segundos para sincronização completar
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        // Recarregar lista de conversas para pegar mensagens sincronizadas
+        await fetchConversations();
+        console.log('✅ Conversas recarregadas após sincronização');
+      } catch (error) {
+        console.error('❌ Erro ao recarregar após sincronização:', error);
+      }
+    };
+
     // Listener de conexão
     socket.on('connect', () => {
       console.log('✅ WebSocket conectado globalmente');
       setIsConnected(true);
+      
+      // Sincronizar e recarregar ao conectar
+      syncAndReload();
     });
 
     socket.on('disconnect', () => {
       console.warn('⚠️ WebSocket desconectado');
       setIsConnected(false);
+    });
+
+    // Listener de reconexão
+    socket.on('reconnect', () => {
+      console.log('✅ Reconectado - sincronizando...');
+      syncAndReload();
     });
 
     // Escutar novas mensagens
@@ -130,8 +159,19 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
     };
   }, [isAuthenticated, addMessage, addConversation, updateConversation, fetchConversations]);
 
+  // Função pública para forçar sincronização manual
+  const syncMessages = async () => {
+    try {
+      console.log('🔄 Sincronização manual iniciada...');
+      await fetchConversations();
+      console.log('✅ Sincronização manual completa');
+    } catch (error) {
+      console.error('❌ Erro na sincronização manual:', error);
+    }
+  };
+
   return (
-    <WebSocketContext.Provider value={{ isConnected }}>
+    <WebSocketContext.Provider value={{ isConnected, syncMessages }}>
       {children}
     </WebSocketContext.Provider>
   );

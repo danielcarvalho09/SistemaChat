@@ -34,6 +34,7 @@ interface ConversationState {
   fetchMessages: (conversationId: string) => Promise<void>;
   sendMessage: (conversationId: string, content: string) => Promise<void>;
   updateConversationStatus: (conversationId: string, status: string) => Promise<void>;
+  syncConversation: (conversationId: string) => Promise<void>;
 }
 
 export const useConversationStore = create<ConversationState>((set, get) => ({
@@ -220,6 +221,22 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
     } catch (error: any) {
       set({ error: error.message || 'Erro ao atualizar status' });
       throw error;
+    }
+  },
+
+  syncConversation: async (conversationId: string) => {
+    try {
+      console.log(`🔄 Forçando sincronização da conversa ${conversationId}...`);
+      // Chamar endpoint de sincronização
+      await api.post(`/sync/conversation/${conversationId}`);
+      // Aguardar 1 segundo para sincronização completar
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      // Recarregar mensagens
+      await get().fetchMessages(conversationId);
+      console.log('✅ Conversa sincronizada com sucesso');
+    } catch (error: any) {
+      console.error('❌ Erro ao sincronizar conversa:', error);
+      set({ error: error.message || 'Erro ao sincronizar conversa' });
     }
   },
 }));
