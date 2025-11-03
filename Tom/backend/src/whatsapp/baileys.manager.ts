@@ -436,9 +436,11 @@ class BaileysManager {
         // ===== FILTROS =====
         
         // 0. Filtrar mensagens antigas (anteriores à primeira conexão)
-        // IMPORTANTE: Mensagens em tempo real (notify) SEMPRE passam (são novas)
-        // Apenas filtrar mensagens de histórico/appended que têm timestamp antigo
-        if (firstConnectedAt && type !== 'notify') {
+        // IMPORTANTE: 
+        // - Mensagens em tempo real (notify) SEMPRE passam (são novas)
+        // - Mensagens sem timestamp SEMPRE passam (podem ser novas)
+        // - Só filtrar mensagens de histórico que têm timestamp explícito e anterior à primeira conexão
+        if (firstConnectedAt && type === 'history') {
           // Extrair timestamp da mensagem do Baileys
           // msg.messageTimestamp vem em segundos Unix, precisa converter para Date
           const messageTimestamp = msg.messageTimestamp 
@@ -447,14 +449,15 @@ class BaileysManager {
               ? new Date(Number(msg.key.messageTimestamp) * 1000)
               : null;
           
-          // Só filtrar se tiver timestamp E for anterior à primeira conexão
+          // Só filtrar se tiver timestamp E for claramente anterior à primeira conexão
           // Se não tiver timestamp, processar (pode ser mensagem recente sem timestamp)
           if (messageTimestamp && messageTimestamp < firstConnectedAt) {
-            logger.debug(`[Baileys] ⏭️ Skipping old message from ${messageTimestamp.toISOString()} (before first connection at ${firstConnectedAt.toISOString()})`);
+            logger.debug(`[Baileys] ⏭️ Skipping old history message from ${messageTimestamp.toISOString()} (before first connection at ${firstConnectedAt.toISOString()})`);
             syncStats.skipped++;
             continue;
           }
         }
+        // Para 'append' e outros tipos, sempre processar (são mensagens novas ou recentes)
         
         // 1. Filtrar STATUS do WhatsApp (status@broadcast)
         if (from === 'status@broadcast') {
