@@ -1,4 +1,5 @@
 import DataLoader from 'dataloader';
+import type { BatchLoadFn, Options } from 'dataloader';
 import { getPrismaClient } from '../config/database.js';
 import type { Message, User, WhatsAppConnection, Contact, Department } from '@prisma/client';
 
@@ -266,7 +267,7 @@ export interface DataLoaderContext {
 export function createDataLoaderContext(): DataLoaderContext {
   return {
     lastMessageLoader: new DataLoader<string, Message | null>(
-      async (conversationIds) => {
+      async (conversationIds: readonly string[]): Promise<(Message | null)[]> => {
         const messages = await prisma.message.findMany({
           where: {
             conversationId: { in: [...conversationIds] },
@@ -282,7 +283,7 @@ export function createDataLoaderContext(): DataLoaderContext {
           }
         });
 
-        return conversationIds.map(id => messageMap.get(id) || null);
+        return conversationIds.map((id: string) => messageMap.get(id) || null);
       }
     ),
     userLoader,
