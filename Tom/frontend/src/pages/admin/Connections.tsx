@@ -299,6 +299,24 @@ export function Connections() {
     }
   };
 
+  const handleCancelReconnection = async (connectionId: string) => {
+    try {
+      await api.post(`/connections/${connectionId}/cancel-reconnection`);
+      
+      // Atualizar status localmente para "disconnected"
+      setConnections((prev) =>
+        prev.map((conn) =>
+          conn.id === connectionId ? { ...conn, status: 'disconnected' } : conn
+        )
+      );
+      
+      console.log('✅ Reconexão cancelada com sucesso');
+    } catch (error) {
+      console.error('Erro ao cancelar reconexão:', error);
+      alert('Erro ao cancelar reconexão. Tente novamente.');
+    }
+  };
+
   const handleDelete = async (connectionId: string) => {
     if (!confirm('Tem certeza que deseja excluir esta conexão? Todas as conversas e mensagens associadas serão perdidas.')) return;
     
@@ -422,6 +440,16 @@ export function Connections() {
                     >
                       <QrCode className="w-4 h-4 mr-2" />
                       Conectar
+                    </Button>
+                  ) : connection.status === 'connecting' ? (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleCancelReconnection(connection.id)}
+                      className="flex-1 bg-yellow-50 hover:bg-yellow-100 text-yellow-800 border-yellow-300"
+                    >
+                      <X className="w-4 h-4 mr-2" />
+                      Cancelar Reconexão
                     </Button>
                   ) : (
                     <Button

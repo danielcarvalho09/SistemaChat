@@ -16,6 +16,7 @@ import { logger } from '../config/logger.js';
 import { getSocketServer } from '../websocket/socket.server.js';
 import { getPrismaClient } from '../config/database.js';
 import { encrypt, decrypt, isEncrypted } from '../utils/encryption.js';
+import { config } from '../config/env.js';
 
 /**
  * Interface do cliente Baileys
@@ -34,6 +35,7 @@ export interface BaileysClient {
   isReconnecting?: boolean; // Flag para evitar múltiplas reconexões simultâneas
   lastHeartbeat?: Date; // Última vez que o heartbeat foi bem-sucedido
   lastSync?: Date; // Última vez que sincronizou mensagens
+  lastKeepAliveMessage?: Date; // Última vez que enviou mensagem de keep-alive
 }
 
 /**
@@ -84,7 +86,7 @@ class BaileysManager {
         // Configurações otimizadas para melhorar estabilidade da conexão
         connectTimeoutMs: 60000, // Timeout de 60s para conectar
         defaultQueryTimeoutMs: 60000, // Timeout para queries
-        keepAliveIntervalMs: 20000, // Pings a cada 20s (equilíbrio entre bateria e estabilidade)
+        keepAliveIntervalMs: 8000, // Pings a cada 8s (ULTRA agressivo para Railway e manter conexão sem uso)
         retryRequestDelayMs: 250, // Delay mínimo entre tentativas
         emitOwnEvents: true, // Emitir eventos de mensagens enviadas por nós
         fireInitQueries: true, // Executar queries iniciais ao conectar
@@ -772,6 +774,32 @@ class BaileysManager {
   }
 
   /**
+   * Cancela reconexão automática manualmente
+   */
+  cancelReconnection(connectionId: string): void {
+    const client = this.clients.get(connectionId);
+    if (!client) {
+      logger.warn(`[Baileys] Cannot cancel reconnection: Client ${connectionId} not found`);
+      return;
+    }
+
+    // Limpar flag de reconexão
+    client.isReconnecting = false;
+    client.reconnectAttempts = 0;
+    
+    // Liberar lock de reconexão
+    this.reconnectionLocks.delete(connectionId);
+    
+    // Atualizar status para desconectado
+    client.status = 'disconnected';
+    
+    logger.info(`[Baileys] ✅ Reconnection cancelled for ${connectionId}`);
+    
+    // Emitir status de desconectado
+    this.emitStatus(connectionId, 'disconnected');
+  }
+
+  /**
    * Envia mensagem via WhatsApp
    */
   async sendMessage(
@@ -879,6 +907,43 @@ class BaileysManager {
       return externalId;
     } catch (error) {
       logger.error(`[Baileys] Error sending media from ${connectionId}:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Envia mensagem de keep-alive para manter conexão ativa
+   * Usa mensagem muito simples (apenas ".") para não poluir
+   * Só é chamado se WHATSAPP_KEEP_ALIVE_NUMBER estiver configurado
+   */
+  private async sendKeepAliveMessage(connectionId: string): Promise<void> {
+    const client = this.clients.get(connectionId);
+    if (!client) {
+      throw new Error(`Connection ${connectionId} not found`);
+    }
+
+    if (client.status !== 'connected') {
+      throw new Error(`Connection ${connectionId} is not connected`);
+    }
+
+    const keepAliveNumber = config.whatsapp.keepAliveNumber;
+    if (!keepAliveNumber) {
+      return; // Não configurado, não fazer nada
+    }
+
+    try {
+      // Limpar número (remover caracteres especiais)
+      const cleanNumber = keepAliveNumber.replace(/\D/g, '');
+      const jid = `${cleanNumber}@s.whatsapp.net`;
+      
+      // Mensagem muito simples (apenas ".") para não poluir
+      // Você pode usar um emoji invisível ou outro caractere se preferir
+      const messageContent = { text: '.' };
+      
+      await client.socket.sendMessage(jid, messageContent);
+      logger.debug(`[Baileys] 📤 Keep-alive message sent from ${connectionId} to ${cleanNumber}`);
+    } catch (error) {
+      logger.warn(`[Baileys] ⚠️ Error sending keep-alive message from ${connectionId}:`, error);
       throw error;
     }
   }
@@ -1033,6 +1098,13 @@ class BaileysManager {
       clearInterval(client.syncInterval);
     }
 
+    // Limpar flags de reconexão
+    client.isReconnecting = false;
+    client.reconnectAttempts = 0;
+    
+    // Liberar lock de reconexão
+    this.reconnectionLocks.delete(connectionId);
+
     // Só fazer logout se solicitado E se estiver conectado
     if (doLogout) {
       try {
@@ -1061,7 +1133,7 @@ class BaileysManager {
     const client = this.clients.get(connectionId);
     if (!client) return;
 
-    // Verificar conexão a cada 10 segundos (mais agressivo)
+    // Verificar conexão a cada 5 segundos (MUITO agressivo para Railway)
     client.keepAliveInterval = setInterval(() => {
       const currentClient = this.clients.get(connectionId);
       if (!currentClient) {
@@ -1074,6 +1146,25 @@ class BaileysManager {
       const lastHeartbeat = currentClient.lastHeartbeat;
       
       if (currentClient.status === 'connected') {
+        // Verificar se a conexão está realmente viva
+        try {
+          // Verificar se socket ainda está aberto
+          if (!currentClient.socket || !currentClient.socket.user) {
+            logger.warn(`[Baileys] ⚠️ Socket appears dead, triggering reconnection...`);
+            this.attemptReconnection(connectionId).catch((err) => {
+              logger.error(`[Baileys] Failed to trigger reconnection:`, err);
+            });
+            return;
+          }
+        } catch (error) {
+          logger.warn(`[Baileys] ⚠️ Error checking socket health:`, error);
+          // Se não conseguir verificar, tentar reconectar por segurança
+          this.attemptReconnection(connectionId).catch((err) => {
+            logger.error(`[Baileys] Failed to trigger reconnection:`, err);
+          });
+          return;
+        }
+
         if (lastReceived) {
           const minutesSinceLastMessage = (now.getTime() - lastReceived.getTime()) / 1000 / 60;
           logger.debug(`[Baileys] 💓 Keepalive ${connectionId} - Last message: ${minutesSinceLastMessage.toFixed(1)}min ago`);
@@ -1081,11 +1172,14 @@ class BaileysManager {
           logger.debug(`[Baileys] 💓 Keepalive ${connectionId} - No messages received yet`);
         }
         
-        // Verificar se heartbeat está funcionando
+        // Verificar se heartbeat está funcionando (mais agressivo: 20s)
         if (lastHeartbeat) {
           const secondsSinceHeartbeat = (now.getTime() - lastHeartbeat.getTime()) / 1000;
-          if (secondsSinceHeartbeat > 30) {
-            logger.warn(`[Baileys] ⚠️ No heartbeat response in ${secondsSinceHeartbeat.toFixed(0)}s - connection may be dead`);
+          if (secondsSinceHeartbeat > 20) {
+            logger.warn(`[Baileys] ⚠️ No heartbeat response in ${secondsSinceHeartbeat.toFixed(0)}s - connection may be dead, triggering reconnection...`);
+            this.attemptReconnection(connectionId).catch((err) => {
+              logger.error(`[Baileys] Failed to trigger reconnection:`, err);
+            });
           }
         }
       } else {
@@ -1099,7 +1193,7 @@ class BaileysManager {
           });
         }
       }
-    }, 10000); // 10 segundos (mais rápido que antes)
+    }, 5000); // 5 segundos (VERY agressivo para Railway)
 
     logger.info(`[Baileys] 🔍 Connection monitoring started for ${connectionId}`);
   }
@@ -1115,7 +1209,8 @@ class BaileysManager {
     const client = this.clients.get(connectionId);
     if (!client) return;
 
-    // Heartbeat robusto a cada 30 segundos
+    // Heartbeat ULTRA agressivo a cada 8 segundos (para Railway e manter conexão sem uso)
+    // Reduzido de 10s para 8s para manter conexão mais ativa
     client.heartbeatInterval = setInterval(async () => {
       const currentClient = this.clients.get(connectionId);
       if (!currentClient) {
@@ -1126,17 +1221,32 @@ class BaileysManager {
       // Só fazer heartbeat se estiver conectado
       if (currentClient.status === 'connected') {
         try {
-          // ESTRATÉGIA MULTI-CAMADAS para manter conexão viva:
+          // ESTRATÉGIA MULTI-CAMADAS ULTRA AGRESSIVA para manter conexão viva:
           
-          // 1. Marcar presença online (CRÍTICO para manter conexão)
+          // 1. Marcar presença online GLOBAL (CRÍTICO para manter conexão)
+          // Isso mantém a conexão ativa mesmo sem mensagens
           try {
             await currentClient.socket.sendPresenceUpdate('available');
-            logger.debug(`[Baileys] 💚 Presence updated for ${connectionId}`);
+            logger.debug(`[Baileys] 💚 Global presence updated for ${connectionId}`);
           } catch (presenceError) {
-            logger.warn(`[Baileys] ⚠️ Could not update presence:`, presenceError);
+            logger.warn(`[Baileys] ⚠️ Could not update global presence:`, presenceError);
           }
 
-          // 2. Sincronizar mensagens recentes (garante que não perca mensagens)
+          // 2. OPERAÇÃO FORÇADA PARA MANTER CONEXÃO VIVA
+          // Mesmo sem conversas, fazemos uma operação leve para manter tráfego de rede
+          try {
+            // Verificar o próprio usuário (operações leves mantêm conexão viva)
+            const user = await currentClient.socket.user;
+            if (user) {
+              logger.debug(`[Baileys] 💓 User check OK for ${connectionId} - connection is alive`);
+            } else {
+              logger.warn(`[Baileys] ⚠️ User is null, connection may be dead`);
+            }
+          } catch (userError) {
+            logger.warn(`[Baileys] ⚠️ Could not verify user:`, userError);
+          }
+
+          // 3. Sincronizar mensagens recentes (garante que não perca mensagens)
           try {
             // Buscar conversas ativas no banco
             const activeConversations = await this.prisma.conversation.findMany({
@@ -1170,7 +1280,74 @@ class BaileysManager {
             logger.warn(`[Baileys] ⚠️ Could not sync messages:`, syncError);
           }
 
-          // 3. Verificar se socket ainda está aberto
+          // 4. Se não há mensagens recentes, FORÇAR atividade adicional
+          // Isso garante que mesmo sem uso, a conexão permanece ativa
+          const lastReceived = currentClient.lastMessageReceived;
+          const lastKeepAlive = currentClient.lastKeepAliveMessage;
+          
+          if (lastReceived) {
+            const minutesSinceLastMessage = (Date.now() - lastReceived.getTime()) / 1000 / 60;
+            
+            // Se não há mensagens há mais de 5 minutos, fazer operação adicional
+            if (minutesSinceLastMessage > 5) {
+              try {
+                // Fazer uma operação leve para manter conexão viva
+                // Verificar status online (gera tráfego de rede)
+                await currentClient.socket.sendPresenceUpdate('available');
+                logger.debug(`[Baileys] 🔄 Forced activity for ${connectionId} (no messages in ${minutesSinceLastMessage.toFixed(1)}min)`);
+              } catch (activityError) {
+                logger.warn(`[Baileys] ⚠️ Could not force activity:`, activityError);
+              }
+            }
+            
+            // 5. SISTEMA DE MENSAGEM DE KEEP-ALIVE (se configurado)
+            // Envia mensagem real para manter tráfego de rede ativo
+            // Isso é mais efetivo que apenas presença para manter conexão viva
+            if (config.whatsapp.keepAliveNumber) {
+              const minutesSinceLastKeepAlive = lastKeepAlive 
+                ? (Date.now() - lastKeepAlive.getTime()) / 1000 / 60
+                : Infinity;
+              
+              // Enviar mensagem de keep-alive a cada 30 minutos de inatividade
+              // Apenas se não há mensagens há mais de 30 minutos
+              if (minutesSinceLastMessage > 30 && minutesSinceLastKeepAlive > 30) {
+                try {
+                  await this.sendKeepAliveMessage(connectionId);
+                  currentClient.lastKeepAliveMessage = new Date();
+                  logger.info(`[Baileys] 📤 Keep-alive message sent for ${connectionId} (inactive for ${minutesSinceLastMessage.toFixed(1)}min)`);
+                } catch (keepAliveError) {
+                  logger.warn(`[Baileys] ⚠️ Could not send keep-alive message:`, keepAliveError);
+                }
+              }
+            }
+          } else {
+            // Se nunca recebeu mensagem, fazer atividade preventiva
+            try {
+              await currentClient.socket.sendPresenceUpdate('available');
+              logger.debug(`[Baileys] 🔄 Preventive activity for ${connectionId} (no messages yet)`);
+            } catch (preventiveError) {
+              logger.warn(`[Baileys] ⚠️ Could not do preventive activity:`, preventiveError);
+            }
+            
+            // Se tem número de keep-alive configurado e nunca enviou mensagem, enviar após 30 minutos
+            if (config.whatsapp.keepAliveNumber) {
+              const minutesSinceLastKeepAlive = lastKeepAlive 
+                ? (Date.now() - lastKeepAlive.getTime()) / 1000 / 60
+                : Infinity;
+              
+              if (minutesSinceLastKeepAlive > 30) {
+                try {
+                  await this.sendKeepAliveMessage(connectionId);
+                  currentClient.lastKeepAliveMessage = new Date();
+                  logger.info(`[Baileys] 📤 Keep-alive message sent for ${connectionId} (preventive)`);
+                } catch (keepAliveError) {
+                  logger.warn(`[Baileys] ⚠️ Could not send keep-alive message:`, keepAliveError);
+                }
+              }
+            }
+          }
+
+          // 6. Verificar se socket ainda está aberto
           try {
             // Tentar uma operação simples para verificar conexão
             const user = await currentClient.socket.user;
@@ -1186,11 +1363,16 @@ class BaileysManager {
         } catch (error) {
           logger.warn(`[Baileys] 💔 Heartbeat failed for ${connectionId}:`, error);
           
-          // Se heartbeat falhar, a conexão pode estar morta
-          logger.info(`[Baileys] 🔄 Heartbeat failure detected, connection may be dead`);
+          // Se heartbeat falhar, a conexão pode estar morta - reconectar imediatamente
+          logger.info(`[Baileys] 🔄 Heartbeat failure detected, triggering reconnection...`);
+          if (!currentClient.isReconnecting) {
+            this.attemptReconnection(connectionId).catch((err) => {
+              logger.error(`[Baileys] Failed to trigger reconnection after heartbeat failure:`, err);
+            });
+          }
         }
       }
-    }, 30000); // 30 segundos (intervalo otimizado)
+    }, 8000); // 8 segundos (ULTRA agressivo para Railway e manter conexão sem uso)
 
     logger.info(`[Baileys] 💚 Active heartbeat started for ${connectionId}`);
   }

@@ -41,6 +41,12 @@ export async function whatsappRoutes(fastify: FastifyInstance) {
     handler: whatsappController.disconnectConnection,
   });
 
+  // Cancelar reconexão automática (apenas admin)
+  fastify.post('/:connectionId/cancel-reconnection', {
+    preHandler: [requireAdmin],
+    handler: whatsappController.cancelReconnection,
+  });
+
   // Deletar conexão (apenas admin)
   fastify.delete('/:connectionId', {
     preHandler: [requireAdmin],
