@@ -1,5 +1,5 @@
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, Users, Building, Smartphone, LogOut, Settings, Tag, Send, ListChecks, Clock, ChevronLeft } from 'lucide-react';
+import { LayoutDashboard, Users, Building, Smartphone, LogOut, Settings, Tag, Send, ListChecks, Clock, ChevronLeft, Brain } from 'lucide-react';
 import { useAuthStore } from '../../store/authStore';
 import { Button } from '../../components/ui/button';
 import { useState } from 'react';
@@ -15,6 +15,7 @@ export function AdminLayout() {
     { name: 'Usuários', href: '/admin/users', icon: Users },
     { name: 'Departamentos', href: '/admin/departments', icon: Building },
     { name: 'Conexões WhatsApp', href: '/admin/connections', icon: Smartphone },
+    { name: 'Assistentes de IA', href: '/admin/ai-assistants', icon: Brain },
     { name: 'Tags', href: '/admin/tags', icon: Tag },
     { name: 'Disparo de Mensagens', href: '/admin/broadcast', icon: Send },
     { name: 'Listas de Contatos', href: '/admin/contact-lists', icon: ListChecks },

@@ -12,6 +12,7 @@ interface Conversation {
   contact: {
     name: string;
     phoneNumber: string;
+    pushName?: string | null;
     profilePicture?: string;
   };
   lastMessage?: {
@@ -152,12 +153,17 @@ export function ConversationItem({ conversation, isSelected, onClick, onAccept }
         {/* Content */}
         <div className="flex-1 min-w-0">
         <div className="flex items-center justify-between mb-1">
-          <div className="flex items-center gap-2 flex-1" onClick={!canAccept ? onClick : undefined}>
+          <div className="flex flex-col gap-0.5 flex-1" onClick={!canAccept ? onClick : undefined}>
             <h3 className="font-semibold text-gray-900 truncate">
               {conversation.contact.name && conversation.contact.name !== conversation.contact.phoneNumber 
                 ? conversation.contact.name 
                 : formatPhoneNumber(conversation.contact.phoneNumber)}
             </h3>
+            {conversation.contact.pushName && (
+              <p className="text-xs text-gray-500 truncate">
+                {conversation.contact.pushName}
+              </p>
+            )}
           </div>
           <div className="flex items-center gap-2 flex-shrink-0">
             {conversation.lastMessageAt && (

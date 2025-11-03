@@ -41,11 +41,18 @@ export class SocketServer {
         allowedHeaders: ['Content-Type', 'Authorization'],
       },
       transports: ['websocket', 'polling'],
-      pingTimeout: 60000,
-      pingInterval: 25000,
-      upgradeTimeout: 30000,
-      maxHttpBufferSize: 1e6, // 1MB
+      // Configurações otimizadas para NUNCA desconectar:
+      pingTimeout: 600000, // 10 minutos - tempo que espera por pong antes de desconectar
+      pingInterval: 25000, // 25 segundos - frequencia de ping
+      upgradeTimeout: 60000, // 60 segundos - tempo para upgrade de transporte
+      maxHttpBufferSize: 10e6, // 10MB - buffer maior para mensagens grandes
       allowEIO3: true, // Compatibilidade com versões antigas
+      // Configurações adicionais para máxima estabilidade
+      connectTimeout: 120000, // 2 minutos para estabelecer conexão
+      perMessageDeflate: false, // Desabilitar compressão para melhor performance
+      // Configurações extras para persistência
+      allowUpgrades: true, // Permitir upgrade de transporte
+      httpCompression: false, // Desabilitar compressão HTTP
     });
 
     this.setupMiddleware();

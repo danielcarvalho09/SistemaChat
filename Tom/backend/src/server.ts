@@ -28,14 +28,39 @@ async function start() {
     // Construir aplicação Fastify
     const app = await buildApp();
 
-    // Iniciar servidor HTTP
+    // Iniciar servidor HTTP com keep-alive otimizado para Railway
     await app.listen({
       port: config.server.port,
       host: '0.0.0.0',
     });
+    
+    // Configurar keep-alive agressivo para evitar desconexões
+    // Especialmente importante para Railway e outros PaaS
+    app.server.keepAliveTimeout = 620000; // 620 segundos (maior que pingTimeout do socket)
+    app.server.headersTimeout = 630000; // 630 segundos (deve ser maior que keepAliveTimeout)
+    
+    // Configurar timeout de requisição longo
+    app.server.timeout = 900000; // 15 minutos
+    
+    logger.info('⚙️  HTTP Keep-Alive configurado: 620s timeout');
 
     // Inicializar WebSocket server
-    initializeSocketServer(app.server);
+    const socketServer = initializeSocketServer(app.server);
+    
+    // Configurar heartbeat no servidor para manter conexões vivas
+    // Enviar ping do servidor para todos os clientes a cada 15 segundos
+    setInterval(() => {
+      const io = socketServer.getIO();
+      const connectedSockets = io.sockets.sockets;
+      
+      connectedSockets.forEach((socket) => {
+        if (socket.connected) {
+          socket.emit('server_ping');
+        }
+      });
+      
+      logger.debug(`🏓 Server ping enviado para ${connectedSockets.size} clientes`);
+    }, 15000); // 15 segundos
 
     logger.info(`✅ Server running on http://localhost:${config.server.port}`);
     logger.info(`🔌 WebSocket server running on ws://localhost:${config.server.port}`);

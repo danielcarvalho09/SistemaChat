@@ -16,7 +16,7 @@ export function ConversationList({
 }: ConversationListProps) {
   const { conversations, fetchConversations, isLoading } = useConversationStore();
   const [searchQuery, setSearchQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState<string>('in_progress');
+  const [statusFilter, setStatusFilter] = useState<string>('all'); // Mostrar todas por padrão
 
   useEffect(() => {
     fetchConversations();
@@ -32,15 +32,27 @@ export function ConversationList({
       (conv.contact.name || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
       conv.contact.phoneNumber.includes(searchQuery);
 
-    const matchesStatus = conv.status === statusFilter;
+    // Filtro de status com lógica especial:
+    // - 'all': Mostra todas as conversas
+    // - 'in_progress': Inclui in_progress E transferred
+    // - outros: Filtra pelo status específico
+    let matchesStatus = false;
+    if (statusFilter === 'all') {
+      matchesStatus = true; // Mostrar todas
+    } else if (statusFilter === 'in_progress') {
+      matchesStatus = conv.status === 'in_progress' || conv.status === 'transferred';
+    } else {
+      matchesStatus = conv.status === statusFilter;
+    }
 
     return matchesSearch && matchesStatus;
   });
 
   // Contadores por status
   const statusCounts = {
-    in_progress: conversations.filter(c => c.status === 'in_progress').length,
+    all: conversations.length, // Total de conversas
     waiting: conversations.filter(c => c.status === 'waiting').length,
+    in_progress: conversations.filter(c => c.status === 'in_progress' || c.status === 'transferred').length,
     transferred: conversations.filter(c => c.status === 'transferred').length,
     resolved: conversations.filter(c => c.status === 'resolved').length,
   };
@@ -78,12 +90,12 @@ export function ConversationList({
         <Button
           variant="ghost"
           size="sm"
-          onClick={() => setStatusFilter('in_progress')}
+          onClick={() => setStatusFilter('all')}
           className={`flex-1 whitespace-nowrap bg-white text-gray-900 border-none hover:bg-white hover:underline transition-all ${
-            statusFilter === 'in_progress' ? 'underline font-bold' : ''
+            statusFilter === 'all' ? 'underline font-bold' : ''
           }`}
         >
-          Em Atendimento ({statusCounts.in_progress})
+          Todas ({statusCounts.all})
         </Button>
         <Button
           variant="ghost"
@@ -94,6 +106,16 @@ export function ConversationList({
           }`}
         >
           Aguardando ({statusCounts.waiting})
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => setStatusFilter('in_progress')}
+          className={`flex-1 whitespace-nowrap bg-white text-gray-900 border-none hover:bg-white hover:underline transition-all ${
+            statusFilter === 'in_progress' ? 'underline font-bold' : ''
+          }`}
+        >
+          Em Atendimento ({statusCounts.in_progress})
         </Button>
         <Button
           variant="ghost"

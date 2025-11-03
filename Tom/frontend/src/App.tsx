@@ -9,6 +9,7 @@ import { Kanban } from './pages/dashboard/Kanban';
 import { AdminRoutes } from './routes/AdminRoutes';
 import { Toaster } from './components/ui/toaster';
 import { ConnectionStatus } from './components/ConnectionStatus';
+import { WebSocketProvider } from './contexts/WebSocketContext';
 
 function App() {
   const { isAuthenticated, fetchMe, logout } = useAuthStore();
@@ -32,7 +33,7 @@ function App() {
   }, []); // Executar apenas uma vez ao montar
 
   return (
-    <>
+    <WebSocketProvider>
       <Routes>
         {/* Rotas públicas */}
         <Route
@@ -69,7 +70,7 @@ function App() {
 
       <Toaster />
       {isAuthenticated && <ConnectionStatus />}
-    </>
+    </WebSocketProvider>
   );
 }
 

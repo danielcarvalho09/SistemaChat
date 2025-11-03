@@ -181,13 +181,29 @@ export class KanbanService {
 
   /**
    * Obter conversas por etapa (para visualização do Kanban)
-   * Filtra apenas conversas do usuário logado
+   * Filtra por connectionId do usuário (mostra apenas conversas da sua conexão WhatsApp)
    */
   async getConversationsByStage(stageId: string, userId?: string) {
+    // Buscar a conexão ativa do usuário
+    let connectionId: string | undefined;
+    if (userId) {
+      const user = await this.prisma.user.findUnique({
+        where: { id: userId },
+        include: {
+          whatsappConnections: {
+            where: { isActive: true },
+            take: 1,
+          },
+        },
+      });
+      connectionId = user?.whatsappConnections?.[0]?.id;
+    }
+
     return await this.prisma.conversation.findMany({
       where: { 
         kanbanStageId: stageId,
-        ...(userId && { assignedUserId: userId }), // Filtrar por usuário se fornecido
+        // Filtrar por connectionId - mostrar apenas conversas da conexão do usuário
+        ...(connectionId && { connectionId }),
       },
       include: {
         contact: true,
@@ -218,7 +234,8 @@ export class KanbanService {
 
   /**
    * Obter todas as conversas organizadas por etapa
-   * Filtra por usuário se fornecido
+   * Mostra TODAS as conversas (aguardando, transferidas, em atendimento)
+   * Não filtra por usuário para permitir visibilidade completa
    */
   async getKanbanBoard(userId?: string) {
     const stages = await this.listStages();

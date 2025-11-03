@@ -2,15 +2,14 @@ import { useState } from 'react';
 import { ConversationList } from '../components/chat/ConversationList';
 import { ChatArea } from '../components/chat/ChatArea';
 import { ContactDetails } from '../components/chat/ContactDetails';
-import { useWebSocket } from '../hooks/useWebSocket';
 import { BackgroundPaths } from '../components/ui/background-paths';
 
 export function Dashboard() {
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
   const [showContactDetails, setShowContactDetails] = useState(false);
 
-  // Conectar ao WebSocket para receber mensagens em tempo real
-  useWebSocket();
+  // WebSocket agora é gerenciado globalmente pelo WebSocketProvider no App.tsx
+  // Não precisa mais chamar useWebSocket() aqui
 
   return (
     <div className="flex h-full bg-black">
