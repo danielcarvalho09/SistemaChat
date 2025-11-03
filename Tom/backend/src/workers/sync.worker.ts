@@ -107,7 +107,10 @@ export const syncWorker = new Worker<SyncJob>(
     }
   },
   {
-    connection: getRedisClient(),
+    connection: {
+      ...getRedisClient(),
+      maxRetriesPerRequest: null, // OBRIGATÓRIO para BullMQ
+    },
     concurrency: 5, // Processar até 5 jobs simultaneamente
     limiter: {
       max: 10, // Máximo 10 jobs

@@ -4,7 +4,10 @@ import { logger } from './logger.js';
 
 // Configuração base para todas as queues
 const queueConfig: QueueOptions = {
-  connection: getRedisClient(),
+  connection: {
+    ...getRedisClient(),
+    maxRetriesPerRequest: null, // OBRIGATÓRIO para BullMQ
+  },
   defaultJobOptions: {
     attempts: 3,
     backoff: {
