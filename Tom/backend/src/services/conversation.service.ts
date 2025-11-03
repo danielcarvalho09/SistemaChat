@@ -8,19 +8,9 @@ import {
 } from '../models/types.js';
 import { NotFoundError, ConflictError, ForbiddenError } from '../middlewares/error.middleware.js';
 import { logger } from '../config/logger.js';
-import { ConversationRepository, IConversationRepository } from '../repositories/conversation.repository.js';
-import { CacheService } from './cache.service.js';
-import { getRedisClient } from '../config/redis.js';
 
 export class ConversationService {
   private prisma = getPrismaClient();
-  private repository: IConversationRepository;
-  private cache: CacheService;
-
-  constructor() {
-    this.repository = new ConversationRepository(this.prisma);
-    this.cache = new CacheService(getRedisClient());
-  }
 
   /**
    * Lista conversas com filtros

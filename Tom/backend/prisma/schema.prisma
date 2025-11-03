@@ -27,8 +27,8 @@ model User {
   whatsappConnections     WhatsAppConnection[] // Conexões WhatsApp do usuário
   conversations           Conversation[]
   messages                Message[]
-  transfersFrom           ConversationTransfer[]  @relation("TransferFrom")
-  transfersTo             ConversationTransfer[]  @relation("TransferTo")
+  transfersFrom           ConversationTransfer[] @relation("TransferFrom")
+  transfersTo             ConversationTransfer[] @relation("TransferTo")
   departmentAccess        UserDepartmentAccess[]
   notifications           Notification[]
   auditLogs               AuditLog[]
@@ -121,18 +121,18 @@ model RefreshToken {
 // ==================== ASSISTENTES DE IA ====================
 
 model AIAssistant {
-  id              String   @id @default(uuid())
-  name            String   @unique // Nome do assistente
-  apiKey          String // API Key da OpenAI (criptografada)
-  model           String   @default("gpt-4") // gpt-4, gpt-4-turbo, gpt-3.5-turbo, etc
-  instructions    String   @db.Text // Instruções de sistema para a IA
-  temperature     Float    @default(0.7) // Criatividade (0-2)
-  maxTokens       Int      @default(500) // Máximo de tokens por resposta
-  memoryContext   Int      @default(20) // Quantas mensagens manter em memória
-  memoryCacheDays Int      @default(1) // Quantos dias manter cache no Redis
-  isActive        Boolean  @default(true)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id                String   @id @default(uuid())
+  name              String   @unique // Nome do assistente
+  apiKey            String // API Key da OpenAI (criptografada)
+  model             String   @default("gpt-4") // gpt-4, gpt-4-turbo, gpt-3.5-turbo, etc
+  instructions      String   @db.Text // Instruções de sistema para a IA
+  temperature       Float    @default(0.7) // Criatividade (0-2)
+  maxTokens         Int      @default(500) // Máximo de tokens por resposta
+  memoryContext     Int      @default(20) // Quantas mensagens manter em memória
+  memoryCacheDays   Int      @default(1) // Quantos dias manter cache no Redis
+  isActive          Boolean  @default(true)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 
   // Relações
   connections WhatsAppConnection[]
@@ -145,27 +145,27 @@ model AIAssistant {
 // ==================== CONEXÕES WHATSAPP ====================
 
 model WhatsAppConnection {
-  id            String    @id @default(uuid())
+  id            String   @id @default(uuid())
   name          String // Nome personalizado da conexão
-  phoneNumber   String    @unique
-  status        String    @default("disconnected") // disconnected, connecting, connected, failed
+  phoneNumber   String   @unique
+  status        String   @default("disconnected") // disconnected, connecting, connected, failed
   qrCode        String?
   avatar        String?
   sessionData   String? // Dados criptografados da sessão (deprecated)
   authData      String? // Auth state do Baileys (credenciais + keys)
   lastConnected DateTime?
-  firstConnectedAt DateTime? // Timestamp da primeira conexão (para não sincronizar msgs antigas)
-  isActive      Boolean   @default(true)
-  isMatriz      Boolean   @default(false) // Conexão matriz vê todas as conversas
-  userId        String? // Conexão agora pertence a um usuário específico
-  aiEnabled     Boolean   @default(false) // Se IA está ativada para esta conexão
-  aiAssistantId String? // ID do assistente de IA associado
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  firstConnectedAt DateTime? // Timestamp da primeira conexão bem-sucedida
+  isActive      Boolean  @default(true)
+  isMatriz      Boolean  @default(false) // Conexão matriz vê todas as conversas
+  userId        String?  // Conexão agora pertence a um usuário específico
+  aiEnabled     Boolean  @default(false) // Se IA está ativada para esta conexão
+  aiAssistantId String?  // ID do assistente de IA associado
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
   // Relações
-  user          User?          @relation(fields: [userId], references: [id], onDelete: SetNull)
-  aiAssistant   AIAssistant?   @relation(fields: [aiAssistantId], references: [id], onDelete: SetNull)
+  user          User?              @relation(fields: [userId], references: [id], onDelete: SetNull)
+  aiAssistant   AIAssistant?       @relation(fields: [aiAssistantId], references: [id], onDelete: SetNull)
   conversations Conversation[]
   messages      Message[]
 
@@ -193,10 +193,10 @@ model Department {
   updatedAt   DateTime @updatedAt
 
   // Relações
-  conversations    Conversation[]
-  userAccess       UserDepartmentAccess[]
-  transfersTo      ConversationTransfer[] @relation("TransferToDepartment")
-  messageTemplates MessageTemplate[]
+  conversations        Conversation[]
+  userAccess           UserDepartmentAccess[]
+  transfersTo          ConversationTransfer[] @relation("TransferToDepartment")
+  messageTemplates     MessageTemplate[]
 
   @@index([isActive])
   @@map("departments")
@@ -221,16 +221,16 @@ model UserDepartmentAccess {
 // ==================== CONVERSAS E MENSAGENS ====================
 
 model Contact {
-  id          String   @id @default(uuid())
-  phoneNumber String   @unique
-  name        String?
-  pushName    String? // Nome do perfil do WhatsApp (push.name)
-  avatar      String?
-  email       String?
-  tags        String[] // Tags personalizadas
-  metadata    Json? // Dados adicionais customizáveis
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id           String   @id @default(uuid())
+  phoneNumber  String   @unique
+  name         String?
+  pushName     String? // Nome do perfil do WhatsApp (push.name)
+  avatar       String?
+  email        String?
+  tags         String[] // Tags personalizadas
+  metadata     Json? // Dados adicionais customizáveis
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
   // Relações
   conversations Conversation[]
@@ -240,35 +240,35 @@ model Contact {
 }
 
 model Conversation {
-  id              String    @id @default(uuid())
-  contactId       String
-  connectionId    String
-  departmentId    String?
-  assignedUserId  String? // Usuário atualmente atendendo
-  kanbanStageId   String? // Etapa atual no Kanban
-  status          String    @default("waiting") // waiting, transferred, in_progress, resolved, closed
-  lastMessageAt   DateTime  @default(now())
-  firstResponseAt DateTime? // Timestamp da primeira resposta do atendente
-  resolvedAt      DateTime?
-  unreadCount     Int       @default(0)
-  internalNotes   String? // Notas internas visíveis apenas para atendentes
-  metadata        Json? // Dados adicionais
-  isMonitored     Boolean   @default(false) // Admin espionando conversa (invisível)
-  monitoredBy     String? // ID do admin monitorando
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  id                 String    @id @default(uuid())
+  contactId          String
+  connectionId       String
+  departmentId       String?
+  assignedUserId     String? // Usuário atualmente atendendo
+  kanbanStageId      String? // Etapa atual no Kanban
+  status             String    @default("waiting") // waiting, transferred, in_progress, resolved, closed
+  lastMessageAt      DateTime  @default(now())
+  firstResponseAt    DateTime? // Timestamp da primeira resposta do atendente
+  resolvedAt         DateTime?
+  unreadCount        Int       @default(0)
+  internalNotes      String? // Notas internas visíveis apenas para atendentes
+  metadata           Json? // Dados adicionais
+  isMonitored        Boolean   @default(false) // Admin espionando conversa (invisível)
+  monitoredBy        String? // ID do admin monitorando
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
 
   // Relações
-  contact      Contact                @relation(fields: [contactId], references: [id], onDelete: Cascade)
-  connection   WhatsAppConnection     @relation(fields: [connectionId], references: [id], onDelete: Cascade)
-  department   Department?            @relation(fields: [departmentId], references: [id], onDelete: SetNull)
-  assignedUser User?                  @relation(fields: [assignedUserId], references: [id], onDelete: SetNull)
-  kanbanStage  KanbanStage?           @relation(fields: [kanbanStageId], references: [id], onDelete: SetNull)
-  messages     Message[]
-  transfers    ConversationTransfer[]
-  attachments  Attachment[]
-  tags         ConversationTag[]
-  history      ConversationHistory[]
+  contact       Contact                  @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  connection    WhatsAppConnection       @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  department    Department?              @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  assignedUser  User?                    @relation(fields: [assignedUserId], references: [id], onDelete: SetNull)
+  kanbanStage   KanbanStage?             @relation(fields: [kanbanStageId], references: [id], onDelete: SetNull)
+  messages      Message[]
+  transfers     ConversationTransfer[]
+  attachments   Attachment[]
+  tags          ConversationTag[]
+  history       ConversationHistory[]
 
   @@index([contactId])
   @@index([connectionId])
@@ -278,11 +278,6 @@ model Conversation {
   @@index([status])
   @@index([lastMessageAt])
   @@index([isMonitored])
-  // ÍNDICES COMPOSTOS para queries otimizadas
-  @@index([assignedUserId, status]) // Para buscar conversas por usuário e status
-  @@index([connectionId, status]) // Para conversas por conexão e status
-  @@index([status, lastMessageAt(sort: Desc)]) // Para ordenar conversas por status
-  @@index([assignedUserId, lastMessageAt(sort: Desc)]) // Para ordenar conversas do usuário
   @@map("conversations")
 }
 
@@ -302,21 +297,17 @@ model Message {
   createdAt      DateTime @default(now())
 
   // Relações
-  conversation Conversation       @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   connection   WhatsAppConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
-  sender       User?              @relation(fields: [senderId], references: [id], onDelete: SetNull)
+  sender       User?        @relation(fields: [senderId], references: [id], onDelete: SetNull)
 
-  @@unique([conversationId, externalId])
   @@index([conversationId])
   @@index([connectionId])
   @@index([senderId])
   @@index([timestamp])
   @@index([isFromContact])
   @@index([externalId])
-  // ÍNDICES COMPOSTOS para queries otimizadas
-  @@index([conversationId, timestamp(sort: Desc)]) // Para buscar mensagens de uma conversa por ordem
-  @@index([senderId, timestamp(sort: Desc)]) // Para histórico de mensagens do usuário
-  @@index([connectionId, timestamp(sort: Desc)]) // Para mensagens por conexão
+  @@unique([conversationId, externalId])
   @@map("messages")
 }
 
@@ -339,13 +330,13 @@ model Attachment {
 // ==================== TRANSFERÊNCIAS ====================
 
 model ConversationTransfer {
-  id             String   @id @default(uuid())
+  id             String    @id @default(uuid())
   conversationId String
   fromUserId     String
   toUserId       String?
   toDepartmentId String?
-  reason         String?  @db.VarChar(200)
-  transferredAt  DateTime @default(now())
+  reason         String?   @db.VarChar(200)
+  transferredAt  DateTime  @default(now())
 
   // Relações
   conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
@@ -425,15 +416,15 @@ model NotificationPreference {
 // ==================== AUDITORIA E LOGS ====================
 
 model AuditLog {
-  id         String   @id @default(uuid())
-  userId     String?
-  action     String // login, logout, create_connection, delete_user, etc.
-  resource   String // users, connections, conversations, etc.
-  resourceId String?
-  details    Json? // Detalhes adicionais da ação
-  ipAddress  String?
-  userAgent  String?
-  timestamp  DateTime @default(now())
+  id          String   @id @default(uuid())
+  userId      String?
+  action      String // login, logout, create_connection, delete_user, etc.
+  resource    String // users, connections, conversations, etc.
+  resourceId  String?
+  details     Json? // Detalhes adicionais da ação
+  ipAddress   String?
+  userAgent   String?
+  timestamp   DateTime @default(now())
 
   // Relações
   user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
@@ -448,16 +439,16 @@ model AuditLog {
 // ==================== MÉTRICAS E ANALYTICS ====================
 
 model ConversationMetric {
-  id                  String   @id @default(uuid())
-  conversationId      String   @unique
-  firstResponseTime   Int? // Segundos até primeira resposta
-  resolutionTime      Int? // Segundos até resolução
-  messageCount        Int      @default(0)
-  transferCount       Int      @default(0)
-  satisfactionRating  Int? // 1-5 estrelas
-  satisfactionComment String?
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
+  id                   String    @id @default(uuid())
+  conversationId       String    @unique
+  firstResponseTime    Int? // Segundos até primeira resposta
+  resolutionTime       Int? // Segundos até resolução
+  messageCount         Int       @default(0)
+  transferCount        Int       @default(0)
+  satisfactionRating   Int? // 1-5 estrelas
+  satisfactionComment  String?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
 
   @@index([firstResponseTime])
   @@index([resolutionTime])
@@ -468,13 +459,13 @@ model ConversationMetric {
 // ==================== TAGS PERSONALIZADAS ====================
 
 model Tag {
-  id        String   @id @default(uuid())
-  name      String
-  color     String   @default("#3b82f6") // Cor em hexadecimal
-  createdBy String? // ID do usuário que criou
-  isGlobal  Boolean  @default(false) // Tags globais são visíveis para todos
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id          String   @id @default(uuid())
+  name        String
+  color       String   @default("#3b82f6") // Cor em hexadecimal
+  createdBy   String? // ID do usuário que criou
+  isGlobal    Boolean  @default(false) // Tags globais são visíveis para todos
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
   // Relações
   conversations ConversationTag[]
@@ -537,24 +528,24 @@ model ListContact {
 }
 
 model Broadcast {
-  id            String    @id @default(uuid())
-  userId        String
-  connectionId  String
-  listId        String
-  message       String    @db.Text
-  mediaUrl      String?
-  mediaType     String? // image, video, document
-  totalContacts Int       @default(0)
-  sentCount     Int       @default(0)
-  failedCount   Int       @default(0)
-  status        String    @default("pending") // pending, in_progress, completed, cancelled, failed
-  startedAt     DateTime?
-  completedAt   DateTime?
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  id           String    @id @default(uuid())
+  userId       String
+  connectionId String
+  listId       String
+  message      String    @db.Text
+  mediaUrl     String?
+  mediaType    String? // image, video, document
+  totalContacts Int      @default(0)
+  sentCount    Int       @default(0)
+  failedCount  Int       @default(0)
+  status       String    @default("pending") // pending, in_progress, completed, cancelled, failed
+  startedAt    DateTime?
+  completedAt  DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
 
   // Relações
-  list ContactList    @relation(fields: [listId], references: [id], onDelete: Cascade)
+  list ContactList     @relation(fields: [listId], references: [id], onDelete: Cascade)
   logs BroadcastLog[]
 
   @@index([userId])
@@ -566,16 +557,16 @@ model Broadcast {
 }
 
 model BroadcastLog {
-  id          String   @id @default(uuid())
+  id          String    @id @default(uuid())
   broadcastId String
   contactId   String
   status      String // sent, failed
   error       String?
-  sentAt      DateTime @default(now())
+  sentAt      DateTime  @default(now())
 
   // Relações
-  broadcast Broadcast   @relation(fields: [broadcastId], references: [id], onDelete: Cascade)
-  contact   ListContact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  broadcast Broadcast    @relation(fields: [broadcastId], references: [id], onDelete: Cascade)
+  contact   ListContact  @relation(fields: [contactId], references: [id], onDelete: Cascade)
 
   @@index([broadcastId])
   @@index([contactId])
@@ -598,10 +589,10 @@ model BroadcastConfig {
 
 model KanbanStage {
   id          String   @id @default(uuid())
-  name        String // Ex: "Novo", "Em Atendimento", "Aguardando Cliente", "Resolvido"
+  name        String   // Ex: "Novo", "Em Atendimento", "Aguardando Cliente", "Resolvido"
   description String?
   color       String   @default("#3B82F6") // Cor da coluna (hex)
-  order       Int // Ordem de exibição (0, 1, 2, 3...)
+  order       Int      // Ordem de exibição (0, 1, 2, 3...)
   isDefault   Boolean  @default(false) // Etapa padrão para novas conversas
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -614,13 +605,13 @@ model KanbanStage {
 }
 
 model ConversationHistory {
-  id             String   @id @default(uuid())
+  id             String       @id @default(uuid())
   conversationId String
   fromStageId    String?
   toStageId      String
-  userId         String // Quem moveu
-  notes          String? // Observações sobre a movimentação
-  createdAt      DateTime @default(now())
+  userId         String       // Quem moveu
+  notes          String?      // Observações sobre a movimentação
+  createdAt      DateTime     @default(now())
 
   // Relações
   conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
