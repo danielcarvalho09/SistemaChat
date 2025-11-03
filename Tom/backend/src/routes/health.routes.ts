@@ -14,6 +14,23 @@ export async function healthRoutes(fastify: FastifyInstance) {
   });
 
   /**
+   * GET / - Root endpoint (fallback para keep-alive)
+   * Útil se outros endpoints derem 404
+   */
+  fastify.get('/', async (request, reply) => {
+    return reply.send({
+      status: 'ok',
+      message: 'AutoChat API is running',
+      timestamp: new Date().toISOString(),
+      endpoints: {
+        ping: '/ping',
+        health: '/health',
+        healthPing: '/health/ping',
+      },
+    });
+  });
+
+  /**
    * GET /keep-alive - Endpoint otimizado para manter servidor acordado
    * Além de responder, aciona pequenas tarefas para manter conexões ativas
    */
