@@ -296,6 +296,21 @@ class BaileysManager {
       // Resetar contador de reconexão ao conectar com sucesso
       this.resetReconnectionAttempts(connectionId);
       
+      // Verificar se é a primeira conexão
+      const connectionData = await this.prisma.whatsAppConnection.findUnique({
+        where: { id: connectionId },
+        select: { firstConnectedAt: true } as any,
+      });
+      
+      // Se é primeira conexão, salvar timestamp (para não sincronizar msgs antigas)
+      if (!(connectionData as any)?.firstConnectedAt) {
+        logger.info(`[Baileys] 🎉 First connection for ${connectionId} - saving timestamp`);
+        await this.prisma.whatsAppConnection.update({
+          where: { id: connectionId },
+          data: { firstConnectedAt: new Date() } as any,
+        });
+      }
+      
       await this.updateConnectionStatus(connectionId, 'connected');
       this.emitStatus(connectionId, 'connected');
       return;
@@ -383,6 +398,17 @@ class BaileysManager {
         client.lastMessageReceived = new Date();
       }
 
+      // Buscar timestamp da primeira conexão para filtrar mensagens antigas
+      const connectionData = await this.prisma.whatsAppConnection.findUnique({
+        where: { id: connectionId },
+        select: { firstConnectedAt: true } as any,
+      });
+      
+      const firstConnectedAt = (connectionData as any)?.firstConnectedAt;
+      if (firstConnectedAt) {
+        logger.info(`[Baileys] 🔒 Filtering messages older than ${firstConnectedAt.toISOString()}`);
+      }
+
       // VALIDAÇÃO: Se receber muitas mensagens de uma vez, pode ser sincronização atrasada
       if (messages && messages.length > 10) {
         logger.warn(`[Baileys] ⚠️ Received batch of ${messages.length} messages - possible delayed sync detected`);
@@ -409,10 +435,20 @@ class BaileysManager {
         const isFromMe = msg.key.fromMe || false;
         const externalId = msg.key.id;
         const pushName = msg.pushName || null; // Capturar pushName do contato
+        
+        // Timestamp da mensagem (em segundos, precisa converter para milissegundos)
+        const messageTimestamp = msg.messageTimestamp ? new Date(parseInt(msg.messageTimestamp) * 1000) : new Date();
 
-        logger.info(`[Baileys] 📱 Processing message from ${from}, isFromMe: ${isFromMe}, pushName: ${pushName}`);
+        logger.info(`[Baileys] 📱 Processing message from ${from}, isFromMe: ${isFromMe}, pushName: ${pushName}, timestamp: ${messageTimestamp.toISOString()}`);
 
         // ===== FILTROS =====
+        
+        // 0. Filtrar mensagens antigas (antes da primeira conexão)
+        if (firstConnectedAt && messageTimestamp < firstConnectedAt) {
+          logger.info(`[Baileys] ⏭️ Skipping OLD message from ${messageTimestamp.toISOString()} (before first connection ${firstConnectedAt.toISOString()})`);
+          syncStats.skipped++;
+          continue;
+        }
         
         // 1. Filtrar STATUS do WhatsApp (status@broadcast)
         if (from === 'status@broadcast') {

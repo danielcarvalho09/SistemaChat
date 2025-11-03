@@ -1,7 +1,6 @@
 import Fastify, { FastifyInstance } from 'fastify';
 import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
-import rateLimit from '@fastify/rate-limit';
 import multipart from '@fastify/multipart';
 import fastifyStatic from '@fastify/static';
 import swagger from '@fastify/swagger';
@@ -86,12 +85,10 @@ export async function buildApp(): Promise<FastifyInstance> {
     optionsSuccessStatus: 204,
   });
 
-  // Rate limiting global (mais permissivo que o específico de auth)
-  await app.register(rateLimit, {
-    max: 1000,
-    timeWindow: '15 minutes',
-    redis: undefined, // Usaremos nosso próprio middleware de rate limit com Redis
-  });
+  // Rate limiting com Redis (MELHORADO - 100 req/min por IP)
+  // Import do plugin customizado no início do arquivo
+  const { rateLimitPlugin } = await import('./plugins/rate-limit.plugin.js');
+  await rateLimitPlugin(app);
 
   // Suporte para upload de arquivos (multipart/form-data)
   await app.register(multipart, {

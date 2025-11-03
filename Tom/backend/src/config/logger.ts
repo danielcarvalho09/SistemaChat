@@ -1,8 +1,20 @@
 import winston from 'winston';
 import path from 'path';
+import * as Sentry from '@sentry/node';
 
 const logLevel = process.env.LOG_LEVEL || 'info';
 const logFilePath = process.env.LOG_FILE_PATH || './logs';
+
+// Helper para enviar erros ao Sentry via logger
+function logToSentry(info: any) {
+  if (info.level === 'error' && process.env.SENTRY_DSN) {
+    if (info instanceof Error) {
+      Sentry.captureException(info);
+    } else if (info.message) {
+      Sentry.captureMessage(info.message, 'error');
+    }
+  }
+}
 
 // Formato customizado para logs
 const customFormat = winston.format.combine(
@@ -61,6 +73,13 @@ export const logger = winston.createLogger({
   transports,
   exitOnError: false,
 });
+
+// Hook para enviar erros ao Sentry
+const originalError = logger.error.bind(logger);
+logger.error = ((...args: any[]) => {
+  logToSentry({ level: 'error', message: args[0] });
+  return originalError.apply(logger, args as [any]);
+}) as any;
 
 // Stream para integração com Morgan (HTTP logging)
 export const loggerStream = {

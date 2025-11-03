@@ -4,9 +4,19 @@ import { getSocketServer } from '../websocket/socket.server.js';
 import { MessageResponse, SendMessageRequest, PaginatedResponse, PaginationParams } from '../models/types.js';
 import { NotFoundError, ForbiddenError } from '../middlewares/error.middleware.js';
 import { logger } from '../config/logger.js';
+import { MessageRepository, IMessageRepository } from '../repositories/message.repository.js';
+import { CacheService } from './cache.service.js';
+import { getRedisClient } from '../config/redis.js';
 
 export class MessageService {
   private prisma = getPrismaClient();
+  private repository: IMessageRepository;
+  private cache: CacheService;
+
+  constructor() {
+    this.repository = new MessageRepository(this.prisma);
+    this.cache = new CacheService(getRedisClient());
+  }
 
   /**
    * Lista mensagens de uma conversa
@@ -34,6 +44,16 @@ export class MessageService {
       throw new ForbiddenError('You do not have access to this conversation');
     }
 
+    // Cache key baseado em conversationId + params
+    const cacheKey = `messages:${conversationId}:page${page}:limit${limit}:${sortOrder}`;
+    
+    // Tentar buscar do cache primeiro
+    const cached = await this.cache.get<PaginatedResponse<MessageResponse>>(cacheKey, { ttl: 60 }); // 1 min cache
+    if (cached) {
+      logger.debug(`Cache HIT: ${cacheKey}`);
+      return cached;
+    }
+
     const [messages, total] = await Promise.all([
       this.prisma.message.findMany({
         where: { conversationId },
@@ -53,7 +73,7 @@ export class MessageService {
       this.prisma.message.count({ where: { conversationId } }),
     ]);
 
-    return {
+    const result = {
       data: messages.map(this.formatMessageResponse),
       pagination: {
         page,
@@ -64,6 +84,11 @@ export class MessageService {
         hasPrev: page > 1,
       },
     };
+
+    // Cachear resultado
+    await this.cache.set(cacheKey, result, { ttl: 60 }); // 1 minuto
+    
+    return result;
   }
 
   /**
@@ -210,6 +235,10 @@ export class MessageService {
         firstResponseAt: conversation.firstResponseAt || new Date(),
       },
     });
+
+    // Invalidar cache de mensagens desta conversa
+    await this.cache.invalidatePattern(`messages:${conversationId}:*`);
+    logger.debug(`Cache invalidated for conversation ${conversationId}`);
 
     logger.info(`[MessageService] ✅ Message processed for conversation ${conversation.id}`);
 

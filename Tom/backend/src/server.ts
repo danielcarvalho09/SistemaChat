@@ -7,16 +7,29 @@ import { seedDatabase } from './utils/seed.js';
 import { initializeSocketServer } from './websocket/socket.server.js';
 import { baileysManager } from './whatsapp/baileys.manager.js';
 import { CleanupService } from './services/cleanup.service.js';
+import { initializeSentry } from './config/sentry.js';
+import { initializeQueues, closeQueues } from './config/queue.js';
+import { syncWorker } from './workers/sync.worker.js';
+import { startSystemMetricsCollection } from './config/metrics.js';
 
 async function start() {
   try {
     logger.info('🚀 Starting WhatsApp System Backend...');
+
+    // Inicializar Sentry (Error Tracking)
+    initializeSentry();
 
     // Conectar ao banco de dados
     await connectDatabase();
 
     // Conectar ao Redis
     await connectRedis();
+
+    // Inicializar Job Queues
+    await initializeQueues();
+
+    // Iniciar coleta de métricas do sistema
+    startSystemMetricsCollection();
 
     // Seed inicial do banco de dados (roles e permissões)
     // DESABILITADO - Já foi executado na primeira vez
@@ -86,6 +99,12 @@ async function start() {
         logger.info(`\n${signal} received, shutting down gracefully...`);
 
         try {
+          // Fechar workers
+          await syncWorker.close();
+          
+          // Fechar queues
+          await closeQueues();
+          
           await app.close();
           await disconnectDatabase();
           await disconnectRedis();

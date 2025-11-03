@@ -452,4 +452,9 @@ class SocketService {
 }
 
 export const socketService = new SocketService();
+
+// NOVO: Service refatorado com melhor arquitetura (SRP)
+// Para usar: import { socketServiceRefactored } from './socket'
+export { socketServiceRefactored } from './websocket/SocketServiceRefactored';
+
 export default socketService;
