@@ -107,23 +107,6 @@ export class WhatsAppController {
   };
 
   /**
-   * POST /api/v1/connections/:connectionId/cancel-reconnection
-   * Cancela reconexão automática
-   */
-  cancelReconnection = async (
-    request: FastifyRequest<{ Params: { connectionId: string } }>,
-    reply: FastifyReply
-  ) => {
-    const { connectionId } = request.params;
-    await this.whatsappService.cancelReconnection(connectionId);
-
-    return reply.status(200).send({
-      success: true,
-      message: 'Reconnection cancelled successfully',
-    });
-  };
-
-  /**
    * DELETE /api/v1/connections/:connectionId
    * Deleta conexão
    */

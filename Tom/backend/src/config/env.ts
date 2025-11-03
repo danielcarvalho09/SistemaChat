@@ -34,7 +34,6 @@ const envSchema = z.object({
   WHATSAPP_SESSION_PATH: z.string().default('./whatsapp-sessions'),
   MAX_CONNECTIONS: z.string().default('100'),
   WHATSAPP_TIMEOUT: z.string().default('60000'),
-  WHATSAPP_KEEP_ALIVE_NUMBER: z.string().optional(), // Número para enviar mensagens de keep-alive (opcional)
 
   // Logging
   LOG_LEVEL: z.string().default('info'),
@@ -106,7 +105,6 @@ export const config = {
     sessionPath: env.WHATSAPP_SESSION_PATH,
     maxConnections: parseInt(env.MAX_CONNECTIONS, 10),
     timeout: parseInt(env.WHATSAPP_TIMEOUT, 10),
-    keepAliveNumber: env.WHATSAPP_KEEP_ALIVE_NUMBER, // Número para keep-alive (opcional)
   },
   logging: {
     level: env.LOG_LEVEL,

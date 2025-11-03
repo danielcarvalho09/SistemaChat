@@ -328,6 +328,7 @@ export enum SocketEvent {
   WHATSAPP_CONNECTED = 'whatsapp_connected',
   WHATSAPP_DISCONNECTED = 'whatsapp_disconnected',
   WHATSAPP_CONNECTING = 'whatsapp_connecting',
+  WHATSAPP_CONNECTION_FAILED = 'whatsapp_connection_failed',
 }
 
 export interface SocketMessage {

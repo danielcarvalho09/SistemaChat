@@ -301,6 +301,18 @@ export class SocketServer {
     });
     logger.info(`WhatsApp status ${status} emitted for connection ${connectionId}`);
   }
+
+  /**
+   * Emite evento de falha na conexão WhatsApp
+   */
+  emitWhatsAppConnectionFailed(connectionId: string, error: string): void {
+    this.io.emit(SocketEvent.WHATSAPP_CONNECTION_FAILED, {
+      connectionId,
+      error,
+      timestamp: new Date(),
+    });
+    logger.error(`WhatsApp connection failed emitted for ${connectionId}: ${error}`);
+  }
 }
 
 let socketServer: SocketServer;

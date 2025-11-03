@@ -200,35 +200,6 @@ export class WhatsAppService {
   }
 
   /**
-   * Cancela reconexão automática de uma conexão
-   */
-  async cancelReconnection(connectionId: string) {
-    try {
-      const connection = await this.prisma.whatsAppConnection.findUnique({
-        where: { id: connectionId },
-      });
-
-      if (!connection) {
-        throw new NotFoundError('Connection not found');
-      }
-
-      // Cancelar reconexão automática
-      baileysManager.cancelReconnection(connectionId);
-
-      // Atualizar status no banco
-      await this.prisma.whatsAppConnection.update({
-        where: { id: connectionId },
-        data: { status: 'disconnected' },
-      });
-
-      logger.info(`[WhatsApp] Reconnection cancelled for ${connectionId}`);
-    } catch (error) {
-      logger.error(`[WhatsApp] Error cancelling reconnection for ${connectionId}:`, error);
-      throw error;
-    }
-  }
-
-  /**
    * Deleta uma conexão e TODOS os dados relacionados
    */
   async deleteConnection(connectionId: string) {

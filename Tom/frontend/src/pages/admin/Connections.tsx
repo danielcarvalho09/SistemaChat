@@ -46,6 +46,7 @@ export function Connections() {
   const [departments, setDepartments] = useState<Department[]>([]);
   const socketRef = useRef<any>(null);
   const hasSetupListeners = useRef(false);
+  const connectionTimeouts = useRef<Map<string, NodeJS.Timeout>>(new Map()); // ✅ Timeouts por conexão
 
   useEffect(() => {
     fetchConnections();
@@ -111,6 +112,13 @@ export function Connections() {
     socket.on('whatsapp_connected', (data: { connectionId: string }) => {
       console.log('✅ WhatsApp conectado:', data.connectionId);
       
+      // ✅ Limpar timeout ao conectar com sucesso
+      const timeoutId = connectionTimeouts.current.get(data.connectionId);
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+        connectionTimeouts.current.delete(data.connectionId);
+      }
+      
       setConnections((prev) =>
         prev.map((conn) =>
           conn.id === data.connectionId ? { ...conn, status: 'connected' } : conn
@@ -132,6 +140,13 @@ export function Connections() {
     socket.on('whatsapp_disconnected', (data: { connectionId: string }) => {
       console.log('❌ WhatsApp desconectado:', data.connectionId);
       
+      // ✅ Limpar timeout ao desconectar
+      const timeoutId = connectionTimeouts.current.get(data.connectionId);
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+        connectionTimeouts.current.delete(data.connectionId);
+      }
+      
       setConnections((prev) =>
         prev.map((conn) =>
           conn.id === data.connectionId ? { ...conn, status: 'disconnected' } : conn
@@ -148,12 +163,43 @@ export function Connections() {
       });
     });
 
+    // ✅ Evento: WhatsApp falhou ao conectar (novo)
+    socket.on('whatsapp_connection_failed', (data: { connectionId: string; error?: string }) => {
+      console.error('❌ WhatsApp falhou ao conectar:', data.connectionId, data.error);
+      
+      // ✅ Limpar timeout ao falhar
+      const timeoutId = connectionTimeouts.current.get(data.connectionId);
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+        connectionTimeouts.current.delete(data.connectionId);
+      }
+      
+      setConnections((prev) =>
+        prev.map((conn) =>
+          conn.id === data.connectionId ? { ...conn, status: 'disconnected' } : conn
+        )
+      );
+      
+      // Fechar modal se estiver aberto
+      setSelectedConnection((prev) => {
+        if (prev?.id === data.connectionId) {
+          setShowQRModal(false);
+          return null;
+        }
+        return prev;
+      });
+
+      // Mostrar alerta de erro
+      alert(`Falha ao conectar WhatsApp: ${data.error || 'Erro desconhecido'}`);
+    });
+
       return () => {
         // Remover listeners ao desmontar
         socket.off('whatsapp_qr_code');
         socket.off('whatsapp_connecting');
         socket.off('whatsapp_connected');
         socket.off('whatsapp_disconnected');
+        socket.off('whatsapp_connection_failed');
       };
     };
 
@@ -162,6 +208,11 @@ export function Connections() {
 
     return () => {
       hasSetupListeners.current = false;
+      // ✅ Limpar todos os timeouts ao desmontar
+      connectionTimeouts.current.forEach((timeoutId) => {
+        clearTimeout(timeoutId);
+      });
+      connectionTimeouts.current.clear();
     };
   }, []);
 
@@ -267,6 +318,13 @@ export function Connections() {
 
   const handleConnect = async (connectionId: string) => {
     try {
+      // ✅ Limpar timeout anterior se existir
+      const existingTimeout = connectionTimeouts.current.get(connectionId);
+      if (existingTimeout) {
+        clearTimeout(existingTimeout);
+        connectionTimeouts.current.delete(connectionId);
+      }
+
       // Atualizar status para "connecting"
       setConnections((prev) =>
         prev.map((conn) =>
@@ -274,17 +332,96 @@ export function Connections() {
         )
       );
 
-      await api.post(`/connections/${connectionId}/connect`);
+      // ✅ Timeout de 30 segundos para conexão
+      const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error('Timeout: Conexão demorou mais de 30 segundos')), 30000);
+      });
+
+      // ✅ Requisição com timeout
+      await Promise.race([
+        api.post(`/connections/${connectionId}/connect`),
+        timeoutPromise,
+      ]) as Promise<any>;
       
+      // ✅ Timeout automático: se após 60s ainda estiver "connecting", voltar para "disconnected"
+      const timeoutId = setTimeout(() => {
+        setConnections((prev) =>
+          prev.map((conn) => {
+            if (conn.id === connectionId && conn.status === 'connecting') {
+              console.warn(`⚠️ Conexão ${connectionId} travada em "connecting" há mais de 60s, resetando para "disconnected"`);
+              return { ...conn, status: 'disconnected' };
+            }
+            return conn;
+          })
+        );
+        connectionTimeouts.current.delete(connectionId);
+      }, 60000); // 60 segundos
+      
+      connectionTimeouts.current.set(connectionId, timeoutId);
+
       // O QR Code virá via WebSocket
-    } catch (error) {
+    } catch (error: any) {
       console.error('Erro ao conectar:', error);
-      alert('Erro ao conectar. Verifique se o backend está rodando.');
+      
+      // ✅ Limpar timeout em caso de erro
+      const timeoutId = connectionTimeouts.current.get(connectionId);
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+        connectionTimeouts.current.delete(connectionId);
+      }
+      
+      // ✅ Mensagem de erro mais descritiva
+      const errorMessage = error.response?.data?.message || error.message || 'Erro desconhecido ao conectar';
+      alert(`Erro ao conectar: ${errorMessage}`);
+      
+      // ✅ Sempre voltar para "disconnected" em caso de erro
       setConnections((prev) =>
         prev.map((conn) =>
           conn.id === connectionId ? { ...conn, status: 'disconnected' } : conn
         )
       );
+    }
+  };
+
+  const handleCancelConnection = async (connectionId: string) => {
+    try {
+      // ✅ Limpar timeout ao cancelar
+      const timeoutId = connectionTimeouts.current.get(connectionId);
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+        connectionTimeouts.current.delete(connectionId);
+      }
+
+      // ✅ Cancelar conexão em andamento
+      console.log(`🛑 Cancelando conexão ${connectionId}...`);
+      
+      // Atualizar status para "disconnected" imediatamente
+      setConnections((prev) =>
+        prev.map((conn) =>
+          conn.id === connectionId ? { ...conn, status: 'disconnected' } : conn
+        )
+      );
+      
+      // Tentar desconectar no backend (pode estar em processo de conexão)
+      try {
+        await api.post(`/connections/${connectionId}/disconnect`);
+      } catch (error) {
+        console.warn('⚠️ Erro ao cancelar conexão no backend (pode ser normal):', error);
+        // Não mostrar erro se a conexão não existir ainda
+      }
+      
+      // Fechar modal se estiver aberto
+      setSelectedConnection((prev) => {
+        if (prev?.id === connectionId) {
+          setShowQRModal(false);
+          return null;
+        }
+        return prev;
+      });
+      
+      console.log(`✅ Conexão ${connectionId} cancelada`);
+    } catch (error) {
+      console.error('Erro ao cancelar conexão:', error);
     }
   };
 
@@ -292,28 +429,17 @@ export function Connections() {
     if (!confirm('Tem certeza que deseja desconectar?')) return;
     
     try {
+      // ✅ Se estiver em "connecting", cancelar primeiro
+      const connection = connections.find(c => c.id === connectionId);
+      if (connection?.status === 'connecting') {
+        await handleCancelConnection(connectionId);
+        return;
+      }
+      
       await api.post(`/connections/${connectionId}/disconnect`);
       fetchConnections();
     } catch (error) {
       console.error('Erro ao desconectar:', error);
-    }
-  };
-
-  const handleCancelReconnection = async (connectionId: string) => {
-    try {
-      await api.post(`/connections/${connectionId}/cancel-reconnection`);
-      
-      // Atualizar status localmente para "disconnected"
-      setConnections((prev) =>
-        prev.map((conn) =>
-          conn.id === connectionId ? { ...conn, status: 'disconnected' } : conn
-        )
-      );
-      
-      console.log('✅ Reconexão cancelada com sucesso');
-    } catch (error) {
-      console.error('Erro ao cancelar reconexão:', error);
-      alert('Erro ao cancelar reconexão. Tente novamente.');
     }
   };
 
@@ -445,11 +571,11 @@ export function Connections() {
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => handleCancelReconnection(connection.id)}
-                      className="flex-1 bg-yellow-50 hover:bg-yellow-100 text-yellow-800 border-yellow-300"
+                      onClick={() => handleCancelConnection(connection.id)}
+                      className="flex-1 bg-red-50 hover:bg-red-100 text-red-700 border-red-300"
                     >
-                      <X className="w-4 h-4 mr-2" />
-                      Cancelar Reconexão
+                      <Power className="w-4 h-4 mr-2" />
+                      Cancelar
                     </Button>
                   ) : (
                     <Button
