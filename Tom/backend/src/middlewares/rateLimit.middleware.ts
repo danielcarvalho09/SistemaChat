@@ -66,11 +66,31 @@ export const rateLimit = (options: RateLimitOptions) => {
 
 /**
  * Rate limit específico para autenticação (mais restritivo)
+ * Previne ataques de brute force combinando IP + email
  */
 export const authRateLimit = rateLimit({
   max: config.server.isDevelopment ? 100 : 5, // 100 em dev, 5 em prod
   windowMs: config.server.isDevelopment ? 60 * 1000 : 15 * 60 * 1000, // 1min em dev, 15min em prod
-  message: 'Too many authentication attempts, please try again later',
+  message: 'Too many authentication attempts. Please try again later.',
+  keyGenerator: (request: FastifyRequest) => {
+    // Combinar IP + email para prevenir brute force distribuído
+    const body = request.body as any;
+    const email = body?.email || 'unknown';
+    return `${request.ip}:${email}`;
+  },
+});
+
+/**
+ * Rate limit MUITO agressivo para login falho
+ * Bloqueia IP após 3 tentativas falhas consecutivas
+ */
+export const loginFailureRateLimit = rateLimit({
+  max: config.server.isDevelopment ? 50 : 3, // 50 em dev, 3 em prod
+  windowMs: config.server.isDevelopment ? 60 * 1000 : 30 * 60 * 1000, // 1min em dev, 30min em prod
+  message: 'Too many failed login attempts. Your IP has been temporarily blocked. Please try again in 30 minutes.',
+  keyGenerator: (request: FastifyRequest) => {
+    return `${request.ip}:failed-login`;
+  },
 });
 
 /**

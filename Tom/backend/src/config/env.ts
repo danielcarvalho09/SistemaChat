@@ -48,6 +48,9 @@ const envSchema = z.object({
   MAX_FILE_SIZE: z.string().default('10485760'), // 10MB
   UPLOAD_PATH: z.string().default('./uploads'),
   ALLOWED_FILE_TYPES: z.string().default('image/jpeg,image/png,image/gif,video/mp4,application/pdf'),
+
+  // Encryption (AES-256)
+  ENCRYPTION_KEY: z.string().min(64, 'ENCRYPTION_KEY must be 64 hex characters (32 bytes)'),
 });
 
 // Validar e parsear variáveis de ambiente

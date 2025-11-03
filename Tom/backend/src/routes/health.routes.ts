@@ -115,6 +115,19 @@ export async function healthRoutes(fastify: FastifyInstance) {
   });
 
   /**
+   * GET /health/ping - Endpoint simples para keep-alive externo
+   * Útil para cron jobs externos fazerem ping no sistema
+   */
+  fastify.get('/health/ping', async (request, reply) => {
+    return reply.send({
+      status: 'pong',
+      timestamp: new Date().toISOString(),
+      uptime: process.uptime(),
+      message: 'Server is alive and responding',
+    });
+  });
+
+  /**
    * GET /health/roles - Verifica se as roles estão configuradas
    */
   fastify.get('/health/roles', async (request, reply) => {

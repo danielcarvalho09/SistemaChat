@@ -11,6 +11,7 @@ import path from 'path';
 import { config } from './config/env.js';
 import { logger } from './config/logger.js';
 import { errorHandler, notFoundHandler } from './middlewares/error.middleware.js';
+import { sanitizeInputs } from './middlewares/sanitize.middleware.js';
 import { registerRoutes } from './routes/index.js';
 
 export async function buildApp(): Promise<FastifyInstance> {
@@ -179,6 +180,9 @@ export async function buildApp(): Promise<FastifyInstance> {
       staticCSP: true,
     });
   }
+
+  // ✅ Hook global de sanitização de inputs (ANTES das rotas)
+  app.addHook('preHandler', sanitizeInputs);
 
   // Registrar rotas
   await registerRoutes(app);

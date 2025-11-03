@@ -27,7 +27,9 @@
     "test:e2e": "jest --config jest.e2e.config.js",
     "lint": "eslint src --ext .ts",
     "lint:fix": "eslint src --ext .ts --fix",
-    "format": "prettier --write \"src/**/*.ts\""
+    "format": "prettier --write \"src/**/*.ts\"",
+    "generate:encryption-key": "tsx scripts/generate-encryption-key.ts",
+    "migrate:encrypt-authdata": "tsx scripts/migrate-encrypt-authdata.ts"
   },
   "keywords": [
     "whatsapp",

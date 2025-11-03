@@ -7,6 +7,7 @@ import { seedDatabase } from './utils/seed.js';
 import { initializeSocketServer } from './websocket/socket.server.js';
 import { baileysManager } from './whatsapp/baileys.manager.js';
 import { CleanupService } from './services/cleanup.service.js';
+import { keepAliveService } from './services/keep-alive.service.js';
 
 async function start() {
   try {
@@ -46,6 +47,10 @@ async function start() {
     const cleanupService = new CleanupService();
     cleanupService.startAutomaticCleanup();
 
+    // ✅ Iniciar serviço de keep-alive (previne sleep no Railway)
+    keepAliveService.start();
+    logger.info('💓 Keep-alive service started (prevents Railway sleep)');
+
     // Reconectar conexões WhatsApp que estavam ativas
     logger.info('⏳ Aguardando 3 segundos antes de reconectar WhatsApp...');
     setTimeout(async () => {
@@ -61,6 +66,7 @@ async function start() {
         logger.info(`\n${signal} received, shutting down gracefully...`);
 
         try {
+          keepAliveService.stop(); // Parar keep-alive
           await app.close();
           await disconnectDatabase();
           await disconnectRedis();

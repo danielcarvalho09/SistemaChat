@@ -15,6 +15,7 @@ import QRCode from 'qrcode';
 import { logger } from '../config/logger.js';
 import { getSocketServer } from '../websocket/socket.server.js';
 import { getPrismaClient } from '../config/database.js';
+import { encrypt, decrypt, isEncrypted } from '../utils/encryption.js';
 
 /**
  * Interface do cliente Baileys
@@ -162,12 +163,23 @@ class BaileysManager {
     if (connection?.authData) {
       // Carregar credenciais existentes
       try {
-        const authData = JSON.parse(connection.authData as string, BufferJSON.reviver);
+        let authDataString = connection.authData as string;
+        
+        // 🔐 DESCRIPTOGRAFAR authData se estiver criptografado
+        if (isEncrypted(authDataString)) {
+          logger.debug(`[Baileys] 🔓 Decrypting auth data for ${connectionId}`);
+          authDataString = decrypt(authDataString);
+        } else {
+          // ⚠️ MIGRAÇÃO: Se não estiver criptografado, é dado legado
+          logger.warn(`[Baileys] ⚠️ Auth data for ${connectionId} is not encrypted (legacy data)`);
+        }
+        
+        const authData = JSON.parse(authDataString, BufferJSON.reviver);
         creds = authData.creds;
         keys = authData.keys || {};
         logger.info(`[Baileys] ✅ Loaded existing auth for ${connectionId} (has credentials)`);
       } catch (error) {
-        logger.warn(`[Baileys] ⚠️ Failed to parse auth data, creating new credentials`);
+        logger.warn(`[Baileys] ⚠️ Failed to parse auth data, creating new credentials:`, error);
         creds = initAuthCreds();
       }
     } else {
@@ -180,7 +192,7 @@ class BaileysManager {
     const saveCreds = async () => {
       try {
         // Usar BufferJSON para serializar corretamente os Buffers
-        const authData = JSON.stringify(
+        const authDataString = JSON.stringify(
           {
             creds,
             keys,
@@ -188,12 +200,16 @@ class BaileysManager {
           BufferJSON.replacer
         );
 
+        // 🔐 CRIPTOGRAFAR authData antes de salvar no banco
+        logger.debug(`[Baileys] 🔒 Encrypting auth data for ${connectionId}`);
+        const encryptedAuthData = encrypt(authDataString);
+
         await this.prisma.whatsAppConnection.update({
           where: { id: connectionId },
-          data: { authData },
+          data: { authData: encryptedAuthData },
         });
 
-        logger.debug(`[Baileys] ✅ Saved auth for ${connectionId}`);
+        logger.debug(`[Baileys] ✅ Saved encrypted auth for ${connectionId}`);
       } catch (error) {
         logger.error(`[Baileys] ❌ Error saving auth for ${connectionId}:`, error);
       }
