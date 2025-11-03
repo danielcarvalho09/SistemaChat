@@ -78,7 +78,7 @@ class BaileysManager {
         printQRInTerminal: false,
         logger: pino({ level: 'silent' }),
         browser: ['WhatsApp Multi-Device', 'Chrome', '1.0.0'],
-        syncFullHistory: true, // habilita sincronização de histórico ao reconectar
+        syncFullHistory: false, // Desabilitado: só sincronizar mensagens a partir da primeira conexão
         markOnlineOnConnect: true, // Marcar como online ao conectar (IMPORTANTE para manter conexão)
         // Configurações otimizadas para melhorar estabilidade da conexão
         connectTimeoutMs: 60000, // Timeout de 60s para conectar
@@ -296,6 +296,9 @@ class BaileysManager {
       // Resetar contador de reconexão ao conectar com sucesso
       this.resetReconnectionAttempts(connectionId);
       
+      // Salvar firstConnectedAt se for a primeira conexão
+      await this.saveFirstConnectedAt(connectionId);
+      
       await this.updateConnectionStatus(connectionId, 'connected');
       this.emitStatus(connectionId, 'connected');
       return;
@@ -377,6 +380,25 @@ class BaileysManager {
 
       logger.info(`[Baileys] 📨 Message update received - Type: ${type}, Count: ${messages?.length || 0}`);
 
+      // Buscar firstConnectedAt para filtrar mensagens antigas
+      const connection = await this.prisma.whatsAppConnection.findUnique({
+        where: { id: connectionId },
+        select: { firstConnectedAt: true },
+      });
+
+      const firstConnectedAt = connection?.firstConnectedAt;
+      
+      // Se não tem firstConnectedAt, ainda não conectou pela primeira vez
+      // Nesse caso, não processar histórico antigo (aguardar conexão)
+      // Mas mensagens em tempo real (notify) sempre devem ser processadas
+      if (!firstConnectedAt && type === 'history') {
+        logger.info(`[Baileys] ⏭️ Skipping history sync - connection ${connectionId} hasn't been connected yet (will process after first connection)`);
+        return;
+      }
+      
+      // IMPORTANTE: Mensagens em tempo real (notify) sempre processar, mesmo sem firstConnectedAt
+      // Elas são novas e devem ser capturadas imediatamente
+
       // Atualizar timestamp de última mensagem recebida
       const client = this.clients.get(connectionId);
       if (client) {
@@ -397,11 +419,10 @@ class BaileysManager {
         type,
       };
 
-      // IMPORTANTE: Processar TODOS os tipos de mensagens para sincronização completa
-      // - notify: mensagens em tempo real
-      // - append: mensagens adicionadas (sincronização)
-      // - history: mensagens históricas (sincronização inicial)
-      // NÃO filtrar por tipo para garantir sincronização completa
+      // IMPORTANTE: Processar mensagens apenas a partir da primeira conexão
+      // - notify: mensagens em tempo real (sempre processar)
+      // - append: mensagens adicionadas (filtrar por data)
+      // - history: mensagens históricas (filtrar por data - mas já foi bloqueado acima)
       logger.info(`[Baileys] 📨 Processing message batch - Type: ${type}, Count: ${messages?.length || 0}`);
 
       for (const msg of messages) {
@@ -413,6 +434,27 @@ class BaileysManager {
         logger.info(`[Baileys] 📱 Processing message from ${from}, isFromMe: ${isFromMe}, pushName: ${pushName}`);
 
         // ===== FILTROS =====
+        
+        // 0. Filtrar mensagens antigas (anteriores à primeira conexão)
+        // IMPORTANTE: Mensagens em tempo real (notify) SEMPRE passam (são novas)
+        // Apenas filtrar mensagens de histórico/appended que têm timestamp antigo
+        if (firstConnectedAt && type !== 'notify') {
+          // Extrair timestamp da mensagem do Baileys
+          // msg.messageTimestamp vem em segundos Unix, precisa converter para Date
+          const messageTimestamp = msg.messageTimestamp 
+            ? new Date(Number(msg.messageTimestamp) * 1000) 
+            : msg.key?.messageTimestamp 
+              ? new Date(Number(msg.key.messageTimestamp) * 1000)
+              : null;
+          
+          // Só filtrar se tiver timestamp E for anterior à primeira conexão
+          // Se não tiver timestamp, processar (pode ser mensagem recente sem timestamp)
+          if (messageTimestamp && messageTimestamp < firstConnectedAt) {
+            logger.debug(`[Baileys] ⏭️ Skipping old message from ${messageTimestamp.toISOString()} (before first connection at ${firstConnectedAt.toISOString()})`);
+            syncStats.skipped++;
+            continue;
+          }
+        }
         
         // 1. Filtrar STATUS do WhatsApp (status@broadcast)
         if (from === 'status@broadcast') {
@@ -1223,6 +1265,30 @@ class BaileysManager {
       logger.info(`[Baileys] Status ${status} emitted for ${connectionId}`);
     } catch (error) {
       logger.error(`[Baileys] Error emitting status for ${connectionId}:`, error);
+    }
+  }
+
+  /**
+   * Salva firstConnectedAt quando conectar pela primeira vez
+   */
+  private async saveFirstConnectedAt(connectionId: string): Promise<void> {
+    try {
+      const connection = await this.prisma.whatsAppConnection.findUnique({
+        where: { id: connectionId },
+        select: { firstConnectedAt: true },
+      });
+
+      // Só salvar se ainda não foi salvo
+      if (connection && !connection.firstConnectedAt) {
+        const now = new Date();
+        await this.prisma.whatsAppConnection.update({
+          where: { id: connectionId },
+          data: { firstConnectedAt: now },
+        });
+        logger.info(`[Baileys] ✅ First connection timestamp saved for ${connectionId}: ${now.toISOString()}`);
+      }
+    } catch (error) {
+      logger.error(`[Baileys] Error saving firstConnectedAt for ${connectionId}:`, error);
     }
   }
 
