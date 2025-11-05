@@ -152,8 +152,11 @@ export class MessageService {
 
     // Enviar via WhatsApp usando Baileys
     let externalId: string | undefined;
+    let sendError: Error | null = null;
+    
     try {
       logger.info(`📤 Sending message from user ${userName} (${userId}) to ${conversation.contact.phoneNumber} via connection ${conversation.connectionId}`);
+      logger.info(`📤 Message type: ${messageType}, mediaUrl: ${mediaUrl || 'none'}`);
       
       if (messageType === 'text') {
         externalId = await baileysManager.sendMessage(
@@ -163,21 +166,27 @@ export class MessageService {
           'text'
         );
       } else if (mediaUrl) {
+        logger.info(`📤 Sending media message: type=${messageType}, url=${mediaUrl}`);
         externalId = await baileysManager.sendMessage(
           conversation.connectionId,
           conversation.contact.phoneNumber,
           { url: mediaUrl, caption: formattedContent },
           messageType as 'image' | 'audio' | 'video' | 'document'
         );
+        logger.info(`📤 Media message sent, externalId: ${externalId || 'none'}`);
       }
       
       logger.info(`✅ Message sent successfully via WhatsApp (id: ${externalId || 'n/a'})`);
     } catch (error) {
       logger.error('❌ Error sending WhatsApp message:', error);
-      throw new Error(`Failed to send WhatsApp message: ${(error as Error).message}`);
+      sendError = error instanceof Error ? error : new Error('Unknown error');
+      // Não lançar erro imediatamente - salvar mensagem como "failed" no banco
+      logger.warn(`⚠️ Message will be saved with status 'failed' due to send error`);
     }
 
     // Salvar mensagem no banco
+    // ✅ Se houve erro ao enviar, salvar como "failed" para que apareça no frontend
+    const messageStatus = sendError ? 'failed' : 'sent';
     const message = await this.prisma.message.create({
       data: {
         conversationId,
@@ -186,10 +195,10 @@ export class MessageService {
         content,
         messageType,
         mediaUrl,
-        status: 'sent',
+        status: messageStatus, // ✅ Salvar como 'failed' se houver erro
         isFromContact: false,
         timestamp: new Date(),
-        externalId: externalId,
+        externalId: externalId, // Pode ser undefined se falhou
       },
       include: {
         sender: {
@@ -211,7 +220,12 @@ export class MessageService {
       },
     });
 
-    logger.info(`[MessageService] ✅ Message processed for conversation ${conversation.id}`);
+    logger.info(`[MessageService] ✅ Message processed for conversation ${conversation.id}, status: ${messageStatus}`);
+
+    // ✅ Se houve erro ao enviar, lançar erro após salvar mensagem
+    if (sendError) {
+      throw new Error(`Failed to send WhatsApp message: ${sendError.message}`);
+    }
 
     // Emitir evento via Socket.IO para notificar frontend em tempo real
     try {

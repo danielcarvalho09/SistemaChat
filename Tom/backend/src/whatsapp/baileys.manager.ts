@@ -1012,7 +1012,8 @@ class BaileysManager {
         let audioBuffer: Buffer | null = null;
         let filename: string | null = null;
         
-        // Tentar extrair filename e verificar se existe localmente
+        // ✅ Sempre tentar extrair filename e ler arquivo localmente
+        // O frontend pode enviar URL absoluta, mas o arquivo sempre está em /uploads/
         if (!audioUrl.startsWith('http://') && !audioUrl.startsWith('https://')) {
           // URL relativa - tentar ler arquivo local
           // Exemplo: /uploads/audio-123.mp3 -> audio-123.mp3
@@ -1020,20 +1021,16 @@ class BaileysManager {
         } else {
           // URL absoluta - tentar extrair filename
           // Exemplo: https://dominio.com/uploads/audio-123.mp3 -> audio-123.mp3
+          // Ou: http://localhost:3000/uploads/audio-123.mp3 -> audio-123.mp3
           const urlParts = audioUrl.split('/');
           filename = urlParts[urlParts.length - 1] || null;
           
-          // Se a URL absoluta aponta para nosso próprio servidor, sempre tentar ler localmente
-          const baseUrl = process.env.API_BASE_URL || process.env.RAILWAY_PUBLIC_DOMAIN || 'http://localhost:3000';
-          const isOurServer = audioUrl.includes(baseUrl) || 
-                             audioUrl.includes('localhost') || 
-                             audioUrl.includes('127.0.0.1') ||
-                             audioUrl.includes('/uploads/'); // Se contém /uploads/, provavelmente é nosso servidor
-          
-          if (!isOurServer && filename) {
-            // Se não é nosso servidor, ainda tentar ler localmente (pode ter sido copiado)
-            logger.info(`[Baileys] URL absoluta de servidor externo, mas tentando ler arquivo localmente: ${filename}`);
+          // Remover query parameters se houver (ex: ?t=123456)
+          if (filename) {
+            filename = filename.split('?')[0];
           }
+          
+          logger.info(`[Baileys] Extracted filename from URL: ${filename}`);
         }
         
         // ✅ Tentar ler arquivo localmente se tiver filename
@@ -1041,33 +1038,45 @@ class BaileysManager {
           const uploadsDir = path.join(process.cwd(), 'uploads');
           const filepath = path.join(uploadsDir, filename);
           
+          logger.info(`[Baileys] Checking for audio file at: ${filepath}`);
+          
           if (fs.existsSync(filepath)) {
             try {
               // Ler arquivo como buffer
               audioBuffer = fs.readFileSync(filepath);
               logger.info(`[Baileys] ✅ Reading audio file from disk: ${filename} (${audioBuffer.length} bytes)`);
             } catch (fileError) {
-              logger.warn(`[Baileys] Failed to read audio file from disk:`, fileError);
+              logger.error(`[Baileys] ❌ Failed to read audio file from disk:`, fileError);
               audioBuffer = null;
             }
           } else {
-            logger.warn(`[Baileys] Audio file not found locally: ${filepath}`);
+            logger.warn(`[Baileys] ⚠️ Audio file not found locally: ${filepath}`);
+            logger.warn(`[Baileys] ⚠️ Uploads directory exists: ${fs.existsSync(uploadsDir)}`);
+            if (fs.existsSync(uploadsDir)) {
+              const files = fs.readdirSync(uploadsDir);
+              logger.warn(`[Baileys] ⚠️ Files in uploads directory: ${files.slice(0, 10).join(', ')}`);
+            }
           }
+        } else {
+          logger.warn(`[Baileys] ⚠️ Could not extract filename from URL: ${audioUrl}`);
         }
         
         // ✅ Sempre preferir enviar como buffer (mais confiável para WhatsApp)
         if (audioBuffer) {
           // Enviar como buffer - WhatsApp pode acessar diretamente
+          // Estrutura correta do Baileys para áudio: { audio: Buffer, mimetype: string, ptt: boolean }
+          // ✅ Baileys aceita Buffer diretamente para áudio
+          // Formato: { audio: Buffer, mimetype: string, ptt: boolean }
           messageContent = { 
             audio: audioBuffer, 
             mimetype: whatsappAudioMimetype, // ✅ Forçar formato compatível com WhatsApp
             ptt: true // Push-to-Talk (mensagem de voz)
           };
-          logger.info(`[Baileys] ✅ Sending audio as buffer (format: ${whatsappAudioMimetype}, PTT: true, size: ${audioBuffer.length} bytes)`);
+          logger.info(`[Baileys] ✅ Prepared audio as buffer (format: ${whatsappAudioMimetype}, PTT: true, size: ${audioBuffer.length} bytes)`);
         } else {
           // Fallback: usar URL apenas se não conseguir ler arquivo localmente
           // ⚠️ AVISO: URLs podem não ser acessíveis pelo WhatsApp se não forem públicas
-          logger.warn(`[Baileys] ⚠️ Sending audio via URL (may not be accessible by WhatsApp): ${audioUrl}`);
+          logger.warn(`[Baileys] ⚠️ Audio file not found locally, using URL (may not be accessible by WhatsApp): ${audioUrl}`);
           messageContent = { 
             audio: { url: audioUrl }, 
             mimetype: whatsappAudioMimetype, // ✅ Forçar formato compatível
@@ -1082,12 +1091,38 @@ class BaileysManager {
         messageContent = { document: { url }, fileName: caption || 'document' };
       }
 
+      logger.info(`[Baileys] Attempting to send message to ${jid}, type: ${messageType}`);
+      
+      // ✅ Log detalhado do messageContent (sem tentar serializar Buffer)
+      if (messageType === 'audio' && messageContent.audio) {
+        const isBuffer = Buffer.isBuffer(messageContent.audio);
+        logger.info(`[Baileys] Audio message content:`, {
+          type: isBuffer ? 'buffer' : 'url',
+          mimetype: messageContent.mimetype,
+          ptt: messageContent.ptt,
+          size: isBuffer ? (messageContent.audio as Buffer).length : 'N/A',
+        });
+      } else {
+        logger.debug(`[Baileys] Message content structure:`, JSON.stringify(messageContent, null, 2).substring(0, 500));
+      }
+      
       const sent = await client.socket.sendMessage(jid, messageContent);
       const externalId = sent?.key?.id as string | undefined;
-      logger.info(`[Baileys] Message sent from ${connectionId} to ${to} (id: ${externalId || 'n/a'})`);
+      
+      if (externalId) {
+        logger.info(`[Baileys] ✅ Message sent successfully from ${connectionId} to ${to} (id: ${externalId})`);
+      } else {
+        logger.warn(`[Baileys] ⚠️ Message sent but no externalId returned from Baileys`);
+      }
+      
       return externalId;
     } catch (error) {
-      logger.error(`[Baileys] Error sending message from ${connectionId}:`, error);
+      logger.error(`[Baileys] ❌ Error sending message from ${connectionId} to ${to}:`, error);
+      logger.error(`[Baileys] Error details:`, {
+        messageType,
+        errorMessage: error instanceof Error ? error.message : 'Unknown error',
+        errorStack: error instanceof Error ? error.stack : undefined,
+      });
       throw error;
     }
   }
