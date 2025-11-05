@@ -994,94 +994,88 @@ class BaileysManager {
           }
         }
         
-        // ✅ IMPORTANTE: WhatsApp requer formato específico para áudios PTT (Push-to-Talk)
-        // O WhatsApp funciona melhor com audio/ogg; codecs=opus para mensagens de voz
-        // NOTA: Estamos apenas declarando o mimetype como OGG/Opus, mas o arquivo físico
-        // pode estar em outro formato (MP3, WAV, etc.). O Baileys/WhatsApp pode converter
-        // automaticamente, mas para garantir 100% de compatibilidade, seria ideal converter
-        // o arquivo fisicamente para OGG/Opus antes de enviar (usando FFmpeg).
-        // Por enquanto, o Baileys deve aceitar outros formatos e converter automaticamente.
-        const whatsappAudioMimetype = 'audio/ogg; codecs=opus';
+        // ✅ IMPORTANTE: Baseado no issue #501 do Baileys (https://github.com/WhiskeySockets/Baileys/issues/501)
+        // e recomendações da comunidade, o formato correto para áudio PTT é:
+        // { audio: { url: string } | Buffer, mimetype: 'audio/ogg', ptt: true }
+        // 
+        // NOTA: O mimetype deve ser 'audio/ogg' (sem 'codecs=opus') para evitar problemas
+        // O áudio idealmente deve estar em formato OGG com codec libopus e canal único (ac: 1)
+        // Para conversão, usar: ffmpeg -i input.mp3 -avoid_negative_ts make_zero -ac 1 output.ogg
         
-        logger.info(`[Baileys] Sending audio with URL: ${audioUrl}, original mimetype: ${audioMimetype}, WhatsApp mimetype: ${whatsappAudioMimetype}`);
+        // ✅ Usar mimetype simples 'audio/ogg' conforme issue #501
+        // O Baileys pode ter problemas com 'audio/ogg; codecs=opus'
+        const whatsappAudioMimetype = 'audio/ogg'; // Formato correto conforme issue #501
         
-        // ✅ CRÍTICO: Sempre tentar enviar como buffer quando possível
-        // O WhatsApp não consegue acessar URLs privadas ou relativas
-        // Enviar como buffer garante que o áudio seja acessível
+        logger.info(`[Baileys] Processing audio: URL=${audioUrl}, detected mimetype=${audioMimetype}`);
         
         let audioBuffer: Buffer | null = null;
         let filename: string | null = null;
+        let finalAudioUrl = audioUrl; // URL final a ser usada (pode ser convertida para absoluta)
         
-        // ✅ Sempre tentar extrair filename e ler arquivo localmente
-        // O frontend pode enviar URL absoluta, mas o arquivo sempre está em /uploads/
+        // ✅ Extrair filename e tentar ler arquivo localmente
         if (!audioUrl.startsWith('http://') && !audioUrl.startsWith('https://')) {
-          // URL relativa - tentar ler arquivo local
-          // Exemplo: /uploads/audio-123.mp3 -> audio-123.mp3
-          filename = audioUrl.split('/').pop() || null;
+          // URL relativa - extrair filename
+          filename = audioUrl.split('/').pop()?.split('?')[0] || null;
         } else {
-          // URL absoluta - tentar extrair filename
-          // Exemplo: https://dominio.com/uploads/audio-123.mp3 -> audio-123.mp3
-          // Ou: http://localhost:3000/uploads/audio-123.mp3 -> audio-123.mp3
+          // URL absoluta - extrair filename
           const urlParts = audioUrl.split('/');
-          filename = urlParts[urlParts.length - 1] || null;
-          
-          // Remover query parameters se houver (ex: ?t=123456)
-          if (filename) {
-            filename = filename.split('?')[0];
-          }
-          
-          logger.info(`[Baileys] Extracted filename from URL: ${filename}`);
+          filename = urlParts[urlParts.length - 1]?.split('?')[0] || null;
         }
         
-        // ✅ Tentar ler arquivo localmente se tiver filename
+        // ✅ Tentar ler arquivo localmente para enviar como buffer
         if (filename) {
           const uploadsDir = path.join(process.cwd(), 'uploads');
           const filepath = path.join(uploadsDir, filename);
           
-          logger.info(`[Baileys] Checking for audio file at: ${filepath}`);
-          
           if (fs.existsSync(filepath)) {
             try {
-              // Ler arquivo como buffer
               audioBuffer = fs.readFileSync(filepath);
-              logger.info(`[Baileys] ✅ Reading audio file from disk: ${filename} (${audioBuffer.length} bytes)`);
+              logger.info(`[Baileys] ✅ Audio file found locally: ${filename} (${audioBuffer.length} bytes)`);
             } catch (fileError) {
-              logger.error(`[Baileys] ❌ Failed to read audio file from disk:`, fileError);
+              logger.error(`[Baileys] ❌ Failed to read audio file:`, fileError);
               audioBuffer = null;
             }
           } else {
             logger.warn(`[Baileys] ⚠️ Audio file not found locally: ${filepath}`);
-            logger.warn(`[Baileys] ⚠️ Uploads directory exists: ${fs.existsSync(uploadsDir)}`);
-            if (fs.existsSync(uploadsDir)) {
-              const files = fs.readdirSync(uploadsDir);
-              logger.warn(`[Baileys] ⚠️ Files in uploads directory: ${files.slice(0, 10).join(', ')}`);
-            }
           }
-        } else {
-          logger.warn(`[Baileys] ⚠️ Could not extract filename from URL: ${audioUrl}`);
+          
+          // ✅ Se arquivo existe localmente, garantir que a URL seja absoluta e pública
+          // Baseado no exemplo PHP, o Baileys precisa de URL pública para funcionar
+          if (!finalAudioUrl.startsWith('http://') && !finalAudioUrl.startsWith('https://')) {
+            const baseUrl = process.env.API_BASE_URL || process.env.RAILWAY_PUBLIC_DOMAIN || 'http://localhost:3000';
+            finalAudioUrl = finalAudioUrl.startsWith('/') 
+              ? `${baseUrl}${finalAudioUrl}` 
+              : `${baseUrl}/${finalAudioUrl}`;
+            logger.info(`[Baileys] Converted relative URL to absolute: ${finalAudioUrl}`);
+          }
         }
         
-        // ✅ Sempre preferir enviar como buffer (mais confiável para WhatsApp)
+        // ✅ Estratégia: Tentar buffer primeiro, se não funcionar, usar URL pública
+        // Baseado no issue #501 e exemplos da comunidade (TabNews, GitHub)
+        // Formato correto: { audio: Buffer | { url: string }, mimetype: 'audio/ogg', ptt: true }
         if (audioBuffer) {
-          // Enviar como buffer - WhatsApp pode acessar diretamente
-          // Estrutura correta do Baileys para áudio: { audio: Buffer, mimetype: string, ptt: boolean }
-          // ✅ Baileys aceita Buffer diretamente para áudio
-          // Formato: { audio: Buffer, mimetype: string, ptt: boolean }
+          // ✅ Enviar como buffer (mais eficiente)
+          // Conforme issue #501, o Baileys aceita Buffer diretamente
           messageContent = { 
             audio: audioBuffer, 
-            mimetype: whatsappAudioMimetype, // ✅ Forçar formato compatível com WhatsApp
+            mimetype: whatsappAudioMimetype, // 'audio/ogg' (sem codecs=opus)
             ptt: true // Push-to-Talk (mensagem de voz)
           };
-          logger.info(`[Baileys] ✅ Prepared audio as buffer (format: ${whatsappAudioMimetype}, PTT: true, size: ${audioBuffer.length} bytes)`);
+          logger.info(`[Baileys] ✅ Using audio buffer (format: ${whatsappAudioMimetype}, size: ${audioBuffer.length} bytes, PTT: true)`);
         } else {
-          // Fallback: usar URL apenas se não conseguir ler arquivo localmente
-          // ⚠️ AVISO: URLs podem não ser acessíveis pelo WhatsApp se não forem públicas
-          logger.warn(`[Baileys] ⚠️ Audio file not found locally, using URL (may not be accessible by WhatsApp): ${audioUrl}`);
+          // ✅ Usar URL pública (conforme issue #501 e exemplos)
+          // IMPORTANTE: URL deve ser absoluta e acessível publicamente
+          // Formato: { audio: { url: string }, mimetype: 'audio/ogg', ptt: true }
           messageContent = { 
-            audio: { url: audioUrl }, 
-            mimetype: whatsappAudioMimetype, // ✅ Forçar formato compatível
-            ptt: true 
+            audio: { url: finalAudioUrl }, // ✅ URL absoluta e pública
+            mimetype: whatsappAudioMimetype, // 'audio/ogg' (sem codecs=opus)
+            ptt: true // Push-to-Talk (mensagem de voz)
           };
+          logger.info(`[Baileys] ✅ Using audio URL (format: ${whatsappAudioMimetype}, url: ${finalAudioUrl}, PTT: true)`);
+          
+          // ⚠️ AVISO: Se o áudio não estiver em formato OGG/Opus, pode não funcionar
+          // Recomendação: Converter para OGG com FFmpeg antes de enviar
+          logger.warn(`[Baileys] ⚠️ Audio URL format may not be compatible. Consider converting to OGG/Opus with FFmpeg.`);
         }
       } else if (messageType === 'video') {
         const { url, caption } = content as { url: string; caption?: string };
