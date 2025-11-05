@@ -1005,55 +1005,69 @@ class BaileysManager {
         
         logger.info(`[Baileys] Sending audio with URL: ${audioUrl}, original mimetype: ${audioMimetype}, WhatsApp mimetype: ${whatsappAudioMimetype}`);
         
-        // ✅ Verificar se o arquivo existe localmente e enviar como buffer
-        // Se a URL for relativa, tentar ler o arquivo local e enviar como buffer
+        // ✅ CRÍTICO: Sempre tentar enviar como buffer quando possível
+        // O WhatsApp não consegue acessar URLs privadas ou relativas
+        // Enviar como buffer garante que o áudio seja acessível
+        
+        let audioBuffer: Buffer | null = null;
+        let filename: string | null = null;
+        
+        // Tentar extrair filename e verificar se existe localmente
         if (!audioUrl.startsWith('http://') && !audioUrl.startsWith('https://')) {
-          const filename = audioUrl.split('/').pop();
-          if (filename) {
-            const uploadsDir = path.join(process.cwd(), 'uploads');
-            const filepath = path.join(uploadsDir, filename);
-            
-            if (fs.existsSync(filepath)) {
-              try {
-                // Ler arquivo como buffer
-                const audioBuffer = fs.readFileSync(filepath);
-                logger.info(`[Baileys] Reading audio file from disk: ${filename} (${audioBuffer.length} bytes)`);
-                
-                // ✅ Sempre usar formato OGG/Opus para WhatsApp (PTT - Push-to-Talk)
-                // O WhatsApp pode converter automaticamente se necessário, mas OGG/Opus é o formato nativo
-                messageContent = { 
-                  audio: audioBuffer, 
-                  mimetype: whatsappAudioMimetype, // ✅ Forçar formato compatível com WhatsApp
-                  ptt: true // Push-to-Talk (mensagem de voz)
-                };
-                logger.info(`[Baileys] ✅ Sending audio as buffer (format: ${whatsappAudioMimetype}, PTT: true)`);
-              } catch (fileError) {
-                logger.warn(`[Baileys] Failed to read audio file, falling back to URL:`, fileError);
-                // Fallback para URL se falhar ao ler arquivo
-                messageContent = { 
-                  audio: { url: audioUrl }, 
-                  mimetype: whatsappAudioMimetype, // ✅ Forçar formato compatível
-                  ptt: true 
-                };
-              }
-            } else {
-              // Arquivo não existe localmente, usar URL
-              messageContent = { 
-                audio: { url: audioUrl }, 
-                mimetype: whatsappAudioMimetype, // ✅ Forçar formato compatível
-                ptt: true 
-              };
+          // URL relativa - tentar ler arquivo local
+          // Exemplo: /uploads/audio-123.mp3 -> audio-123.mp3
+          filename = audioUrl.split('/').pop() || null;
+        } else {
+          // URL absoluta - tentar extrair filename
+          // Exemplo: https://dominio.com/uploads/audio-123.mp3 -> audio-123.mp3
+          const urlParts = audioUrl.split('/');
+          filename = urlParts[urlParts.length - 1] || null;
+          
+          // Se a URL absoluta aponta para nosso próprio servidor, sempre tentar ler localmente
+          const baseUrl = process.env.API_BASE_URL || process.env.RAILWAY_PUBLIC_DOMAIN || 'http://localhost:3000';
+          const isOurServer = audioUrl.includes(baseUrl) || 
+                             audioUrl.includes('localhost') || 
+                             audioUrl.includes('127.0.0.1') ||
+                             audioUrl.includes('/uploads/'); // Se contém /uploads/, provavelmente é nosso servidor
+          
+          if (!isOurServer && filename) {
+            // Se não é nosso servidor, ainda tentar ler localmente (pode ter sido copiado)
+            logger.info(`[Baileys] URL absoluta de servidor externo, mas tentando ler arquivo localmente: ${filename}`);
+          }
+        }
+        
+        // ✅ Tentar ler arquivo localmente se tiver filename
+        if (filename) {
+          const uploadsDir = path.join(process.cwd(), 'uploads');
+          const filepath = path.join(uploadsDir, filename);
+          
+          if (fs.existsSync(filepath)) {
+            try {
+              // Ler arquivo como buffer
+              audioBuffer = fs.readFileSync(filepath);
+              logger.info(`[Baileys] ✅ Reading audio file from disk: ${filename} (${audioBuffer.length} bytes)`);
+            } catch (fileError) {
+              logger.warn(`[Baileys] Failed to read audio file from disk:`, fileError);
+              audioBuffer = null;
             }
           } else {
-            // Não conseguiu extrair filename, usar URL
-            messageContent = { 
-              audio: { url: audioUrl }, 
-              mimetype: whatsappAudioMimetype, // ✅ Forçar formato compatível
-              ptt: true 
-            };
+            logger.warn(`[Baileys] Audio file not found locally: ${filepath}`);
           }
+        }
+        
+        // ✅ Sempre preferir enviar como buffer (mais confiável para WhatsApp)
+        if (audioBuffer) {
+          // Enviar como buffer - WhatsApp pode acessar diretamente
+          messageContent = { 
+            audio: audioBuffer, 
+            mimetype: whatsappAudioMimetype, // ✅ Forçar formato compatível com WhatsApp
+            ptt: true // Push-to-Talk (mensagem de voz)
+          };
+          logger.info(`[Baileys] ✅ Sending audio as buffer (format: ${whatsappAudioMimetype}, PTT: true, size: ${audioBuffer.length} bytes)`);
         } else {
-          // URL absoluta, usar diretamente
+          // Fallback: usar URL apenas se não conseguir ler arquivo localmente
+          // ⚠️ AVISO: URLs podem não ser acessíveis pelo WhatsApp se não forem públicas
+          logger.warn(`[Baileys] ⚠️ Sending audio via URL (may not be accessible by WhatsApp): ${audioUrl}`);
           messageContent = { 
             audio: { url: audioUrl }, 
             mimetype: whatsappAudioMimetype, // ✅ Forçar formato compatível
