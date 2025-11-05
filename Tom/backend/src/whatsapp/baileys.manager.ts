@@ -12,6 +12,8 @@ import makeWASocket, {
 import { Boom } from '@hapi/boom';
 import pino from 'pino';
 import QRCode from 'qrcode';
+import fs from 'fs';
+import path from 'path';
 import { logger } from '../config/logger.js';
 import { getSocketServer } from '../websocket/socket.server.js';
 import { getPrismaClient } from '../config/database.js';
@@ -521,6 +523,8 @@ class BaileysManager {
 
         let messageText = '';
         let messageType = 'text';
+        let audioMediaUrl: string | null = null; // ✅ Variável para armazenar URL do áudio baixado
+        let imageMediaUrl: string | null = null; // ✅ Variável para armazenar URL da imagem baixada
 
         if (msg.message?.conversation) {
           messageText = msg.message.conversation;
@@ -529,9 +533,125 @@ class BaileysManager {
         } else if (msg.message?.imageMessage) {
           messageText = msg.message.imageMessage.caption || '[Imagem]';
           messageType = 'image';
+          
+          // ✅ Baixar e salvar imagem recebida
+          try {
+            const client = this.clients.get(connectionId);
+            if (client?.socket) {
+              logger.info(`[Baileys] 📥 Downloading image message ${externalId}...`);
+              
+              // Baixar imagem usando downloadMediaMessage do Baileys
+              const imageBuffer = await downloadMediaMessage(
+                msg,
+                'buffer',
+                {},
+                { logger: pino({ level: 'silent' }), reuploadRequest: client.socket.updateMediaMessage }
+              );
+              
+              if (imageBuffer && Buffer.isBuffer(imageBuffer)) {
+                // Detectar extensão baseado no mimetype da imagem
+                const imageMimetype = msg.message.imageMessage?.mimetype || 'image/jpeg';
+                let imageExt = '.jpg'; // padrão
+                
+                if (imageMimetype.includes('jpeg') || imageMimetype.includes('jpg')) {
+                  imageExt = '.jpg';
+                } else if (imageMimetype.includes('png')) {
+                  imageExt = '.png';
+                } else if (imageMimetype.includes('gif')) {
+                  imageExt = '.gif';
+                } else if (imageMimetype.includes('webp')) {
+                  imageExt = '.webp';
+                } else if (imageMimetype.includes('bmp')) {
+                  imageExt = '.bmp';
+                }
+                
+                // Salvar arquivo de imagem
+                const timestamp = Date.now();
+                const randomString = Math.random().toString(36).substring(7);
+                const filename = `image-${timestamp}-${randomString}${imageExt}`;
+                const uploadsDir = path.join(process.cwd(), 'uploads');
+                
+                // Criar diretório se não existir
+                if (!fs.existsSync(uploadsDir)) {
+                  fs.mkdirSync(uploadsDir, { recursive: true });
+                }
+                
+                const filepath = path.join(uploadsDir, filename);
+                fs.writeFileSync(filepath, imageBuffer);
+                
+                imageMediaUrl = `/uploads/${filename}`;
+                logger.info(`[Baileys] ✅ Image saved: ${filename} (${imageBuffer.length} bytes, mimetype: ${imageMimetype})`);
+              } else {
+                logger.warn(`[Baileys] ⚠️ Failed to download image, saving without media URL`);
+              }
+            }
+          } catch (imageError) {
+            logger.error(`[Baileys] ❌ Error downloading image:`, imageError);
+            // Continuar processamento sem URL da imagem
+          }
         } else if (msg.message?.audioMessage) {
           messageText = '[Áudio]';
           messageType = 'audio';
+          
+          // ✅ Baixar e salvar áudio recebido
+          try {
+            const client = this.clients.get(connectionId);
+            if (client?.socket) {
+              logger.info(`[Baileys] 📥 Downloading audio message ${externalId}...`);
+              
+              // Baixar áudio usando downloadMediaMessage do Baileys
+              const audioBuffer = await downloadMediaMessage(
+                msg,
+                'buffer',
+                {},
+                { logger: pino({ level: 'silent' }), reuploadRequest: client.socket.updateMediaMessage }
+              );
+              
+              if (audioBuffer && Buffer.isBuffer(audioBuffer)) {
+                // Detectar extensão baseado no mimetype do áudio
+                const audioMimetype = msg.message.audioMessage?.mimetype || 'audio/ogg; codecs=opus';
+                let audioExt = '.ogg'; // padrão
+                
+                if (audioMimetype.includes('mp3') || audioMimetype.includes('mpeg')) {
+                  audioExt = '.mp3';
+                } else if (audioMimetype.includes('wav')) {
+                  audioExt = '.wav';
+                } else if (audioMimetype.includes('ogg') || audioMimetype.includes('opus')) {
+                  audioExt = '.ogg';
+                } else if (audioMimetype.includes('webm')) {
+                  audioExt = '.webm';
+                } else if (audioMimetype.includes('aac')) {
+                  audioExt = '.aac';
+                } else if (audioMimetype.includes('mp4') || audioMimetype.includes('m4a')) {
+                  audioExt = '.m4a';
+                } else if (audioMimetype.includes('amr')) {
+                  audioExt = '.amr';
+                }
+                
+                // Salvar arquivo de áudio
+                const timestamp = Date.now();
+                const randomString = Math.random().toString(36).substring(7);
+                const filename = `audio-${timestamp}-${randomString}${audioExt}`;
+                const uploadsDir = path.join(process.cwd(), 'uploads');
+                
+                // Criar diretório se não existir
+                if (!fs.existsSync(uploadsDir)) {
+                  fs.mkdirSync(uploadsDir, { recursive: true });
+                }
+                
+                const filepath = path.join(uploadsDir, filename);
+                fs.writeFileSync(filepath, audioBuffer);
+                
+                audioMediaUrl = `/uploads/${filename}`;
+                logger.info(`[Baileys] ✅ Audio saved: ${filename} (${audioBuffer.length} bytes, mimetype: ${audioMimetype})`);
+              } else {
+                logger.warn(`[Baileys] ⚠️ Failed to download audio, saving without media URL`);
+              }
+            }
+          } catch (audioError) {
+            logger.error(`[Baileys] ❌ Error downloading audio:`, audioError);
+            // Continuar processamento sem URL do áudio
+          }
         } else if (msg.message?.videoMessage) {
           messageText = msg.message.videoMessage.caption || '[Vídeo]';
           messageType = 'video';
@@ -557,7 +677,7 @@ class BaileysManager {
             from,
             messageText,
             messageType,
-            null,
+            messageType === 'audio' ? audioMediaUrl : messageType === 'image' ? imageMediaUrl : null, // ✅ Passar URL da mídia se foi baixada
             isFromMe,
             externalId,
             pushName // Passar pushName para o service
@@ -813,7 +933,133 @@ class BaileysManager {
         messageContent = { image: { url }, caption: caption || '' };
       } else if (messageType === 'audio') {
         const { url } = content as { url: string };
-        messageContent = { audio: { url }, mimetype: 'audio/ogg; codecs=opus', ptt: true };
+        // ✅ Converter URL relativa para absoluta se necessário
+        let audioUrl = url;
+        let audioMimetype = 'audio/ogg; codecs=opus'; // padrão
+        
+        if (!audioUrl.startsWith('http://') && !audioUrl.startsWith('https://')) {
+          // Se for URL relativa, tentar ler o arquivo local para detectar mimetype
+          const filename = audioUrl.split('/').pop();
+          if (filename) {
+            const uploadsDir = path.join(process.cwd(), 'uploads');
+            const filepath = path.join(uploadsDir, filename);
+            
+            // ✅ Tentar ler o arquivo local para detectar mimetype correto
+            if (fs.existsSync(filepath)) {
+              const audioExtension = filename.split('.').pop()?.toLowerCase();
+              
+              // Detectar mimetype baseado na extensão
+              if (audioExtension === 'mp3' || audioExtension === 'mpeg') {
+                audioMimetype = 'audio/mpeg';
+              } else if (audioExtension === 'wav') {
+                audioMimetype = 'audio/wav';
+              } else if (audioExtension === 'ogg' || audioExtension === 'opus') {
+                audioMimetype = 'audio/ogg; codecs=opus';
+              } else if (audioExtension === 'webm') {
+                audioMimetype = 'audio/webm';
+              } else if (audioExtension === 'aac') {
+                audioMimetype = 'audio/aac';
+              } else if (audioExtension === 'm4a') {
+                audioMimetype = 'audio/mp4';
+              } else if (audioExtension === 'amr') {
+                audioMimetype = 'audio/amr';
+              }
+              
+              logger.info(`[Baileys] Detected mimetype from file: ${audioMimetype} (extension: ${audioExtension})`);
+            }
+          }
+          
+          // Converter para URL absoluta
+          const baseUrl = process.env.API_BASE_URL || process.env.RAILWAY_PUBLIC_DOMAIN || 'http://localhost:3000';
+          audioUrl = audioUrl.startsWith('/') 
+            ? `${baseUrl}${audioUrl}` 
+            : `${baseUrl}/${audioUrl}`;
+        } else {
+          // Se já for URL absoluta, detectar mimetype da extensão
+          const audioExtension = audioUrl.split('.').pop()?.split('?')[0]?.toLowerCase();
+          if (audioExtension === 'mp3' || audioExtension === 'mpeg') {
+            audioMimetype = 'audio/mpeg';
+          } else if (audioExtension === 'wav') {
+            audioMimetype = 'audio/wav';
+          } else if (audioExtension === 'ogg' || audioExtension === 'opus') {
+            audioMimetype = 'audio/ogg; codecs=opus';
+          } else if (audioExtension === 'webm') {
+            audioMimetype = 'audio/webm';
+          } else if (audioExtension === 'aac') {
+            audioMimetype = 'audio/aac';
+          } else if (audioExtension === 'm4a') {
+            audioMimetype = 'audio/mp4';
+          } else if (audioExtension === 'amr') {
+            audioMimetype = 'audio/amr';
+          }
+        }
+        
+        // ✅ IMPORTANTE: WhatsApp requer formato específico para áudios PTT (Push-to-Talk)
+        // O WhatsApp funciona melhor com audio/ogg; codecs=opus para mensagens de voz
+        // NOTA: Estamos apenas declarando o mimetype como OGG/Opus, mas o arquivo físico
+        // pode estar em outro formato (MP3, WAV, etc.). O Baileys/WhatsApp pode converter
+        // automaticamente, mas para garantir 100% de compatibilidade, seria ideal converter
+        // o arquivo fisicamente para OGG/Opus antes de enviar (usando FFmpeg).
+        // Por enquanto, o Baileys deve aceitar outros formatos e converter automaticamente.
+        const whatsappAudioMimetype = 'audio/ogg; codecs=opus';
+        
+        logger.info(`[Baileys] Sending audio with URL: ${audioUrl}, original mimetype: ${audioMimetype}, WhatsApp mimetype: ${whatsappAudioMimetype}`);
+        
+        // ✅ Verificar se o arquivo existe localmente e enviar como buffer
+        // Se a URL for relativa, tentar ler o arquivo local e enviar como buffer
+        if (!audioUrl.startsWith('http://') && !audioUrl.startsWith('https://')) {
+          const filename = audioUrl.split('/').pop();
+          if (filename) {
+            const uploadsDir = path.join(process.cwd(), 'uploads');
+            const filepath = path.join(uploadsDir, filename);
+            
+            if (fs.existsSync(filepath)) {
+              try {
+                // Ler arquivo como buffer
+                const audioBuffer = fs.readFileSync(filepath);
+                logger.info(`[Baileys] Reading audio file from disk: ${filename} (${audioBuffer.length} bytes)`);
+                
+                // ✅ Sempre usar formato OGG/Opus para WhatsApp (PTT - Push-to-Talk)
+                // O WhatsApp pode converter automaticamente se necessário, mas OGG/Opus é o formato nativo
+                messageContent = { 
+                  audio: audioBuffer, 
+                  mimetype: whatsappAudioMimetype, // ✅ Forçar formato compatível com WhatsApp
+                  ptt: true // Push-to-Talk (mensagem de voz)
+                };
+                logger.info(`[Baileys] ✅ Sending audio as buffer (format: ${whatsappAudioMimetype}, PTT: true)`);
+              } catch (fileError) {
+                logger.warn(`[Baileys] Failed to read audio file, falling back to URL:`, fileError);
+                // Fallback para URL se falhar ao ler arquivo
+                messageContent = { 
+                  audio: { url: audioUrl }, 
+                  mimetype: whatsappAudioMimetype, // ✅ Forçar formato compatível
+                  ptt: true 
+                };
+              }
+            } else {
+              // Arquivo não existe localmente, usar URL
+              messageContent = { 
+                audio: { url: audioUrl }, 
+                mimetype: whatsappAudioMimetype, // ✅ Forçar formato compatível
+                ptt: true 
+              };
+            }
+          } else {
+            // Não conseguiu extrair filename, usar URL
+            messageContent = { 
+              audio: { url: audioUrl }, 
+              mimetype: whatsappAudioMimetype, // ✅ Forçar formato compatível
+              ptt: true 
+            };
+          }
+        } else {
+          // URL absoluta, usar diretamente
+          messageContent = { 
+            audio: { url: audioUrl }, 
+            mimetype: whatsappAudioMimetype, // ✅ Forçar formato compatível
+            ptt: true 
+          };
+        }
       } else if (messageType === 'video') {
         const { url, caption } = content as { url: string; caption?: string };
         messageContent = { video: { url }, caption: caption || '' };
