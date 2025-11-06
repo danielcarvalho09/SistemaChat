@@ -8,6 +8,7 @@ import { initializeSocketServer } from './websocket/socket.server.js';
 import { baileysManager } from './whatsapp/baileys.manager.js';
 import { CleanupService } from './services/cleanup.service.js';
 import { keepAliveService } from './services/keep-alive.service.js';
+import { syncQueueService } from './services/sync-queue.service.js';
 
 async function start() {
   try {
@@ -76,6 +77,10 @@ async function start() {
     keepAliveService.start();
     logger.info('💓 Keep-alive service started (prevents Railway sleep)');
 
+    // ✅ Iniciar serviço de queue de sincronização
+    syncQueueService.start();
+    logger.info('🔄 Sync queue service started (processes pending syncs)');
+
     // Reconectar conexões WhatsApp que estavam ativas
     logger.info('⏳ Aguardando 3 segundos antes de reconectar WhatsApp...');
     setTimeout(async () => {
@@ -92,6 +97,7 @@ async function start() {
 
         try {
           keepAliveService.stop(); // Parar keep-alive
+          syncQueueService.stop(); // Parar sync queue
           await app.close();
           await disconnectDatabase();
           await disconnectRedis();

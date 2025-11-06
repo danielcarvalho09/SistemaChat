@@ -144,60 +144,90 @@ class SocketService {
       this.isPageVisible = !document.hidden;
       
       if (this.isPageVisible) {
-        console.log('✨ PÁGINA VOLTOU AO FOCO - INICIANDO RECUPERAÇÃO COMPLETA...');
+        console.log('✨✨✨ PÁGINA VOLTOU AO FOCO - RECUPERAÇÃO ULTRA-ROBUSTA ✨✨✨');
         
         const timeSinceLastSync = Date.now() - this.lastSyncTime;
-        console.log(`⏱️  Tempo desde última sync: ${Math.round(timeSinceLastSync/1000)}s`);
+        const timeSinceLastPong = Date.now() - this.lastPongTime;
         
-        // SEMPRE forçar reconexão ao voltar
-        // Mesmo que pareça conectado, pode ser conexão zumbi
+        console.log(`⏱️  Tempo desde última sync: ${Math.round(timeSinceLastSync/1000)}s`);
+        console.log(`🏓 Tempo desde último pong: ${Math.round(timeSinceLastPong/1000)}s`);
+        
+        // ESTRATÉGIA AGRESSIVA DE RECONEXÃO
         if (!this.socket?.connected) {
-          console.log('🔄 WebSocket desconectado - reconectando...');
+          console.log('🔄 WebSocket DESCONECTADO - reconectando IMEDIATAMENTE...');
           this.socket?.connect();
-        } else {
-          const timeSinceLastPong = Date.now() - this.lastPongTime;
-          console.log(`🏓 Último pong: ${Math.round(timeSinceLastPong/1000)}s atrás`);
-          
-          // Se passou muito tempo sem pong, assumir conexão morta
-          if (timeSinceLastPong > 30000) { // 30 segundos sem pong
-            console.warn('⚠️ Conexão provavelmente morta - forçando reconexão...');
-            this.socket?.disconnect();
-            setTimeout(() => this.socket?.connect(), 500);
+        } else if (timeSinceLastPong > 30000) {
+          // Conexão zumbi detectada (mais de 30s sem pong)
+          console.warn('⚠️⚠️ CONEXÃO ZUMBI DETECTADA - forçando reconexão completa...');
+          this.socket?.disconnect();
+          setTimeout(() => this.socket?.connect(), 500);
+        } else if (timeSinceLastSync > 60000) {
+          // Muito tempo sem sync (mais de 1 minuto)
+          console.warn('⚠️ Muito tempo sem sync - verificando saúde da conexão...');
+          // Forçar ping para testar conexão
+          if (this.socket?.connected) {
+            this.socket.emit('ping');
           }
         }
         
-        // SEMPRE sincronizar ao voltar, independente do estado
-        console.log('🔄 Forçando sincronização IMEDIATA ao voltar...');
+        // SINCRONIZAÇÃO TRIPLA AGRESSIVA ao voltar
+        console.log('🔄🔄🔄 Iniciando SINCRONIZAÇÃO TRIPLA...');
+        
+        // Sync 1: IMEDIATA
         this.syncAllMessages().catch(err => {
-          console.error('❌ Erro ao sincronizar:', err);
+          console.error('❌ Erro na sync imediata:', err);
         });
         
-        // Forçar sync duplo após 2 segundos (garantia)
+        // Sync 2: Após 1 segundo (garantia)
         setTimeout(() => {
-          console.log('🔄 Sincronização de garantia (2s após voltar)...');
+          console.log('🔄 Sync 2/3 (1s após voltar)...');
           this.syncAllMessages().catch(err => {
-            console.error('❌ Erro na sync de garantia:', err);
+            console.error('❌ Erro na sync 2:', err);
           });
-        }, 2000);
+        }, 1000);
+        
+        // Sync 3: Após 3 segundos (garantia final)
+        setTimeout(() => {
+          console.log('🔄 Sync 3/3 FINAL (3s após voltar)...');
+          this.syncAllMessages().catch(err => {
+            console.error('❌ Erro na sync final:', err);
+          });
+        }, 3000);
+        
+        // Limpar flag de forçar sync
+        this.forceSyncOnNextVisible = false;
         
       } else {
-        console.log('🌙 PáGINA FOI PARA BACKGROUND');
-        console.log('⚠️ AVISO: Browsers podem pausar timers após alguns minutos');
-        console.log('✅ Polling de fallback continuará funcionando');
+        console.log('🌙🌙🌙 PÁGINA INDO PARA BACKGROUND 🌙🌙🌙');
+        console.log('⚠️ BROWSERS podem pausar timers JavaScript após alguns minutos');
+        console.log('✅ POLLING HTTP continuará (não é pausado pelos browsers)');
+        console.log('✅ Cronjob externo garantirá sincronização mesmo com app fechado');
         
         // Marcar para forçar sync quando voltar
         this.forceSyncOnNextVisible = true;
         
-        // Enviar ping extra antes de ir para background
-        if (this.socket?.connected) {
-          console.log('🏓 Enviando ping extra antes de pausar...');
-          this.socket.emit('ping');
-        }
+        // SINCRONIZAÇÃO DUPLA antes de ir para background
+        console.log('🔄 Sincronizando antes de pausar...');
         
-        // Sincronizar antes de ir para background
+        // Sync 1: Imediata
         this.syncAllMessages().catch(err => {
           console.error('❌ Erro ao sincronizar antes de background:', err);
         });
+        
+        // Sync 2: Após 500ms (garantia)
+        setTimeout(() => {
+          this.syncAllMessages().catch(err => {
+            console.error('❌ Erro na sync de garantia antes de background:', err);
+          });
+        }, 500);
+        
+        // Enviar múltiplos pings antes de pausar (manter conexão viva)
+        if (this.socket?.connected) {
+          console.log('🏓 Enviando pings extras antes de pausar...');
+          this.socket.emit('ping');
+          setTimeout(() => this.socket?.emit('ping'), 200);
+          setTimeout(() => this.socket?.emit('ping'), 400);
+        }
       }
     };
 
@@ -316,27 +346,41 @@ class SocketService {
    * Polling de fallback - funciona mesmo quando WebSocket está morto
    * Usa HTTP simples para sincronizar
    * CRUCIAL para funcionar em background
+   * VERSÃO AGRESSIVA E ROBUSTA
    */
   private startPolling(): void {
     this.stopPolling();
     
-    // Polling a cada 15 segundos
-    // Mais frequente que sync normal porque é o fallback
+    // POLLING AGRESSIVO: a cada 10 segundos (mais rápido para pegar mensagens)
+    // SEMPRE funciona, mesmo com navegador em background (HTTP não é pausado)
     this.pollingInterval = setInterval(async () => {
       const timeSinceLastSync = Date.now() - this.lastSyncTime;
+      const isConnected = this.socket?.connected || false;
       
-      // Se passou mais de 20 segundos sem sync, forçar via polling
-      if (timeSinceLastSync > 20000) {
-        console.log('📡 Polling de fallback ativado (sem sync recente)...');
+      // ESTRATÉGIA 1: Se passou muito tempo sem sync, forçar (mesmo com WebSocket conectado)
+      if (timeSinceLastSync > 15000) { // 15 segundos sem sync
+        console.log(`📡 POLLING: Sem sync há ${Math.round(timeSinceLastSync/1000)}s - forçando...`);
         await this.syncAllMessages();
+        return;
       }
       
-      // Se WebSocket não está conectado, usar polling como principal
-      if (!this.socket?.connected) {
-        console.log('📡 Polling ativo (WebSocket offline)...');
+      // ESTRATÉGIA 2: Se WebSocket offline, polling vira o método principal
+      if (!isConnected) {
+        console.log('📡 POLLING: WebSocket offline - modo fallback ativo');
+        await this.syncAllMessages();
+        return;
+      }
+      
+      // ESTRATÉGIA 3: Polling periódico mesmo conectado (redundância)
+      // A cada 3 ciclos (30 segundos), forçar sync via HTTP para garantir
+      const cycleCount = Math.floor((Date.now() - this.lastSyncTime) / 10000);
+      if (cycleCount >= 3) {
+        console.log('📡 POLLING: Sync de redundância (garantia a cada 30s)');
         await this.syncAllMessages();
       }
-    }, 15000); // 15 segundos
+    }, 10000); // 10 segundos (mais agressivo)
+    
+    console.log('✅ Polling agressivo iniciado (a cada 10s)');
   }
 
   private stopPolling(): void {

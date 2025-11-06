@@ -84,7 +84,7 @@ export async function syncRoutes(fastify: FastifyInstance) {
   });
 
   /**
-   * Sincronizar todas as conversas ativas
+   * Sincronizar todas as conversas ativas (SIMPLES)
    * POST /api/v1/sync/all
    */
   fastify.post('/all', { preHandler: [authenticate] }, async (request: FastifyRequest, reply: FastifyReply) => {
@@ -132,6 +132,118 @@ export async function syncRoutes(fastify: FastifyInstance) {
   });
 
   /**
+   * SINCRONIZAÇÃO COMPLETA E ROBUSTA - Para Cronjobs
+   * POST /api/v1/sync/full-system
+   * Endpoint otimizado para ser chamado por cronjobs externos
+   * Não requer autenticação (pode ser chamado por cron-job.org)
+   */
+  fastify.post('/full-system', async (request: FastifyRequest, reply: FastifyReply) => {
+    try {
+      logger.info('🚀 FULL SYSTEM SYNC requested (via cronjob)');
+      
+      const { baileysManager } = await import('../whatsapp/baileys.manager.js');
+      const result = await baileysManager.syncAllConnections();
+
+      return reply.send({
+        success: true,
+        message: `Full system sync completed successfully`,
+        data: {
+          totalConnections: result.totalConnections,
+          syncedConversations: result.syncedConversations,
+          gapsRecovered: result.gapsRecovered,
+          timestamp: new Date().toISOString(),
+        },
+      });
+    } catch (error: any) {
+      logger.error('Error in full system sync:', error);
+      return reply.status(500).send({
+        success: false,
+        message: error.message || 'Error in full system sync',
+      });
+    }
+  });
+
+  /**
+   * Detectar e Recuperar GAPS (Mensagens Perdidas)
+   * POST /api/v1/sync/detect-gaps/:connectionId
+   */
+  fastify.post('/detect-gaps/:connectionId', { preHandler: [authenticate] }, async (request: any, reply: FastifyReply) => {
+    try {
+      const { connectionId } = request.params;
+
+      const { baileysManager } = await import('../whatsapp/baileys.manager.js');
+      const result = await baileysManager.detectAndRecoverGaps(connectionId);
+
+      return reply.send({
+        success: true,
+        message: `Gap detection completed`,
+        data: {
+          gapsFound: result.gapsFound,
+          gapsRecovered: result.recovered,
+        },
+      });
+    } catch (error: any) {
+      logger.error('Error detecting gaps:', error);
+      return reply.status(500).send({
+        success: false,
+        message: error.message || 'Error detecting gaps',
+      });
+    }
+  });
+
+  /**
+   * Detectar e Recuperar GAPS de TODAS as conexões
+   * POST /api/v1/sync/detect-all-gaps
+   */
+  fastify.post('/detect-all-gaps', { preHandler: [authenticate] }, async (request: FastifyRequest, reply: FastifyReply) => {
+    try {
+      const { PrismaClient } = await import('@prisma/client');
+      const prisma = new PrismaClient();
+      
+      const connections = await prisma.whatsAppConnection.findMany({
+        where: { status: 'connected' },
+      });
+
+      await prisma.$disconnect();
+
+      if (connections.length === 0) {
+        return reply.send({
+          success: true,
+          message: 'No active connections',
+          totalGaps: 0,
+          totalRecovered: 0,
+        });
+      }
+
+      const { baileysManager } = await import('../whatsapp/baileys.manager.js');
+      let totalGaps = 0;
+      let totalRecovered = 0;
+
+      for (const connection of connections) {
+        const result = await baileysManager.detectAndRecoverGaps(connection.id);
+        totalGaps += result.gapsFound;
+        totalRecovered += result.recovered;
+      }
+
+      return reply.send({
+        success: true,
+        message: `Gap detection completed for ${connections.length} connections`,
+        data: {
+          connectionsProcessed: connections.length,
+          totalGapsFound: totalGaps,
+          totalGapsRecovered: totalRecovered,
+        },
+      });
+    } catch (error: any) {
+      logger.error('Error detecting all gaps:', error);
+      return reply.status(500).send({
+        success: false,
+        message: error.message || 'Error detecting all gaps',
+      });
+    }
+  });
+
+  /**
    * Obter status da sincronização
    * GET /api/v1/sync/status
    */
@@ -154,6 +266,10 @@ export async function syncRoutes(fastify: FastifyInstance) {
 
     await prisma.$disconnect();
 
+    // Obter estatísticas da queue
+    const { syncQueueService } = await import('../services/sync-queue.service.js');
+    const queueStats = syncQueueService.getStats();
+
     return reply.send({
       success: true,
       data: {
@@ -164,6 +280,7 @@ export async function syncRoutes(fastify: FastifyInstance) {
         syncPercentage: totalMessages > 0 
           ? Math.round((messagesWithExternalId / totalMessages) * 100) 
           : 0,
+        syncQueue: queueStats,
       },
     });
   } catch (error: any) {
@@ -173,5 +290,27 @@ export async function syncRoutes(fastify: FastifyInstance) {
       message: error.message || 'Erro ao obter status',
     });
   }
+  });
+
+  /**
+   * Obter estatísticas da queue de sincronização
+   * GET /api/v1/sync/queue-stats
+   */
+  fastify.get('/queue-stats', { preHandler: [authenticate] }, async (request: FastifyRequest, reply: FastifyReply) => {
+    try {
+      const { syncQueueService } = await import('../services/sync-queue.service.js');
+      const stats = syncQueueService.getStats();
+
+      return reply.send({
+        success: true,
+        data: stats,
+      });
+    } catch (error: any) {
+      logger.error('Error getting queue stats:', error);
+      return reply.status(500).send({
+        success: false,
+        message: error.message || 'Error getting queue stats',
+      });
+    }
   });
 }
