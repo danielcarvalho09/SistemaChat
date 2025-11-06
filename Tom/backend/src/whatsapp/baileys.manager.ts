@@ -328,6 +328,7 @@ class BaileysManager {
       this.resetReconnectionAttempts(connectionId);
       
       // Salvar firstConnectedAt se for a primeira conexão
+      // E forçar sincronização de mensagens desde a primeira conexão ao reconectar
       await this.saveFirstConnectedAt(connectionId);
       
       await this.updateConnectionStatus(connectionId, 'connected');
@@ -1614,22 +1615,51 @@ class BaileysManager {
 
   /**
    * Salva firstConnectedAt quando conectar pela primeira vez
+   * E força sincronização de TODAS as conversas desde a primeira conexão ao reconectar
    */
   private async saveFirstConnectedAt(connectionId: string): Promise<void> {
     try {
       const connection = await this.prisma.whatsAppConnection.findUnique({
         where: { id: connectionId },
-        select: { firstConnectedAt: true },
+        select: { firstConnectedAt: true, status: true },
       });
 
-      // Só salvar se ainda não foi salvo
-      if (connection && !connection.firstConnectedAt) {
+      const isFirstConnection = connection && !connection.firstConnectedAt;
+      
+      // Só salvar se ainda não foi salvo (primeira conexão)
+      if (isFirstConnection) {
         const now = new Date();
         await this.prisma.whatsAppConnection.update({
           where: { id: connectionId },
           data: { firstConnectedAt: now },
         });
         logger.info(`[Baileys] ✅ First connection timestamp saved for ${connectionId}: ${now.toISOString()}`);
+        logger.info(`[Baileys] 📝 Sistema vai processar mensagens a partir desta data daqui para frente`);
+      } else if (connection?.firstConnectedAt) {
+        // RECONEXÃO: Não é a primeira vez que conecta
+        const timeSinceFirst = Date.now() - connection.firstConnectedAt.getTime();
+        const hoursSinceFirst = Math.round(timeSinceFirst / (1000 * 60 * 60));
+        
+        logger.info(`[Baileys] 🔄 RECONEXÃO detectada para ${connectionId}`);
+        logger.info(`[Baileys] ⏰ Primeira conexão foi há ${hoursSinceFirst} horas (${connection.firstConnectedAt.toISOString()})`);
+        logger.info(`[Baileys] 🔍 Iniciando sincronização de TODAS conversas desde a primeira conexão...`);
+        
+        // Aguardar 5 segundos para conexão estabilizar
+        setTimeout(async () => {
+          try {
+            // Forçar sincronização de TODAS as conversas ativas desde firstConnectedAt
+            // Isso garante que mensagens perdidas durante desconexão sejam recuperadas
+            const syncedCount = await this.syncAllActiveConversations(connectionId, 100);
+            
+            logger.info(`[Baileys] ✅ Sincronização pós-reconexão completa: ${syncedCount} conversas sincronizadas`);
+            
+            // Também detectar e recuperar gaps
+            const { gapsFound, recovered } = await this.detectAndRecoverGaps(connectionId);
+            logger.info(`[Baileys] ✅ Detecção de gaps: ${gapsFound} encontrados, ${recovered} em recuperação`);
+          } catch (syncError) {
+            logger.error(`[Baileys] ❌ Erro na sincronização pós-reconexão:`, syncError);
+          }
+        }, 5000); // 5 segundos de espera
       }
     } catch (error) {
       logger.error(`[Baileys] Error saving firstConnectedAt for ${connectionId}:`, error);

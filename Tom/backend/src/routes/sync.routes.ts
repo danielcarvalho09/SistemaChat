@@ -132,14 +132,46 @@ export async function syncRoutes(fastify: FastifyInstance) {
   });
 
   /**
-   * SINCRONIZAÇÃO COMPLETA E ROBUSTA - Para Cronjobs
+   * SINCRONIZAÇÃO COMPLETA E ROBUSTA - Para Cronjobs (POST)
    * POST /api/v1/sync/full-system
    * Endpoint otimizado para ser chamado por cronjobs externos
    * Não requer autenticação (pode ser chamado por cron-job.org)
    */
   fastify.post('/full-system', async (request: FastifyRequest, reply: FastifyReply) => {
     try {
-      logger.info('🚀 FULL SYSTEM SYNC requested (via cronjob)');
+      logger.info('🚀 FULL SYSTEM SYNC requested (via cronjob POST)');
+      
+      const { baileysManager } = await import('../whatsapp/baileys.manager.js');
+      const result = await baileysManager.syncAllConnections();
+
+      return reply.send({
+        success: true,
+        message: `Full system sync completed successfully`,
+        data: {
+          totalConnections: result.totalConnections,
+          syncedConversations: result.syncedConversations,
+          gapsRecovered: result.gapsRecovered,
+          timestamp: new Date().toISOString(),
+        },
+      });
+    } catch (error: any) {
+      logger.error('Error in full system sync:', error);
+      return reply.status(500).send({
+        success: false,
+        message: error.message || 'Error in full system sync',
+      });
+    }
+  });
+
+  /**
+   * SINCRONIZAÇÃO COMPLETA E ROBUSTA - Para Cronjobs (GET)
+   * GET /api/v1/sync/full-system
+   * Versão GET para compatibilidade com cron-job.org (usa GET por padrão)
+   * Não requer autenticação (pode ser chamado por cron-job.org)
+   */
+  fastify.get('/full-system', async (request: FastifyRequest, reply: FastifyReply) => {
+    try {
+      logger.info('🚀 FULL SYSTEM SYNC requested (via cronjob GET)');
       
       const { baileysManager } = await import('../whatsapp/baileys.manager.js');
       const result = await baileysManager.syncAllConnections();
