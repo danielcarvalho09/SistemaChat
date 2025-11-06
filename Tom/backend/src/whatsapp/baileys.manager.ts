@@ -1724,38 +1724,30 @@ class BaileysManager {
 
       try {
         // ESTRATÉGIA ROBUSTA DE SINCRONIZAÇÃO:
-        // Usa múltiplos métodos para garantir que mensagens sejam sincronizadas
+        // Usa presence updates múltiplos para forçar WhatsApp a enviar mensagens pendentes
         
         logger.info(`[Baileys] Starting robust sync for ${phoneNumber}...`);
         
-        // Método 1: Marcar presença (faz o WhatsApp enviar updates)
+        // Método 1: Marcar presença disponível
         await client.socket.sendPresenceUpdate('available', jid);
-        await new Promise(resolve => setTimeout(resolve, 100));
+        await new Promise(resolve => setTimeout(resolve, 200));
         
-        // Método 2: Simular digitação (ativa sincronização mais agressiva)
+        // Método 2: Simular digitação (ativa sincronização mais agressiva do WhatsApp)
         await client.socket.sendPresenceUpdate('composing', jid);
-        await new Promise(resolve => setTimeout(resolve, 500));
+        await new Promise(resolve => setTimeout(resolve, 800));
+        
+        // Método 3: Pausar digitação
         await client.socket.sendPresenceUpdate('paused', jid);
-        await new Promise(resolve => setTimeout(resolve, 100));
+        await new Promise(resolve => setTimeout(resolve, 200));
         
-        // Método 3: Marcar como disponível novamente
+        // Método 4: Marcar disponível novamente (ciclo completo)
         await client.socket.sendPresenceUpdate('available', jid);
-        
-        // Método 4: Forçar leitura do chat (faz WhatsApp sincronizar)
-        try {
-          // Tentar buscar mensagens mais recentes do chat
-          // Isso força o Baileys a sincronizar via eventos
-          await client.socket.chatModify(
-            { markRead: false }, // Apenas tocar no chat, sem marcar como lido
-            jid
-          );
-        } catch (chatModifyError) {
-          // Não é crítico se falhar
-          logger.debug(`[Baileys] chatModify not available:`, chatModifyError);
-        }
         
         logger.info(`[Baileys] ✅ ROBUST sync triggers sent for ${phoneNumber}`);
         logger.info(`[Baileys] WhatsApp will send missing messages via events (processed by handleIncomingMessages)`);
+        
+        // A sincronização real acontece via eventos que são capturados
+        // por handleIncomingMessages() quando o WhatsApp responde aos presence updates
         
         return true;
       } catch (error) {
