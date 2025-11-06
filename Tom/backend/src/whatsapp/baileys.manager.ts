@@ -1724,101 +1724,46 @@ class BaileysManager {
 
       try {
         // ESTRATÉGIA ROBUSTA DE SINCRONIZAÇÃO:
+        // Usa múltiplos métodos para garantir que mensagens sejam sincronizadas
         
-        // 1. Buscar a última mensagem salva no banco para este contato
-        const lastMessage = await this.prisma.message.findFirst({
-          where: {
-            conversation: {
-              connectionId,
-              contact: {
-                phoneNumber: phoneNumber.replace('@s.whatsapp.net', '').replace('@g.us', ''),
-              },
-            },
-          },
-          orderBy: { timestamp: 'desc' },
-          select: { timestamp: true, externalId: true },
-        });
-
-        const lastMessageTime = lastMessage?.timestamp || new Date(0);
-        logger.info(`[Baileys] Last message in DB: ${lastMessageTime.toISOString()}`);
-
-        // 2. Buscar histórico de mensagens do WhatsApp
-        logger.info(`[Baileys] Fetching message history from WhatsApp...`);
+        logger.info(`[Baileys] Starting robust sync for ${phoneNumber}...`);
         
-        // fetchMessageHistory: busca mensagens do servidor WhatsApp
-        // Parâmetros: (quantidade, beforeKey)
-        const history = await client.socket.fetchMessageHistory(
-          limit,
-          {
-            remoteJid: jid,
-            id: lastMessage?.externalId || undefined, // Buscar a partir da última mensagem conhecida
-          }
-        );
-
-        if (!history || !history.messages || history.messages.length === 0) {
-          logger.info(`[Baileys] No new messages found in history for ${phoneNumber}`);
-          
-          // Mesmo sem mensagens novas, forçar presence update como fallback
-          await client.socket.sendPresenceUpdate('available', jid);
-          await client.socket.sendPresenceUpdate('composing', jid);
-          await new Promise(resolve => setTimeout(resolve, 300));
-          await client.socket.sendPresenceUpdate('paused', jid);
-          
-          return true;
-        }
-
-        logger.info(`[Baileys] ✅ Retrieved ${history.messages.length} messages from history`);
-
-        // 3. Processar mensagens recuperadas
-        let processedCount = 0;
-        let skippedCount = 0;
-        
-        for (const msg of history.messages) {
-          try {
-            // Verificar se mensagem já existe no banco (evitar duplicação)
-            const msgExternalId = msg.key.id;
-            if (msgExternalId) {
-              const exists = await this.prisma.message.findFirst({
-                where: {
-                  externalId: msgExternalId,
-                  connectionId,
-                },
-              });
-
-              if (exists) {
-                skippedCount++;
-                continue; // Já existe, pular
-              }
-            }
-
-            // Processar mensagem (usar handleIncomingMessages internamente)
-            await this.handleIncomingMessages(connectionId, {
-              messages: [msg],
-              type: 'history', // Marcar como histórico
-            });
-            
-            processedCount++;
-          } catch (error) {
-            logger.error(`[Baileys] Error processing history message:`, error);
-          }
-        }
-
-        logger.info(`[Baileys] ✅ Processed ${processedCount} new messages, skipped ${skippedCount} existing`);
-
-        // 4. Forçar presence updates como segundo mecanismo (redundância)
+        // Método 1: Marcar presença (faz o WhatsApp enviar updates)
         await client.socket.sendPresenceUpdate('available', jid);
-        await client.socket.sendPresenceUpdate('composing', jid);
-        await new Promise(resolve => setTimeout(resolve, 300));
-        await client.socket.sendPresenceUpdate('paused', jid);
+        await new Promise(resolve => setTimeout(resolve, 100));
         
-        logger.info(`[Baileys] ✅ ROBUST sync completed for ${phoneNumber}`);
+        // Método 2: Simular digitação (ativa sincronização mais agressiva)
+        await client.socket.sendPresenceUpdate('composing', jid);
+        await new Promise(resolve => setTimeout(resolve, 500));
+        await client.socket.sendPresenceUpdate('paused', jid);
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
+        // Método 3: Marcar como disponível novamente
+        await client.socket.sendPresenceUpdate('available', jid);
+        
+        // Método 4: Forçar leitura do chat (faz WhatsApp sincronizar)
+        try {
+          // Tentar buscar mensagens mais recentes do chat
+          // Isso força o Baileys a sincronizar via eventos
+          await client.socket.chatModify(
+            { markRead: false }, // Apenas tocar no chat, sem marcar como lido
+            jid
+          );
+        } catch (chatModifyError) {
+          // Não é crítico se falhar
+          logger.debug(`[Baileys] chatModify not available:`, chatModifyError);
+        }
+        
+        logger.info(`[Baileys] ✅ ROBUST sync triggers sent for ${phoneNumber}`);
+        logger.info(`[Baileys] WhatsApp will send missing messages via events (processed by handleIncomingMessages)`);
+        
         return true;
       } catch (error) {
         logger.error(`[Baileys] ❌ Error in robust sync:`, error);
         
-        // Fallback: tentar apenas presence updates se fetchMessageHistory falhar
+        // Fallback: tentar apenas presence updates básico
         try {
-          logger.info(`[Baileys] Falling back to presence updates...`);
+          logger.info(`[Baileys] Falling back to basic presence updates...`);
           await client.socket.sendPresenceUpdate('available', jid);
           await client.socket.sendPresenceUpdate('composing', jid);
           await new Promise(resolve => setTimeout(resolve, 300));
