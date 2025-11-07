@@ -161,8 +161,13 @@ class BaileysManager {
       // Iniciar heartbeat ativo
       this.startActiveHeartbeat(connectionId);
       
-      // Iniciar sincronização periódica automática
-      this.startPeriodicSync(connectionId);
+      // ❌ SINCRONIZAÇÃO PERIÓDICA DESABILITADA
+      // Sincronização automática estava interferindo no recebimento de mensagens em tempo real
+      // Sincronização agora só ocorre quando:
+      // 1. Reconexão (após desconexão)
+      // 2. Detecção de gaps
+      // 3. Solicitação manual via API
+      // this.startPeriodicSync(connectionId);
 
       logger.info(`[Baileys] ✅ Client created successfully: ${connectionId}`);
       
@@ -1569,64 +1574,25 @@ class BaileysManager {
    * Inicia sincronização periódica automática de mensagens
    * Roda a cada 2 minutos para garantir que nenhuma mensagem seja perdida
    */
+  /**
+   * ❌ SINCRONIZAÇÃO PERIÓDICA DESABILITADA
+   * 
+   * A sincronização periódica automática estava interferindo no recebimento
+   * de mensagens em tempo real. Agora a sincronização só ocorre quando:
+   * 
+   * 1. **Reconexão**: Após desconexão, sincroniza todas as conversas
+   * 2. **Detecção de Gaps**: Quando detecta lacunas temporais
+   * 3. **Solicitação Manual**: Via API endpoints
+   * 
+   * Mensagens em tempo real são recebidas via eventos do Baileys (handleIncomingMessages)
+   * e não precisam de sincronização periódica.
+   */
   private startPeriodicSync(connectionId: string): void {
-    const client = this.clients.get(connectionId);
-    if (!client) return;
-
-    // SINCRONIZAÇÃO ROBUSTA E AGRESSIVA: 
-    // - A cada 1 minuto (mais frequente para pegar mensagens rapidamente)
-    // - Sincroniza apenas conversas ativas (eficiente)
-    // - Detecta e recupera mensagens perdidas
-    client.syncInterval = setInterval(async () => {
-      const currentClient = this.clients.get(connectionId);
-      if (!currentClient) {
-        clearInterval(client.syncInterval!);
-        return;
-      }
-
-      // Só sincronizar se estiver conectado
-      if (currentClient.status === 'connected') {
-        try {
-          const syncStartTime = Date.now();
-          logger.info(`[Baileys] 🔄 Starting ROBUST periodic sync for ${connectionId}...`);
-          
-          // 1. Processar queue de retry primeiro (mensagens que falharam antes)
-          await this.processRetryQueue(connectionId);
-          
-          // 2. Sincronizar todas as conversas ativas COM BUSCA HISTÓRICO
-          const syncedCount = await this.syncAllActiveConversations(connectionId, 50);
-          
-          // 3. Detectar e recuperar gaps
-          const { gapsFound, recovered } = await this.detectAndRecoverGaps(connectionId);
-          
-          currentClient.lastSync = new Date();
-          const syncDuration = Date.now() - syncStartTime;
-          
-          logger.info(`[Baileys] ✅ ROBUST periodic sync completed for ${connectionId}: ${syncedCount} conversations synced, ${gapsFound} gaps found, ${recovered} recovered in ${syncDuration}ms`);
-          
-          // Se não conseguiu sincronizar nenhuma conversa, logar warning
-          if (syncedCount === 0) {
-            logger.warn(`[Baileys] ⚠️ Periodic sync found 0 conversations to sync for ${connectionId}`);
-          }
-        } catch (error) {
-          logger.error(`[Baileys] ❌ Error in periodic sync for ${connectionId}:`, error);
-          
-          // Se falhar, tentar novamente em 30 segundos (recuperação rápida)
-          setTimeout(async () => {
-            try {
-              logger.info(`[Baileys] 🔄 Retry sync after error for ${connectionId}...`);
-              await this.syncAllActiveConversations(connectionId);
-            } catch (retryError) {
-              logger.error(`[Baileys] ❌ Retry sync also failed:`, retryError);
-            }
-          }, 30000);
-        }
-      } else {
-        logger.debug(`[Baileys] ⏭️ Skipping sync for ${connectionId}: not connected (status: ${currentClient.status})`);
-      }
-    }, 60000); // 1 minuto (mais agressivo)
-
-    logger.info(`[Baileys] 🔄 ROBUST periodic sync started for ${connectionId} (every 1 minute)`);
+    // DESABILITADO: Sincronização periódica estava interferindo no recebimento de mensagens
+    // As mensagens em tempo real são recebidas via eventos do Baileys
+    // Sincronização só ocorre quando necessário (reconexão, gaps, manual)
+    logger.info(`[Baileys] ⏭️ Periodic sync DISABLED for ${connectionId} - messages received via real-time events`);
+    return;
   }
 
   /**
