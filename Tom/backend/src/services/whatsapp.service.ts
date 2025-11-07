@@ -180,6 +180,29 @@ export class WhatsAppService {
     }
   }
 
+  async manualReconnectConnection(connectionId: string) {
+    const connection = await this.prisma.whatsAppConnection.findUnique({
+      where: { id: connectionId },
+    });
+
+    if (!connection) {
+      throw new NotFoundError('Connection not found');
+    }
+
+    const result = await baileysManager.manualReconnect(connectionId);
+
+    if (['connecting', 'awaiting_qr', 'reconnecting'].includes(result.status)) {
+      await this.prisma.whatsAppConnection.update({
+        where: { id: connectionId },
+        data: { status: 'connecting' },
+      });
+    }
+
+    logger.info(`[WhatsApp] Manual reconnect response for ${connectionId}: ${result.status}`);
+
+    return result;
+  }
+
   /**
    * Desconecta uma conexão
    */

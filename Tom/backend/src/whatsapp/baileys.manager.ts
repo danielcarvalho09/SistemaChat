@@ -346,9 +346,11 @@ class BaileysManager {
 
     // Desconectado
     if (connection === 'close') {
-      client.status = 'disconnected';
       const statusCode = (lastDisconnect?.error as Boom)?.output?.statusCode;
       const errorMessage = (lastDisconnect?.error as Error)?.message || 'Unknown error';
+
+      // Marcar cliente como desconectado imediatamente para parar heartbeats/presence
+      client.status = 'disconnected';
       
       logger.warn(`[Baileys] ❌ Connection closed: ${connectionId}`);
       logger.warn(`[Baileys] 📊 Status Code: ${statusCode}`);
@@ -379,9 +381,15 @@ class BaileysManager {
         return;
       }
 
-      // Logout ou sessão inválida requer novo pareamento
-      if (statusCode === DisconnectReason.loggedOut || statusCode === DisconnectReason.badSession) {
-        await this.handleBadSession(connectionId, statusCode, lastDisconnect?.error);
+      // Logout
+      if (statusCode === DisconnectReason.loggedOut) {
+        await this.handleSessionInvalidation(connectionId, 'logged_out', lastDisconnect?.error);
+        return;
+      }
+
+      // Sessão inválida / credenciais corrompidas (stream:error ack -> badSession)
+      if (statusCode === DisconnectReason.badSession || statusCode === 500) {
+        await this.handleSessionInvalidation(connectionId, 'bad_session', lastDisconnect?.error);
         return;
       }
 
@@ -523,37 +531,6 @@ class BaileysManager {
    * Processa um lote de mensagens com proteção robusta
    * Garante que todas mensagens sejam processadas mesmo com erros
    */
-  private extractMessageTimestamp(msg: proto.IWebMessageInfo): Date | null {
-    try {
-      const data: any = msg;
-      const candidate =
-        data.messageTimestamp ??
-        data.message?.messageTimestamp ??
-        data.message?.extendedTextMessage?.contextInfo?.messageTimestamp ??
-        data.message?.audioMessage?.messageTimestamp ??
-        data.message?.videoMessage?.messageTimestamp ??
-        data.message?.imageMessage?.messageTimestamp ??
-        data.message?.documentMessage?.messageTimestamp ??
-        data.key?.messageTimestamp ??
-        data.key?.timestamp;
-
-      if (!candidate) {
-        return null;
-      }
-
-      const numericTimestamp = Number(candidate);
-      if (!Number.isFinite(numericTimestamp)) {
-        return null;
-      }
-
-      const normalized = numericTimestamp > 1e12 ? numericTimestamp : numericTimestamp * 1000;
-      return new Date(normalized);
-    } catch (error) {
-      logger.debug('[Baileys] Could not extract message timestamp:', error);
-      return null;
-    }
-  }
-
   private async processMessageBatch(
     connectionId: string,
     messages: any[],
@@ -587,8 +564,6 @@ class BaileysManager {
           break; // Parar loop mas não falhar completamente
         }
         
-        const messageTimestamp = this.extractMessageTimestamp(msg);
-
         const from = msg.key.remoteJid;
         const isFromMe = msg.key.fromMe || false;
         const externalId = msg.key.id;
@@ -600,6 +575,12 @@ class BaileysManager {
         
         // 0. Filtrar mensagens antigas (anteriores à primeira conexão)
         if (firstConnectedAt && type === 'history') {
+          const messageTimestamp = msg.messageTimestamp 
+            ? new Date(Number(msg.messageTimestamp) * 1000) 
+            : msg.key?.messageTimestamp 
+              ? new Date(Number(msg.key.messageTimestamp) * 1000)
+              : null;
+          
           if (!messageTimestamp) {
             logger.debug(`[Baileys] ✅ Processing message without timestamp (likely recent)`);
           } else {
@@ -716,24 +697,18 @@ class BaileysManager {
 
         logger.info(`[Baileys] ✅ New ${messageType} from ${from}: "${messageText.substring(0, 50)}..."`);
 
-        const mediaUrl =
-          messageType === 'audio' ? audioMediaUrl :
-          messageType === 'image' ? imageMediaUrl :
-          null;
-
         // Processar mensagem com timeout e retry robusto
         const messageProcessed = await this.processMessageWithRetry(
           connectionId,
           from,
           messageText,
           messageType,
-          mediaUrl,
+          messageType === 'audio' ? audioMediaUrl : messageType === 'image' ? imageMediaUrl : null,
           isFromMe,
           externalId,
           pushName,
           processedIndex,
-          totalMessages,
-          messageTimestamp || undefined
+          totalMessages
         );
 
         if (messageProcessed) {
@@ -771,8 +746,7 @@ class BaileysManager {
     externalId: string,
     pushName: string | null,
     processedIndex: number,
-    totalMessages: number,
-    messageTimestamp?: Date
+    totalMessages: number
   ): Promise<boolean> {
     const maxRetries = 3;
     const timeoutMs = 30000; // 30 segundos por tentativa
@@ -791,8 +765,7 @@ class BaileysManager {
             mediaUrl,
             isFromMe,
             externalId,
-            pushName,
-            messageTimestamp
+            pushName
           );
         })();
 
@@ -843,8 +816,7 @@ class BaileysManager {
                 mediaUrl,
                 isFromMe,
                 externalId,
-                pushName,
-                messageTimestamp
+                pushName
               );
               this.syncRetryQueue.delete(retryKey);
               logger.info(`[Baileys] ✅ Background retry successful for ${externalId}`);
@@ -1676,11 +1648,6 @@ class BaileysManager {
       // Só fazer heartbeat se estiver conectado
       if (currentClient.status === 'connected') {
         try {
-          if (!currentClient.socket) {
-            logger.debug(`[Baileys] ⏸️ Skipping heartbeat for ${connectionId} - socket not available`);
-            return;
-          }
-
           // ESTRATÉGIA MULTI-CAMADAS para manter conexão viva:
           
           // 1. Marcar presença online (CRÍTICO para manter conexão)
@@ -1709,10 +1676,6 @@ class BaileysManager {
             // Para cada conversa ativa, marcar presença para manter conexão
             for (const conv of activeConversations) {
               try {
-                if (currentClient.status !== 'connected' || !currentClient.socket) {
-                  logger.debug(`[Baileys] ⏸️ Stopping presence updates for ${connectionId} - connection no longer active`);
-                  break;
-                }
                 const jid = conv.contact.phoneNumber.includes('@') 
                   ? conv.contact.phoneNumber 
                   : `${conv.contact.phoneNumber}@s.whatsapp.net`;
@@ -1872,7 +1835,7 @@ class BaileysManager {
   /**
    * Emite status via Socket.IO
    */
-  private emitStatus(connectionId: string, status: 'connecting' | 'connected' | 'disconnected' | 'requires_reauth') {
+  private emitStatus(connectionId: string, status: 'connecting' | 'connected' | 'disconnected') {
     try {
       const socketServer = getSocketServer();
       socketServer.emitWhatsAppStatus(connectionId, status);
@@ -1882,35 +1845,70 @@ class BaileysManager {
     }
   }
 
-  /**
-   * Limpa credenciais persistidas e marca conexão como necessitando reautenticação
-   */
-  private async resetConnectionAuth(connectionId: string, reason: string): Promise<void> {
-    try {
-      await this.prisma.whatsAppConnection.update({
-        where: { id: connectionId },
-        data: {
-          authData: null,
-          qrCode: null,
-          lastConnected: null,
-        },
-      });
+  public async manualReconnect(
+    connectionId: string
+  ): Promise<{
+    status: 'already_connected' | 'connecting' | 'awaiting_qr' | 'reconnecting' | 'already_reconnecting';
+    message: string;
+  }> {
+    const client = this.clients.get(connectionId);
 
-      await this.updateConnectionStatus(connectionId, 'requires_reauth');
-
-      logger.warn(`[Baileys] 🔐 Auth data cleared for ${connectionId} (reason: ${reason})`);
-    } catch (error) {
-      logger.error(`[Baileys] ❌ Error clearing auth for ${connectionId}:`, error);
+    if (client && client.status === 'connected') {
+      return {
+        status: 'already_connected',
+        message: 'Conexão já está ativa.',
+      };
     }
+
+    if (!client) {
+      logger.info(`[Baileys] 🔁 Manual reconnect requested - no client found for ${connectionId}. Creating new client...`);
+      await this.createClient(connectionId);
+      return {
+        status: 'connecting',
+        message: 'Cliente recriado. QR code será emitido automaticamente se necessário.',
+      };
+    }
+
+    if (!client.hasCredentials) {
+      logger.warn(`[Baileys] 🔁 Manual reconnect for ${connectionId} - no credentials stored. Generating new QR...`);
+      await this.createClient(connectionId);
+      return {
+        status: 'awaiting_qr',
+        message: 'Credenciais ausentes. Novo QR code será emitido para pareamento.',
+      };
+    }
+
+    if (client.isReconnecting || this.reconnectionLocks.get(connectionId)) {
+      logger.info(`[Baileys] 🔁 Manual reconnect for ${connectionId} ignored - reconnection already in progress.`);
+      return {
+        status: 'already_reconnecting',
+        message: 'Já existe um processo de reconexão em andamento.',
+      };
+    }
+
+    client.reconnectAttempts = 0;
+    client.isReconnecting = false;
+    this.reconnectionLocks.delete(connectionId);
+
+    logger.info(`[Baileys] 🔁 Manual reconnect initiated for ${connectionId}`);
+    await this.attemptReconnection(connectionId);
+
+    return {
+      status: 'reconnecting',
+      message: 'Tentativa de reconexão iniciada.',
+    };
   }
 
   /**
-   * Trata cenários de sessão inválida/deslogada
+   * Agenda reconexão automática quando a sessão fica inválida
+   * Mantém credenciais salvas (não limpa authData)
    */
-  private async handleBadSession(connectionId: string, statusCode?: number, error?: any): Promise<void> {
-    const reason = statusCode === DisconnectReason.loggedOut ? 'logged_out' : 'bad_session';
-
-    logger.warn(`[Baileys] 🛑 ${reason.toUpperCase()} detected for ${connectionId}. Clearing credentials and requesting new QR.`);
+  private async handleSessionInvalidation(
+    connectionId: string,
+    reason: 'logged_out' | 'bad_session',
+    error?: any
+  ): Promise<void> {
+    logger.warn(`[Baileys] 🛑 Session invalidation detected for ${connectionId} (${reason})`);
 
     const client = this.clients.get(connectionId);
     if (client) {
@@ -1918,32 +1916,39 @@ class BaileysManager {
       client.hasCredentials = false;
     }
 
-    // Evitar múltiplos timers em paralelo
+    // Remover locks pendentes para permitir recriação
     this.reconnectionLocks.delete(connectionId);
 
-    // Remover intervals/cliente atuais sem forçar logout (já inválido)
+    // Remover cliente atual sem forçar logout (sessão já inválida)
     await this.removeClient(connectionId, false);
 
-    await this.resetConnectionAuth(connectionId, reason);
-
-    // Notificar frontend
-    this.emitStatus(connectionId, 'requires_reauth');
+    await this.updateConnectionStatus(connectionId, 'disconnected');
+    this.emitStatus(connectionId, 'disconnected');
 
     try {
       const socketServer = getSocketServer();
-      socketServer.emitWhatsAppConnectionFailed(
-        connectionId,
-        `Sessão do WhatsApp inválida (${reason === 'bad_session' ? 'bad session' : 'logged out'}). Escaneie o QR novamente.`
-      );
+      const message = reason === 'logged_out'
+        ? 'A sessão do WhatsApp foi encerrada no aparelho. Escaneie o QR code novamente.'
+        : 'A sessão do WhatsApp ficou inválida. Escaneie o QR code novamente no aparelho.';
+
+      socketServer.emitWhatsAppConnectionFailed(connectionId, message);
     } catch (notifyError) {
-      logger.error(`[Baileys] Error emitting connection failure for ${connectionId}:`, notifyError);
+      logger.error(`[Baileys] ❌ Error notifying session invalidation for ${connectionId}:`, notifyError);
     }
 
-    // Agendar recriação do cliente para gerar novo QR automaticamente
+    if (error) {
+      logger.debug(`[Baileys] Session invalidation raw error for ${connectionId}:`, error);
+    }
+
+    // Tentar reconectar automaticamente com as mesmas credenciais após pequeno delay
     setTimeout(() => {
-      this.createClient(connectionId).catch((creationError) => {
-        logger.error(`[Baileys] ❌ Failed to recreate client for ${connectionId} after ${reason}:`, creationError);
-      });
+      this.createClient(connectionId)
+        .then(() => {
+          logger.info(`[Baileys] 🔁 Client recreation scheduled after ${reason} for ${connectionId}`);
+        })
+        .catch((creationError) => {
+          logger.error(`[Baileys] ❌ Failed to recreate client for ${connectionId} after ${reason}:`, creationError);
+        });
     }, 2000);
   }
 

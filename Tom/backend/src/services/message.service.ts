@@ -381,12 +381,9 @@ export class MessageService {
     mediaUrl: string | null = null,
     isFromMe: boolean = false,
     externalId?: string,
-    pushName?: string | null,
-    messageTimestamp?: Date | null
+    pushName?: string | null
   ): Promise<void> {
     try {
-      const receivedAt = messageTimestamp ?? new Date();
-
       // 🔒 DEDUPLICAÇÃO: Verificar se mensagem já foi processada
       if (externalId) {
         const existingMessage = await this.prisma.message.findFirst({
@@ -533,10 +530,9 @@ export class MessageService {
             assignedUserId: null, // Não atribuir automaticamente
             kanbanStageId: defaultStage?.id || null, // Atribuir etapa padrão
             status: 'waiting', // Sempre aguardando
-            lastMessageAt: receivedAt,
+            lastMessageAt: new Date(),
           },
         });
-        conversation.lastMessageAt = receivedAt;
         logger.info(`New conversation created: ${conversation.id} in department: ${departmentId || 'None'} (status: waiting)`);
       }
 
@@ -564,25 +560,21 @@ export class MessageService {
           status: 'delivered',
           mediaUrl,
           externalId: externalId || `generated-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-          timestamp: receivedAt,
+          timestamp: new Date(),
         },
       });
       
       logger.info(`[MessageService] 💾 Message saved: ${message.id} (external: ${message.externalId})`);
 
       // Atualizar conversa
-      const existingLastMessageAt = conversation.lastMessageAt ? new Date(conversation.lastMessageAt) : null;
-      const nextLastMessageAt = existingLastMessageAt && existingLastMessageAt > receivedAt ? existingLastMessageAt : receivedAt;
       await this.prisma.conversation.update({
         where: { id: conversation.id },
         data: {
-          lastMessageAt: nextLastMessageAt,
+          lastMessageAt: new Date(),
           // Incrementar unreadCount apenas para mensagens do contato
           ...(isFromMe ? {} : { unreadCount: { increment: 1 } }),
         },
       });
-
-      conversation.lastMessageAt = nextLastMessageAt;
 
       logger.info(`[MessageService] ✅ Message processed for conversation ${conversation.id}`);
 

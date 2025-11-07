@@ -89,6 +89,20 @@ export class WhatsAppController {
     });
   };
 
+  manualReconnectConnection = async (
+    request: FastifyRequest<{ Params: { connectionId: string } }>,
+    reply: FastifyReply
+  ) => {
+    const { connectionId } = request.params;
+    const result = await this.whatsappService.manualReconnectConnection(connectionId);
+
+    return reply.status(200).send({
+      success: true,
+      message: result.message,
+      data: result,
+    });
+  };
+
   /**
    * POST /api/v1/connections/:connectionId/disconnect
    * Desconecta conexão

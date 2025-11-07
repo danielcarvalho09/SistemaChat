@@ -41,6 +41,12 @@ export async function whatsappRoutes(fastify: FastifyInstance) {
     handler: whatsappController.disconnectConnection,
   });
 
+  // Forçar reconexão mantendo credenciais (qualquer usuário autenticado)
+  fastify.post('/:connectionId/reconnect', {
+    preHandler: [requireAuth],
+    handler: whatsappController.manualReconnectConnection,
+  });
+
   // Deletar conexão (apenas admin)
   fastify.delete('/:connectionId', {
     preHandler: [requireAdmin],
