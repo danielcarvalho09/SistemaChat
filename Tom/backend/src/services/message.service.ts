@@ -150,43 +150,8 @@ export class MessageService {
       );
     }
 
-    // Enviar via WhatsApp usando Baileys
-    let externalId: string | undefined;
-    let sendError: Error | null = null;
-    
-    try {
-      logger.info(`📤 Sending message from user ${userName} (${userId}) to ${conversation.contact.phoneNumber} via connection ${conversation.connectionId}`);
-      logger.info(`📤 Message type: ${messageType}, mediaUrl: ${mediaUrl || 'none'}`);
-      
-      if (messageType === 'text') {
-        externalId = await baileysManager.sendMessage(
-          conversation.connectionId,
-          conversation.contact.phoneNumber,
-          formattedContent,
-          'text'
-        );
-      } else if (mediaUrl) {
-        logger.info(`📤 Sending media message: type=${messageType}, url=${mediaUrl}`);
-        externalId = await baileysManager.sendMessage(
-          conversation.connectionId,
-          conversation.contact.phoneNumber,
-          { url: mediaUrl, caption: formattedContent },
-          messageType as 'image' | 'audio' | 'video' | 'document'
-        );
-        logger.info(`📤 Media message sent, externalId: ${externalId || 'none'}`);
-      }
-      
-      logger.info(`✅ Message sent successfully via WhatsApp (id: ${externalId || 'n/a'})`);
-    } catch (error) {
-      logger.error('❌ Error sending WhatsApp message:', error);
-      sendError = error instanceof Error ? error : new Error('Unknown error');
-      // Não lançar erro imediatamente - salvar mensagem como "failed" no banco
-      logger.warn(`⚠️ Message will be saved with status 'failed' due to send error`);
-    }
-
-    // Salvar mensagem no banco
-    // ✅ Se houve erro ao enviar, salvar como "failed" para que apareça no frontend
-    const messageStatus = sendError ? 'failed' : 'sent';
+    // ✅ OTIMIZAÇÃO: Salvar mensagem IMEDIATAMENTE com status "sending" para aparecer no frontend
+    // Depois enviar via WhatsApp em background e atualizar status
     const message = await this.prisma.message.create({
       data: {
         conversationId,
@@ -195,10 +160,10 @@ export class MessageService {
         content,
         messageType,
         mediaUrl,
-        status: messageStatus, // ✅ Salvar como 'failed' se houver erro
+        status: 'sending', // ✅ Status inicial: "sending" (aparece imediatamente no frontend)
         isFromContact: false,
         timestamp: new Date(),
-        externalId: externalId, // Pode ser undefined se falhou
+        externalId: null, // Será atualizado após envio
       },
       include: {
         sender: {
@@ -211,7 +176,7 @@ export class MessageService {
       },
     });
 
-    // Atualizar conversa
+    // Atualizar conversa IMEDIATAMENTE
     await this.prisma.conversation.update({
       where: { id: conversationId },
       data: {
@@ -220,24 +185,185 @@ export class MessageService {
       },
     });
 
-    logger.info(`[MessageService] ✅ Message processed for conversation ${conversation.id}, status: ${messageStatus}`);
-
-    // ✅ Se houve erro ao enviar, lançar erro após salvar mensagem
-    if (sendError) {
-      throw new Error(`Failed to send WhatsApp message: ${sendError.message}`);
-    }
-
-    // Emitir evento via Socket.IO para notificar frontend em tempo real
+    // ✅ Emitir evento WebSocket IMEDIATAMENTE (mensagem aparece no frontend antes de enviar)
     try {
       const socketServer = getSocketServer();
-      const formattedMessage = this.formatMessageResponse(message);
-      
-      socketServer.emitNewMessage(conversationId, formattedMessage);
-      logger.info(`[MessageService] 📡 New message event emitted for conversation ${conversationId}`);
+      if (socketServer) {
+        const formattedMessage: MessageResponse = {
+          id: message.id,
+          conversationId: message.conversationId,
+          content: message.content,
+          messageType: message.messageType as MessageType,
+          mediaUrl: message.mediaUrl,
+          status: 'sending', // ✅ Status inicial
+          isFromContact: message.isFromContact,
+          timestamp: message.timestamp.toISOString(),
+          sender: {
+            id: message.sender.id,
+            name: message.sender.name,
+            email: message.sender.email,
+            roles: message.sender.roles.map((ur: any) => ur.role.name),
+          },
+        };
+        socketServer.emitNewMessage(conversationId, formattedMessage);
+        logger.info(`[MessageService] 📡 Message event emitted IMMEDIATELY for conversation ${conversationId} (status: sending)`);
+      }
     } catch (socketError) {
       logger.error('[MessageService] ❌ Error emitting socket event:', socketError);
     }
 
+    // ✅ ENVIAR VIA WHATSAPP EM BACKGROUND (não bloqueia resposta)
+    // Isso permite que a mensagem apareça imediatamente no frontend
+    // ✅ IMPORTANTE: Usar .catch() para garantir que erros não sejam silenciados
+    (async () => {
+      try {
+        logger.info(`📤 [BACKGROUND] Starting WhatsApp send for message ${message.id}`);
+        logger.info(`📤 [BACKGROUND] Connection: ${conversation.connectionId}, Phone: ${conversation.contact.phoneNumber}`);
+        logger.info(`📤 [BACKGROUND] Message type: ${messageType}, mediaUrl: ${mediaUrl || 'none'}`);
+        
+        // ✅ VERIFICAÇÃO: Verificar se conexão está disponível antes de enviar
+        const connectionStatus = await this.prisma.whatsAppConnection.findUnique({
+          where: { id: conversation.connectionId },
+          select: { status: true },
+        });
+        
+        if (!connectionStatus || connectionStatus.status !== 'connected') {
+          throw new Error(`Connection ${conversation.connectionId} is not connected (status: ${connectionStatus?.status || 'not found'})`);
+        }
+        
+        logger.info(`📤 [BACKGROUND] Connection verified: ${connectionStatus.status}`);
+        
+        let externalId: string | undefined;
+        
+        if (messageType === 'text') {
+          logger.info(`📤 [BACKGROUND] Sending text message...`);
+          externalId = await baileysManager.sendMessage(
+            conversation.connectionId,
+            conversation.contact.phoneNumber,
+            formattedContent,
+            'text'
+          );
+          logger.info(`📤 [BACKGROUND] Text message sent, externalId: ${externalId || 'none'}`);
+        } else if (mediaUrl) {
+          logger.info(`📤 [BACKGROUND] Sending media message: type=${messageType}, url=${mediaUrl}`);
+          externalId = await baileysManager.sendMessage(
+            conversation.connectionId,
+            conversation.contact.phoneNumber,
+            { url: mediaUrl, caption: formattedContent },
+            messageType as 'image' | 'audio' | 'video' | 'document'
+          );
+          logger.info(`📤 [BACKGROUND] Media message sent, externalId: ${externalId || 'none'}`);
+        } else {
+          throw new Error(`Invalid message type or missing mediaUrl for media message`);
+        }
+        
+        if (!externalId) {
+          logger.warn(`📤 [BACKGROUND] ⚠️ Message sent but no externalId returned - may not have been sent`);
+        }
+        
+        // ✅ Atualizar mensagem com externalId e status "sent"
+        await this.prisma.message.update({
+          where: { id: message.id },
+          data: {
+            externalId,
+            status: 'sent',
+          },
+        });
+        
+        logger.info(`✅ [BACKGROUND] Message ${message.id} updated to 'sent' status (externalId: ${externalId || 'none'})`);
+        
+        // ✅ Emitir evento WebSocket com status atualizado
+        try {
+          const socketServer = getSocketServer();
+          if (socketServer) {
+            const updatedMessage: MessageResponse = {
+              id: message.id,
+              conversationId: message.conversationId,
+              content: message.content,
+              messageType: message.messageType as MessageType,
+              mediaUrl: message.mediaUrl,
+              status: 'sent', // ✅ Status atualizado
+              isFromContact: message.isFromContact,
+              timestamp: message.timestamp.toISOString(),
+              sender: {
+                id: message.sender.id,
+                name: message.sender.name,
+                email: message.sender.email,
+                roles: message.sender.roles.map((ur: any) => ur.role.name),
+              },
+            };
+            socketServer.emitNewMessage(conversationId, updatedMessage);
+            logger.info(`[MessageService] 📡 Message status updated to 'sent' for conversation ${conversationId}`);
+          }
+        } catch (socketError) {
+          logger.error('[MessageService] ❌ Error emitting socket event (update):', socketError);
+        }
+        
+        logger.info(`✅ [BACKGROUND] Message ${message.id} sent successfully via WhatsApp (id: ${externalId || 'n/a'})`);
+      } catch (error: any) {
+        // ✅ LOG DETALHADO DO ERRO
+        logger.error('❌ [BACKGROUND] Error sending WhatsApp message:', error);
+        logger.error('❌ [BACKGROUND] Error details:', {
+          messageId: message.id,
+          conversationId,
+          connectionId: conversation.connectionId,
+          phoneNumber: conversation.contact.phoneNumber,
+          messageType,
+          errorMessage: error?.message || 'Unknown error',
+          errorStack: error?.stack || 'No stack trace',
+          errorName: error?.name || 'Unknown',
+        });
+        
+        // ✅ Atualizar mensagem com status "failed"
+        try {
+          await this.prisma.message.update({
+            where: { id: message.id },
+            data: {
+              status: 'failed',
+            },
+          });
+          logger.info(`❌ [BACKGROUND] Message ${message.id} updated to 'failed' status`);
+        } catch (updateError) {
+          logger.error('❌ [BACKGROUND] Error updating message status to failed:', updateError);
+        }
+        
+        // ✅ Emitir evento WebSocket com status "failed"
+        try {
+          const socketServer = getSocketServer();
+          if (socketServer) {
+            const failedMessage: MessageResponse = {
+              id: message.id,
+              conversationId: message.conversationId,
+              content: message.content,
+              messageType: message.messageType as MessageType,
+              mediaUrl: message.mediaUrl,
+              status: 'failed', // ✅ Status atualizado
+              isFromContact: message.isFromContact,
+              timestamp: message.timestamp.toISOString(),
+              sender: {
+                id: message.sender.id,
+                name: message.sender.name,
+                email: message.sender.email,
+                roles: message.sender.roles.map((ur: any) => ur.role.name),
+              },
+            };
+            socketServer.emitNewMessage(conversationId, failedMessage);
+            logger.info(`[MessageService] 📡 Message status updated to 'failed' for conversation ${conversationId}`);
+          }
+        } catch (socketError) {
+          logger.error('[MessageService] ❌ Error emitting socket event (failed):', socketError);
+        }
+      }
+    })().catch((error) => {
+      // ✅ CATCH FINAL: Garantir que nenhum erro seja silenciado
+      logger.error('❌ [BACKGROUND] Unhandled error in background send:', error);
+      logger.error('❌ [BACKGROUND] This should never happen - all errors should be caught above');
+    });
+
+    logger.info(`[MessageService] ✅ Message saved and queued for sending (id: ${message.id})`);
+
+    // ✅ Retornar mensagem IMEDIATAMENTE (não esperar envio via WhatsApp)
+    // Evento WebSocket já foi emitido acima com status "sending"
     return this.formatMessageResponse(message);
   }
 

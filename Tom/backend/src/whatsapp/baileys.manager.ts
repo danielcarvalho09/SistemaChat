@@ -1046,12 +1046,26 @@ class BaileysManager {
       throw new Error(`Connection ${connectionId} not found`);
     }
 
+    // ✅ VERIFICAÇÃO ROBUSTA: Verificar status E socket realmente conectado
     if (client.status !== 'connected') {
-      throw new Error(`Connection ${connectionId} is not connected`);
+      throw new Error(`Connection ${connectionId} is not connected (status: ${client.status})`);
+    }
+
+    // ✅ VERIFICAÇÃO CRÍTICA: Verificar se socket existe e está realmente conectado
+    if (!client.socket) {
+      throw new Error(`Socket not available for connection ${connectionId}`);
     }
 
     try {
-      const jid = to.includes('@') ? to : `${to}@s.whatsapp.net`;
+      // ✅ FORMATO CORRETO DO JID conforme documentação do Baileys
+      // JID deve estar no formato: 5511999999999@s.whatsapp.net
+      // Remover caracteres não numéricos do número
+      const cleanNumber = to.replace(/\D/g, '');
+      const jid = cleanNumber.includes('@') 
+        ? cleanNumber 
+        : `${cleanNumber}@s.whatsapp.net`;
+      
+      logger.info(`[Baileys] Preparing to send message to JID: ${jid} (original: ${to})`);
       let messageContent: any;
 
       if (messageType === 'text') {
@@ -1228,23 +1242,96 @@ class BaileysManager {
         logger.debug(`[Baileys] Message content structure:`, JSON.stringify(messageContent, null, 2).substring(0, 500));
       }
       
+      // ✅ VERIFICAÇÃO FINAL: Verificar se socket ainda está conectado antes de enviar
+      if (!client.socket || client.status !== 'connected') {
+        throw new Error(`Socket disconnected before sending message (status: ${client.status})`);
+      }
+      
+      // ✅ ENVIAR MENSAGEM conforme documentação do Baileys
+      // Documentação: https://baileys.wiki/docs/sending-messages/
+      // Formato: socket.sendMessage(jid, messageContent)
+      
+      logger.info(`[Baileys] 📤 Calling sendMessage with JID: ${jid}, type: ${messageType}`);
+      logger.info(`[Baileys] 📤 Message content preview:`, {
+        type: messageType,
+        hasText: !!messageContent.text,
+        hasImage: !!messageContent.image,
+        hasAudio: !!messageContent.audio,
+        hasVideo: !!messageContent.video,
+        hasDocument: !!messageContent.document,
+      });
+      
       const sent = await client.socket.sendMessage(jid, messageContent);
-      const externalId = sent?.key?.id as string | undefined;
+      
+      // ✅ EXTRAIR EXTERNAL ID DE FORMA ROBUSTA
+      // O Baileys pode retornar o ID em diferentes formatos
+      let externalId: string | undefined = undefined;
+      
+      if (sent?.key?.id) {
+        externalId = sent.key.id as string;
+      } else if (sent?.id) {
+        externalId = sent.id as string;
+      } else if (typeof sent === 'string') {
+        externalId = sent;
+      } else if (sent && typeof sent === 'object') {
+        // Tentar extrair ID de qualquer propriedade
+        const sentStr = JSON.stringify(sent);
+        const idMatch = sentStr.match(/"id"\s*:\s*"([^"]+)"/);
+        if (idMatch) {
+          externalId = idMatch[1];
+        }
+      }
+      
+      logger.info(`[Baileys] 📤 sendMessage returned:`, {
+        hasKey: !!sent?.key,
+        hasId: !!sent?.key?.id,
+        externalId: externalId || 'none',
+        sentType: typeof sent,
+        sentKeys: sent && typeof sent === 'object' ? Object.keys(sent) : 'N/A',
+        fullResponse: JSON.stringify(sent, null, 2).substring(0, 1000),
+      });
       
       if (externalId) {
         logger.info(`[Baileys] ✅ Message sent successfully from ${connectionId} to ${to} (id: ${externalId})`);
       } else {
+        // ✅ AVISO: Se não tem externalId, pode ser que a mensagem não foi enviada
+        // Mas também pode ser que o Baileys não retornou o ID (comportamento conhecido)
         logger.warn(`[Baileys] ⚠️ Message sent but no externalId returned from Baileys`);
+        logger.warn(`[Baileys] ⚠️ This may indicate the message was not actually sent`);
+        logger.warn(`[Baileys] ⚠️ Full response:`, JSON.stringify(sent, null, 2));
+        
+        // ✅ IMPORTANTE: Mesmo sem externalId, considerar como enviado se não houve erro
+        // O Baileys pode enviar a mensagem mas não retornar o ID em alguns casos
+        logger.info(`[Baileys] ⚠️ Assuming message was sent (no error thrown, but no externalId)`);
       }
       
       return externalId;
-    } catch (error) {
+    } catch (error: any) {
+      // ✅ LOG DETALHADO DO ERRO
       logger.error(`[Baileys] ❌ Error sending message from ${connectionId} to ${to}:`, error);
-      logger.error(`[Baileys] Error details:`, {
+      logger.error(`[Baileys] ❌ Error details:`, {
         messageType,
-        errorMessage: error instanceof Error ? error.message : 'Unknown error',
-        errorStack: error instanceof Error ? error.stack : undefined,
+        jid,
+        connectionId,
+        connectionStatus: client.status,
+        hasSocket: !!client.socket,
+        errorMessage: error?.message || 'Unknown error',
+        errorStack: error?.stack || 'No stack trace',
+        errorName: error?.name || 'Unknown',
+        errorCode: error?.code || 'N/A',
+        errorOutput: error?.output ? JSON.stringify(error.output, null, 2).substring(0, 500) : 'N/A',
       });
+      
+      // ✅ Verificar se é erro de conexão
+      if (error?.message?.includes('not connected') || error?.message?.includes('Socket not available')) {
+        logger.error(`[Baileys] ❌ Connection issue detected - message cannot be sent`);
+      }
+      
+      // ✅ Verificar se é erro de formato
+      if (error?.message?.includes('Invalid') || error?.message?.includes('format')) {
+        logger.error(`[Baileys] ❌ Format issue detected - check message content`);
+      }
+      
       throw error;
     }
   }
