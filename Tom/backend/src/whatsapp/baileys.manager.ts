@@ -443,6 +443,15 @@ class BaileysManager {
         logger.info(`[Baileys] 📊 Processing large batch - will process in chunks to avoid overload`);
       }
       
+      // 📊 Estatísticas de sincronização (declarar ANTES de usar)
+      const syncStats = {
+        total: messages?.length || 0,
+        processed: 0,
+        skipped: 0,
+        errors: 0,
+        type,
+      };
+      
       // Se receber MUITAS mensagens (> 50), processar em lotes menores para evitar timeout
       const BATCH_SIZE = 50;
       const shouldProcessInBatches = messages && messages.length > BATCH_SIZE;
@@ -463,7 +472,7 @@ class BaileysManager {
           logger.info(`[Baileys] 📦 Processing batch ${batchIndex + 1}/${batches.length} (${batch.length} messages)...`);
           
           // Processar lote (usar mesmo código de processamento)
-          await this.processMessageBatch(connectionId, batch, type, firstConnectedAt, syncStats);
+          await this.processMessageBatch(connectionId, batch, type, firstConnectedAt || null, syncStats);
           
           // Delay entre lotes para evitar sobrecarga
           if (batchIndex < batches.length - 1) {
@@ -476,18 +485,9 @@ class BaileysManager {
         logger.info(`[Baileys] 📊 Batch processing complete: Total=${syncStats.total}, Processed=${syncStats.processed}, Skipped=${syncStats.skipped}, Errors=${syncStats.errors}`);
         return; // Sair da função - já processou tudo em lotes
       }
-
-      // 📊 Estatísticas de sincronização
-      const syncStats = {
-        total: messages?.length || 0,
-        processed: 0,
-        skipped: 0,
-        errors: 0,
-        type,
-      };
       
       // Processar mensagens normalmente (se não foi processado em lotes)
-      await this.processMessageBatch(connectionId, messages, type, firstConnectedAt, syncStats);
+      await this.processMessageBatch(connectionId, messages, type, firstConnectedAt || null, syncStats);
     } catch (error) {
       logger.error(`[Baileys] ❌ Error handling messages for ${connectionId}:`, error);
       // Não propagar erro - continuar funcionamento
