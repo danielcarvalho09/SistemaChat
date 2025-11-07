@@ -523,6 +523,37 @@ class BaileysManager {
    * Processa um lote de mensagens com proteção robusta
    * Garante que todas mensagens sejam processadas mesmo com erros
    */
+  private extractMessageTimestamp(msg: proto.IWebMessageInfo): Date | null {
+    try {
+      const data: any = msg;
+      const candidate =
+        data.messageTimestamp ??
+        data.message?.messageTimestamp ??
+        data.message?.extendedTextMessage?.contextInfo?.messageTimestamp ??
+        data.message?.audioMessage?.messageTimestamp ??
+        data.message?.videoMessage?.messageTimestamp ??
+        data.message?.imageMessage?.messageTimestamp ??
+        data.message?.documentMessage?.messageTimestamp ??
+        data.key?.messageTimestamp ??
+        data.key?.timestamp;
+
+      if (!candidate) {
+        return null;
+      }
+
+      const numericTimestamp = Number(candidate);
+      if (!Number.isFinite(numericTimestamp)) {
+        return null;
+      }
+
+      const normalized = numericTimestamp > 1e12 ? numericTimestamp : numericTimestamp * 1000;
+      return new Date(normalized);
+    } catch (error) {
+      logger.debug('[Baileys] Could not extract message timestamp:', error);
+      return null;
+    }
+  }
+
   private async processMessageBatch(
     connectionId: string,
     messages: any[],
@@ -556,6 +587,8 @@ class BaileysManager {
           break; // Parar loop mas não falhar completamente
         }
         
+        const messageTimestamp = this.extractMessageTimestamp(msg);
+
         const from = msg.key.remoteJid;
         const isFromMe = msg.key.fromMe || false;
         const externalId = msg.key.id;
@@ -567,12 +600,6 @@ class BaileysManager {
         
         // 0. Filtrar mensagens antigas (anteriores à primeira conexão)
         if (firstConnectedAt && type === 'history') {
-          const messageTimestamp = msg.messageTimestamp 
-            ? new Date(Number(msg.messageTimestamp) * 1000) 
-            : msg.key?.messageTimestamp 
-              ? new Date(Number(msg.key.messageTimestamp) * 1000)
-              : null;
-          
           if (!messageTimestamp) {
             logger.debug(`[Baileys] ✅ Processing message without timestamp (likely recent)`);
           } else {
@@ -689,18 +716,24 @@ class BaileysManager {
 
         logger.info(`[Baileys] ✅ New ${messageType} from ${from}: "${messageText.substring(0, 50)}..."`);
 
+        const mediaUrl =
+          messageType === 'audio' ? audioMediaUrl :
+          messageType === 'image' ? imageMediaUrl :
+          null;
+
         // Processar mensagem com timeout e retry robusto
         const messageProcessed = await this.processMessageWithRetry(
           connectionId,
           from,
           messageText,
           messageType,
-          messageType === 'audio' ? audioMediaUrl : messageType === 'image' ? imageMediaUrl : null,
+          mediaUrl,
           isFromMe,
           externalId,
           pushName,
           processedIndex,
-          totalMessages
+          totalMessages,
+          messageTimestamp || undefined
         );
 
         if (messageProcessed) {
@@ -738,7 +771,8 @@ class BaileysManager {
     externalId: string,
     pushName: string | null,
     processedIndex: number,
-    totalMessages: number
+    totalMessages: number,
+    messageTimestamp?: Date
   ): Promise<boolean> {
     const maxRetries = 3;
     const timeoutMs = 30000; // 30 segundos por tentativa
@@ -757,7 +791,8 @@ class BaileysManager {
             mediaUrl,
             isFromMe,
             externalId,
-            pushName
+            pushName,
+            messageTimestamp
           );
         })();
 
@@ -808,7 +843,8 @@ class BaileysManager {
                 mediaUrl,
                 isFromMe,
                 externalId,
-                pushName
+                pushName,
+                messageTimestamp
               );
               this.syncRetryQueue.delete(retryKey);
               logger.info(`[Baileys] ✅ Background retry successful for ${externalId}`);
