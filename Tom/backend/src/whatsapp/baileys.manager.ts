@@ -1818,7 +1818,12 @@ class BaileysManager {
           lastConnected: status === 'connected' ? new Date() : undefined,
         },
       });
-    } catch (error) {
+    } catch (error: any) {
+      // Se a conexão não existe mais no banco, apenas logar warning (não é erro crítico)
+      if (error?.code === 'P2025' || error?.message?.includes('Record to update not found')) {
+        logger.warn(`[Baileys] ⚠️ Connection ${connectionId} not found in database - may have been deleted`);
+        return;
+      }
       logger.error(`[Baileys] Error updating status for ${connectionId}:`, error);
     }
   }
@@ -1886,7 +1891,7 @@ class BaileysManager {
       
       // Verificação robusta: status E socket realmente conectado
       if (!client || client.status !== 'connected') {
-        logger.warn(`[Baileys] ⚠️ Connection ${connectionId} not available (status: ${client?.status || 'not found'})`);
+        const currentStatus = client?.status || 'not found';
         
         // ❌ NÃO tentar reconectar aqui - pode causar múltiplas tentativas simultâneas
         // Se não estiver conectado, apenas retornar false
@@ -1895,7 +1900,22 @@ class BaileysManager {
         // 2. saveFirstConnectedAt (após primeira conexão)
         // 3. Manual via API
         
-        logger.warn(`[Baileys] ⏭️ Skipping sync for ${connectionId} - connection not available (will sync after reconnection)`);
+        // Reduzir logs repetitivos para status "qr" ou "connecting"
+        if (currentStatus === 'qr' || currentStatus === 'connecting') {
+          // Log apenas uma vez a cada 10 segundos para evitar spam
+          const lastLogKey = `sync_skip_${connectionId}`;
+          const lastLogTime = (this as any)[lastLogKey] || 0;
+          const now = Date.now();
+          
+          if (now - lastLogTime > 10000) { // 10 segundos
+            logger.debug(`[Baileys] ⏭️ Skipping sync for ${connectionId} - status: ${currentStatus} (will sync after connection)`);
+            (this as any)[lastLogKey] = now;
+          }
+        } else {
+          logger.warn(`[Baileys] ⚠️ Connection ${connectionId} not available (status: ${currentStatus})`);
+          logger.warn(`[Baileys] ⏭️ Skipping sync for ${connectionId} - connection not available (will sync after reconnection)`);
+        }
+        
         return false;
       }
 
@@ -2056,6 +2076,8 @@ class BaileysManager {
       // VERIFICAÇÃO CRÍTICA: Verificar se conexão está realmente conectada ANTES de sincronizar
       const client = this.clients.get(connectionId);
       if (!client || client.status !== 'connected' || !client.socket) {
+        const currentStatus = client?.status || 'not found';
+        
         // ❌ NÃO tentar reconectar aqui - pode causar múltiplas tentativas simultâneas
         // Se não estiver conectado, apenas retornar 0
         // A reconexão deve ser feita apenas por:
@@ -2063,8 +2085,22 @@ class BaileysManager {
         // 2. saveFirstConnectedAt (após primeira conexão)
         // 3. Manual via API
         
-        logger.warn(`[Baileys] ⏭️ Skipping sync for ${connectionId} - connection not available (status: ${client?.status || 'not found'})`);
-        logger.warn(`[Baileys] 💡 Sync will occur automatically after reconnection`);
+        // Reduzir logs repetitivos para status "qr" ou "connecting"
+        if (currentStatus === 'qr' || currentStatus === 'connecting') {
+          // Log apenas uma vez a cada 10 segundos para evitar spam
+          const lastLogKey = `sync_all_skip_${connectionId}`;
+          const lastLogTime = (this as any)[lastLogKey] || 0;
+          const now = Date.now();
+          
+          if (now - lastLogTime > 10000) { // 10 segundos
+            logger.debug(`[Baileys] ⏭️ Skipping sync for ${connectionId} - status: ${currentStatus} (will sync after connection)`);
+            (this as any)[lastLogKey] = now;
+          }
+        } else {
+          logger.warn(`[Baileys] ⏭️ Skipping sync for ${connectionId} - connection not available (status: ${currentStatus})`);
+          logger.warn(`[Baileys] 💡 Sync will occur automatically after reconnection`);
+        }
+        
         return 0;
       }
       
