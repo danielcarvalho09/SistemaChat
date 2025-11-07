@@ -279,7 +279,7 @@ export class SocketServer {
   /**
    * Emite status de conexão WhatsApp
    */
-  emitWhatsAppStatus(connectionId: string, status: 'connecting' | 'connected' | 'disconnected'): void {
+  emitWhatsAppStatus(connectionId: string, status: 'connecting' | 'connected' | 'disconnected' | 'requires_reauth'): void {
     let event: string;
     
     switch (status) {
@@ -291,6 +291,9 @@ export class SocketServer {
         break;
       case 'disconnected':
         event = SocketEvent.WHATSAPP_DISCONNECTED;
+        break;
+      case 'requires_reauth':
+        event = SocketEvent.WHATSAPP_REQUIRES_REAUTH;
         break;
     }
 

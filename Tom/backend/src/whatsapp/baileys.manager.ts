@@ -346,6 +346,7 @@ class BaileysManager {
 
     // Desconectado
     if (connection === 'close') {
+      client.status = 'disconnected';
       const statusCode = (lastDisconnect?.error as Boom)?.output?.statusCode;
       const errorMessage = (lastDisconnect?.error as Error)?.message || 'Unknown error';
       
@@ -378,12 +379,9 @@ class BaileysManager {
         return;
       }
 
-      // Logout
-      if (statusCode === DisconnectReason.loggedOut) {
-        logger.warn(`[Baileys] Logged out: ${connectionId}`);
-        await this.removeClient(connectionId, false); // Não fazer logout, já foi deslogado
-        await this.updateConnectionStatus(connectionId, 'disconnected');
-        this.emitStatus(connectionId, 'disconnected');
+      // Logout ou sessão inválida requer novo pareamento
+      if (statusCode === DisconnectReason.loggedOut || statusCode === DisconnectReason.badSession) {
+        await this.handleBadSession(connectionId, statusCode, lastDisconnect?.error);
         return;
       }
 
@@ -1642,6 +1640,11 @@ class BaileysManager {
       // Só fazer heartbeat se estiver conectado
       if (currentClient.status === 'connected') {
         try {
+          if (!currentClient.socket) {
+            logger.debug(`[Baileys] ⏸️ Skipping heartbeat for ${connectionId} - socket not available`);
+            return;
+          }
+
           // ESTRATÉGIA MULTI-CAMADAS para manter conexão viva:
           
           // 1. Marcar presença online (CRÍTICO para manter conexão)
@@ -1670,6 +1673,10 @@ class BaileysManager {
             // Para cada conversa ativa, marcar presença para manter conexão
             for (const conv of activeConversations) {
               try {
+                if (currentClient.status !== 'connected' || !currentClient.socket) {
+                  logger.debug(`[Baileys] ⏸️ Stopping presence updates for ${connectionId} - connection no longer active`);
+                  break;
+                }
                 const jid = conv.contact.phoneNumber.includes('@') 
                   ? conv.contact.phoneNumber 
                   : `${conv.contact.phoneNumber}@s.whatsapp.net`;
@@ -1829,7 +1836,7 @@ class BaileysManager {
   /**
    * Emite status via Socket.IO
    */
-  private emitStatus(connectionId: string, status: 'connecting' | 'connected' | 'disconnected') {
+  private emitStatus(connectionId: string, status: 'connecting' | 'connected' | 'disconnected' | 'requires_reauth') {
     try {
       const socketServer = getSocketServer();
       socketServer.emitWhatsAppStatus(connectionId, status);
@@ -1837,6 +1844,71 @@ class BaileysManager {
     } catch (error) {
       logger.error(`[Baileys] Error emitting status for ${connectionId}:`, error);
     }
+  }
+
+  /**
+   * Limpa credenciais persistidas e marca conexão como necessitando reautenticação
+   */
+  private async resetConnectionAuth(connectionId: string, reason: string): Promise<void> {
+    try {
+      await this.prisma.whatsAppConnection.update({
+        where: { id: connectionId },
+        data: {
+          authData: null,
+          qrCode: null,
+          lastConnected: null,
+        },
+      });
+
+      await this.updateConnectionStatus(connectionId, 'requires_reauth');
+
+      logger.warn(`[Baileys] 🔐 Auth data cleared for ${connectionId} (reason: ${reason})`);
+    } catch (error) {
+      logger.error(`[Baileys] ❌ Error clearing auth for ${connectionId}:`, error);
+    }
+  }
+
+  /**
+   * Trata cenários de sessão inválida/deslogada
+   */
+  private async handleBadSession(connectionId: string, statusCode?: number, error?: any): Promise<void> {
+    const reason = statusCode === DisconnectReason.loggedOut ? 'logged_out' : 'bad_session';
+
+    logger.warn(`[Baileys] 🛑 ${reason.toUpperCase()} detected for ${connectionId}. Clearing credentials and requesting new QR.`);
+
+    const client = this.clients.get(connectionId);
+    if (client) {
+      client.status = 'disconnected';
+      client.hasCredentials = false;
+    }
+
+    // Evitar múltiplos timers em paralelo
+    this.reconnectionLocks.delete(connectionId);
+
+    // Remover intervals/cliente atuais sem forçar logout (já inválido)
+    await this.removeClient(connectionId, false);
+
+    await this.resetConnectionAuth(connectionId, reason);
+
+    // Notificar frontend
+    this.emitStatus(connectionId, 'requires_reauth');
+
+    try {
+      const socketServer = getSocketServer();
+      socketServer.emitWhatsAppConnectionFailed(
+        connectionId,
+        `Sessão do WhatsApp inválida (${reason === 'bad_session' ? 'bad session' : 'logged out'}). Escaneie o QR novamente.`
+      );
+    } catch (notifyError) {
+      logger.error(`[Baileys] Error emitting connection failure for ${connectionId}:`, notifyError);
+    }
+
+    // Agendar recriação do cliente para gerar novo QR automaticamente
+    setTimeout(() => {
+      this.createClient(connectionId).catch((creationError) => {
+        logger.error(`[Baileys] ❌ Failed to recreate client for ${connectionId} after ${reason}:`, creationError);
+      });
+    }, 2000);
   }
 
   /**
