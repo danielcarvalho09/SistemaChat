@@ -164,6 +164,7 @@ export enum MessageType {
 }
 
 export enum MessageStatus {
+  SENDING = 'sending', // ✅ Mensagem sendo enviada (aparece imediatamente no frontend)
   SENT = 'sent',
   DELIVERED = 'delivered',
   READ = 'read',

@@ -1,7 +1,7 @@
 import { getPrismaClient } from '../config/database.js';
 import { baileysManager } from '../whatsapp/baileys.manager.js';
 import { getSocketServer } from '../websocket/socket.server.js';
-import { MessageResponse, SendMessageRequest, PaginatedResponse, PaginationParams } from '../models/types.js';
+import { MessageResponse, SendMessageRequest, PaginatedResponse, PaginationParams, MessageType, MessageStatus } from '../models/types.js';
 import { NotFoundError, ForbiddenError } from '../middlewares/error.middleware.js';
 import { logger } from '../config/logger.js';
 
@@ -189,22 +189,10 @@ export class MessageService {
     try {
       const socketServer = getSocketServer();
       if (socketServer) {
-        const formattedMessage: MessageResponse = {
-          id: message.id,
-          conversationId: message.conversationId,
-          content: message.content,
-          messageType: message.messageType as MessageType,
-          mediaUrl: message.mediaUrl,
-          status: 'sending', // ✅ Status inicial
-          isFromContact: message.isFromContact,
-          timestamp: message.timestamp.toISOString(),
-          sender: {
-            id: message.sender.id,
-            name: message.sender.name,
-            email: message.sender.email,
-            roles: message.sender.roles.map((ur: any) => ur.role.name),
-          },
-        };
+        const formattedMessage = this.formatMessageResponse(message);
+        // Sobrescrever status para 'sending'
+        formattedMessage.status = MessageStatus.SENDING;
+        
         socketServer.emitNewMessage(conversationId, formattedMessage);
         logger.info(`[MessageService] 📡 Message event emitted IMMEDIATELY for conversation ${conversationId} (status: sending)`);
       }
@@ -276,24 +264,25 @@ export class MessageService {
         try {
           const socketServer = getSocketServer();
           if (socketServer) {
-            const updatedMessage: MessageResponse = {
-              id: message.id,
-              conversationId: message.conversationId,
-              content: message.content,
-              messageType: message.messageType as MessageType,
-              mediaUrl: message.mediaUrl,
-              status: 'sent', // ✅ Status atualizado
-              isFromContact: message.isFromContact,
-              timestamp: message.timestamp.toISOString(),
-              sender: {
-                id: message.sender.id,
-                name: message.sender.name,
-                email: message.sender.email,
-                roles: message.sender.roles.map((ur: any) => ur.role.name),
+            // Buscar mensagem atualizada com sender
+            const updatedMessageData = await this.prisma.message.findUnique({
+              where: { id: message.id },
+              include: {
+                sender: {
+                  include: {
+                    roles: {
+                      include: { role: true },
+                    },
+                  },
+                },
               },
-            };
-            socketServer.emitNewMessage(conversationId, updatedMessage);
-            logger.info(`[MessageService] 📡 Message status updated to 'sent' for conversation ${conversationId}`);
+            });
+            
+            if (updatedMessageData) {
+              const updatedMessage = this.formatMessageResponse(updatedMessageData);
+              socketServer.emitNewMessage(conversationId, updatedMessage);
+              logger.info(`[MessageService] 📡 Message status updated to 'sent' for conversation ${conversationId}`);
+            }
           }
         } catch (socketError) {
           logger.error('[MessageService] ❌ Error emitting socket event (update):', socketError);
@@ -331,24 +320,25 @@ export class MessageService {
         try {
           const socketServer = getSocketServer();
           if (socketServer) {
-            const failedMessage: MessageResponse = {
-              id: message.id,
-              conversationId: message.conversationId,
-              content: message.content,
-              messageType: message.messageType as MessageType,
-              mediaUrl: message.mediaUrl,
-              status: 'failed', // ✅ Status atualizado
-              isFromContact: message.isFromContact,
-              timestamp: message.timestamp.toISOString(),
-              sender: {
-                id: message.sender.id,
-                name: message.sender.name,
-                email: message.sender.email,
-                roles: message.sender.roles.map((ur: any) => ur.role.name),
+            // Buscar mensagem atualizada com sender
+            const failedMessageData = await this.prisma.message.findUnique({
+              where: { id: message.id },
+              include: {
+                sender: {
+                  include: {
+                    roles: {
+                      include: { role: true },
+                    },
+                  },
+                },
               },
-            };
-            socketServer.emitNewMessage(conversationId, failedMessage);
-            logger.info(`[MessageService] 📡 Message status updated to 'failed' for conversation ${conversationId}`);
+            });
+            
+            if (failedMessageData) {
+              const failedMessage = this.formatMessageResponse(failedMessageData);
+              socketServer.emitNewMessage(conversationId, failedMessage);
+              logger.info(`[MessageService] 📡 Message status updated to 'failed' for conversation ${conversationId}`);
+            }
           }
         } catch (socketError) {
           logger.error('[MessageService] ❌ Error emitting socket event (failed):', socketError);

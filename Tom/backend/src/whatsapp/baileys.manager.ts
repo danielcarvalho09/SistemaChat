@@ -1056,16 +1056,17 @@ class BaileysManager {
       throw new Error(`Socket not available for connection ${connectionId}`);
     }
 
+    // ✅ FORMATO CORRETO DO JID conforme documentação do Baileys (fora do try-catch)
+    // JID deve estar no formato: 5511999999999@s.whatsapp.net
+    // Remover caracteres não numéricos do número
+    const cleanNumber = to.replace(/\D/g, '');
+    const jid = cleanNumber.includes('@') 
+      ? cleanNumber 
+      : `${cleanNumber}@s.whatsapp.net`;
+    
+    logger.info(`[Baileys] Preparing to send message to JID: ${jid} (original: ${to})`);
+    
     try {
-      // ✅ FORMATO CORRETO DO JID conforme documentação do Baileys
-      // JID deve estar no formato: 5511999999999@s.whatsapp.net
-      // Remover caracteres não numéricos do número
-      const cleanNumber = to.replace(/\D/g, '');
-      const jid = cleanNumber.includes('@') 
-        ? cleanNumber 
-        : `${cleanNumber}@s.whatsapp.net`;
-      
-      logger.info(`[Baileys] Preparing to send message to JID: ${jid} (original: ${to})`);
       let messageContent: any;
 
       if (messageType === 'text') {
@@ -1269,8 +1270,6 @@ class BaileysManager {
       
       if (sent?.key?.id) {
         externalId = sent.key.id as string;
-      } else if (sent?.id) {
-        externalId = sent.id as string;
       } else if (typeof sent === 'string') {
         externalId = sent;
       } else if (sent && typeof sent === 'object') {
