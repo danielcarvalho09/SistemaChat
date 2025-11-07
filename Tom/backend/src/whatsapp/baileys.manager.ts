@@ -178,6 +178,9 @@ class BaileysManager {
     } catch (error) {
       logger.error(`[Baileys] Error creating client ${connectionId}:`, error);
       
+      // ✅ LIBERAR LOCK EM CASO DE ERRO
+      this.reconnectionLocks.delete(connectionId);
+      
       // ✅ Emitir evento de falha de conexão
       try {
         const socketServer = getSocketServer();
@@ -384,6 +387,25 @@ class BaileysManager {
         return;
       }
 
+      // Tratamento especial para erro 503 (Service Unavailable)
+      if (statusCode === 503) {
+        logger.warn(`[Baileys] ⚠️ Error 503 (Service Unavailable) - WhatsApp may be temporarily unavailable`);
+        logger.warn(`[Baileys] 💡 Will wait 30 seconds before attempting reconnection`);
+        
+        // Aguardar 30 segundos antes de tentar reconectar (evitar múltiplas tentativas)
+        setTimeout(async () => {
+          const shouldReconnect = this.shouldAttemptReconnection(connectionId, statusCode);
+          if (shouldReconnect) {
+            logger.info(`[Baileys] 🔄 Auto-reconnecting ${connectionId} after 503 error...`);
+            await this.attemptReconnection(connectionId);
+          }
+        }, 30000); // 30 segundos para erro 503
+        
+        await this.updateConnectionStatus(connectionId, 'disconnected');
+        this.emitStatus(connectionId, 'disconnected');
+        return;
+      }
+      
       // Reconexão automática inteligente
       // Só reconecta se:
       // 1. Tem credenciais salvas (já foi conectado antes)
@@ -899,6 +921,12 @@ class BaileysManager {
    * Tenta reconectar automaticamente
    */
   private async attemptReconnection(connectionId: string): Promise<void> {
+    // ✅ VERIFICAÇÃO CRÍTICA: Verificar ANTES de qualquer coisa se já está reconectando
+    if (this.reconnectionLocks.get(connectionId)) {
+      logger.info(`[Baileys] ⏭️ Skipping reconnection for ${connectionId}: Already reconnecting (lock active)`);
+      return;
+    }
+
     const client = this.clients.get(connectionId);
     
     if (!client) {
@@ -907,11 +935,14 @@ class BaileysManager {
     }
 
     // Verificar se já está reconectando (dupla verificação)
-    if (client.isReconnecting || this.reconnectionLocks.get(connectionId)) {
-      logger.info(`[Baileys] ⏭️ Reconnection already in progress for ${connectionId}, skipping...`);
+    if (client.isReconnecting) {
+      logger.info(`[Baileys] ⏭️ Skipping reconnection for ${connectionId}: Already reconnecting (flag active)`);
       return;
     }
 
+    // ✅ MARCAR LOCK ANTES DE QUALQUER OPERAÇÃO
+    this.reconnectionLocks.set(connectionId, true);
+    
     // Marcar como reconectando
     client.isReconnecting = true;
     client.reconnectAttempts = (client.reconnectAttempts || 0) + 1;
@@ -950,13 +981,37 @@ class BaileysManager {
       if (updatedClient) {
         updatedClient.isReconnecting = false;
       }
-    } catch (error) {
+      
+      // ✅ Lock será liberado pelo createClient em caso de sucesso
+    } catch (error: any) {
       logger.error(`[Baileys] ❌ Reconnection failed for ${connectionId}:`, error);
+      
+      // ✅ LIBERAR LOCK EM CASO DE ERRO
+      this.reconnectionLocks.delete(connectionId);
       
       // Resetar flag mesmo em caso de erro
       const updatedClient = this.clients.get(connectionId);
       if (updatedClient) {
         updatedClient.isReconnecting = false;
+      }
+      
+      // Verificar se é erro 503 (Service Unavailable) - aguardar mais tempo
+      const is503Error = error?.message?.includes('503') || 
+                        error?.output?.statusCode === 503 ||
+                        error?.statusCode === 503;
+      
+      if (is503Error) {
+        logger.warn(`[Baileys] ⚠️ Error 503 (Service Unavailable) - WhatsApp may be temporarily unavailable`);
+        logger.warn(`[Baileys] 💡 Will retry after longer delay (30s)`);
+        
+        // Aguardar 30 segundos antes de tentar novamente (se não excedeu limite)
+        if (client.reconnectAttempts < 30) {
+          setTimeout(() => {
+            this.attemptReconnection(connectionId).catch(err => {
+              logger.error(`[Baileys] Failed to retry reconnection after 503:`, err);
+            });
+          }, 30000); // 30 segundos para erro 503
+        }
       }
       
       // Marcar como desconectado se falhou
@@ -1833,25 +1888,15 @@ class BaileysManager {
       if (!client || client.status !== 'connected') {
         logger.warn(`[Baileys] ⚠️ Connection ${connectionId} not available (status: ${client?.status || 'not found'})`);
         
-        // Tentar reconectar se não estiver conectado
-        logger.info(`[Baileys] 🔄 Attempting to reconnect ${connectionId} before sync...`);
-        try {
-          await this.createClient(connectionId);
-          client = this.clients.get(connectionId);
-          
-          // Aguardar conexão estabilizar
-          await new Promise(resolve => setTimeout(resolve, 2000));
-          
-          if (!client || client.status !== 'connected') {
-            logger.error(`[Baileys] ❌ Failed to reconnect ${connectionId} for sync`);
-            return false;
-          }
-          
-          logger.info(`[Baileys] ✅ Reconnected ${connectionId} successfully, proceeding with sync`);
-        } catch (reconnectError) {
-          logger.error(`[Baileys] ❌ Reconnection failed:`, reconnectError);
-          return false;
-        }
+        // ❌ NÃO tentar reconectar aqui - pode causar múltiplas tentativas simultâneas
+        // Se não estiver conectado, apenas retornar false
+        // A reconexão deve ser feita apenas por:
+        // 1. attemptReconnection (após desconexão)
+        // 2. saveFirstConnectedAt (após primeira conexão)
+        // 3. Manual via API
+        
+        logger.warn(`[Baileys] ⏭️ Skipping sync for ${connectionId} - connection not available (will sync after reconnection)`);
+        return false;
       }
 
       // Verificar se socket está realmente conectado (não apenas status)
@@ -2011,26 +2056,16 @@ class BaileysManager {
       // VERIFICAÇÃO CRÍTICA: Verificar se conexão está realmente conectada ANTES de sincronizar
       const client = this.clients.get(connectionId);
       if (!client || client.status !== 'connected' || !client.socket) {
-        logger.warn(`[Baileys] ⚠️ Connection ${connectionId} not connected - attempting to reconnect before sync...`);
+        // ❌ NÃO tentar reconectar aqui - pode causar múltiplas tentativas simultâneas
+        // Se não estiver conectado, apenas retornar 0
+        // A reconexão deve ser feita apenas por:
+        // 1. attemptReconnection (após desconexão)
+        // 2. saveFirstConnectedAt (após primeira conexão)
+        // 3. Manual via API
         
-        try {
-          // Tentar reconectar antes de sincronizar
-          await this.createClient(connectionId);
-          
-          // Aguardar conexão estabilizar
-          await new Promise(resolve => setTimeout(resolve, 3000));
-          
-          const reconnectedClient = this.clients.get(connectionId);
-          if (!reconnectedClient || reconnectedClient.status !== 'connected' || !reconnectedClient.socket) {
-            logger.error(`[Baileys] ❌ Failed to reconnect ${connectionId} - skipping sync`);
-            return 0;
-          }
-          
-          logger.info(`[Baileys] ✅ Reconnected ${connectionId} successfully - proceeding with sync`);
-        } catch (reconnectError) {
-          logger.error(`[Baileys] ❌ Reconnection failed for ${connectionId}:`, reconnectError);
-          return 0;
-        }
+        logger.warn(`[Baileys] ⏭️ Skipping sync for ${connectionId} - connection not available (status: ${client?.status || 'not found'})`);
+        logger.warn(`[Baileys] 💡 Sync will occur automatically after reconnection`);
+        return 0;
       }
       
       // Buscar todas as conversas ativas
