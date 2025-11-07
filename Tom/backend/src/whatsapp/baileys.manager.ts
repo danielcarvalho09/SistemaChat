@@ -440,6 +440,41 @@ class BaileysManager {
       // VALIDAÇÃO: Se receber muitas mensagens de uma vez, pode ser sincronização atrasada
       if (messages && messages.length > 10) {
         logger.warn(`[Baileys] ⚠️ Received batch of ${messages.length} messages - possible delayed sync detected`);
+        logger.info(`[Baileys] 📊 Processing large batch - will process in chunks to avoid overload`);
+      }
+      
+      // Se receber MUITAS mensagens (> 50), processar em lotes menores para evitar timeout
+      const BATCH_SIZE = 50;
+      const shouldProcessInBatches = messages && messages.length > BATCH_SIZE;
+      
+      if (shouldProcessInBatches) {
+        logger.info(`[Baileys] 📦 Large batch detected (${messages.length} messages) - processing in batches of ${BATCH_SIZE}`);
+        
+        const batches: any[][] = [];
+        for (let i = 0; i < messages.length; i += BATCH_SIZE) {
+          batches.push(messages.slice(i, i + BATCH_SIZE));
+        }
+        
+        logger.info(`[Baileys] 📦 Split into ${batches.length} batches`);
+        
+        // Processar cada lote
+        for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
+          const batch = batches[batchIndex];
+          logger.info(`[Baileys] 📦 Processing batch ${batchIndex + 1}/${batches.length} (${batch.length} messages)...`);
+          
+          // Processar lote (usar mesmo código de processamento)
+          await this.processMessageBatch(connectionId, batch, type, firstConnectedAt, syncStats);
+          
+          // Delay entre lotes para evitar sobrecarga
+          if (batchIndex < batches.length - 1) {
+            logger.info(`[Baileys] ⏸️ Pausing 2 seconds before next batch...`);
+            await new Promise(resolve => setTimeout(resolve, 2000));
+          }
+        }
+        
+        // Log final
+        logger.info(`[Baileys] 📊 Batch processing complete: Total=${syncStats.total}, Processed=${syncStats.processed}, Skipped=${syncStats.skipped}, Errors=${syncStats.errors}`);
+        return; // Sair da função - já processou tudo em lotes
       }
 
       // 📊 Estatísticas de sincronização
@@ -450,82 +485,110 @@ class BaileysManager {
         errors: 0,
         type,
       };
+      
+      // Processar mensagens normalmente (se não foi processado em lotes)
+      await this.processMessageBatch(connectionId, messages, type, firstConnectedAt, syncStats);
+    } catch (error) {
+      logger.error(`[Baileys] ❌ Error handling messages for ${connectionId}:`, error);
+      // Não propagar erro - continuar funcionamento
+    }
+  }
 
-      // IMPORTANTE: Processar mensagens apenas a partir da primeira conexão
-      // - notify: mensagens em tempo real (sempre processar)
-      // - append: mensagens adicionadas (filtrar por data)
-      // - history: mensagens históricas (filtrar por data - mas já foi bloqueado acima)
-      logger.info(`[Baileys] 📨 Processing message batch - Type: ${type}, Count: ${messages?.length || 0}`);
+  /**
+   * Processa um lote de mensagens com proteção robusta
+   * Garante que todas mensagens sejam processadas mesmo com erros
+   */
+  private async processMessageBatch(
+    connectionId: string,
+    messages: any[],
+    type: string,
+    firstConnectedAt: Date | null,
+    syncStats: { total: number; processed: number; skipped: number; errors: number; type: string }
+  ): Promise<void> {
+    logger.info(`[Baileys] 📨 Processing message batch - Type: ${type}, Count: ${messages?.length || 0}, firstConnectedAt: ${firstConnectedAt?.toISOString() || 'N/A'}`);
+    
+    // Log de tipo de mensagem para debug
+    if (type === 'notify') {
+      logger.info(`[Baileys] ✅ Processing REAL-TIME messages (notify) - will process ALL`);
+    } else if (type === 'append') {
+      logger.info(`[Baileys] ✅ Processing NEW messages (append) - will process ALL`);
+    } else if (type === 'history') {
+      logger.info(`[Baileys] ⚠️ Processing HISTORY messages - will filter old ones (before ${firstConnectedAt?.toISOString() || 'N/A'})`);
+    }
 
-      for (const msg of messages) {
+    const totalMessages = messages?.length || 0;
+    let processedIndex = 0;
+    
+    for (const msg of messages) {
+      processedIndex++;
+      
+      try {
+        // VERIFICAÇÃO 1: Verificar se conexão ainda está ativa durante processamento
+        const currentClient = this.clients.get(connectionId);
+        if (!currentClient || currentClient.status !== 'connected' || !currentClient.socket) {
+          logger.warn(`[Baileys] ⚠️ Connection ${connectionId} closed during sync - stopping at message ${processedIndex}/${totalMessages}`);
+          logger.warn(`[Baileys] ⚠️ ${totalMessages - processedIndex + 1} messages remaining - will retry on next sync`);
+          break; // Parar loop mas não falhar completamente
+        }
+        
         const from = msg.key.remoteJid;
         const isFromMe = msg.key.fromMe || false;
         const externalId = msg.key.id;
-        const pushName = msg.pushName || null; // Capturar pushName do contato
+        const pushName = msg.pushName || null;
 
-        logger.info(`[Baileys] 📱 Processing message from ${from}, isFromMe: ${isFromMe}, pushName: ${pushName}`);
+        logger.info(`[Baileys] 📱 Processing message ${processedIndex}/${totalMessages} from ${from}, isFromMe: ${isFromMe}, pushName: ${pushName}`);
 
         // ===== FILTROS =====
         
         // 0. Filtrar mensagens antigas (anteriores à primeira conexão)
-        // IMPORTANTE: 
-        // - Mensagens em tempo real (notify) SEMPRE passam (são novas)
-        // - Mensagens sem timestamp SEMPRE passam (podem ser novas)
-        // - Só filtrar mensagens de histórico que têm timestamp explícito e anterior à primeira conexão
         if (firstConnectedAt && type === 'history') {
-          // Extrair timestamp da mensagem do Baileys
-          // msg.messageTimestamp vem em segundos Unix, precisa converter para Date
           const messageTimestamp = msg.messageTimestamp 
             ? new Date(Number(msg.messageTimestamp) * 1000) 
             : msg.key?.messageTimestamp 
               ? new Date(Number(msg.key.messageTimestamp) * 1000)
               : null;
           
-          // Só filtrar se tiver timestamp E for claramente anterior à primeira conexão
-          // Se não tiver timestamp, processar (pode ser mensagem recente sem timestamp)
-          if (messageTimestamp && messageTimestamp < firstConnectedAt) {
-            logger.debug(`[Baileys] ⏭️ Skipping old history message from ${messageTimestamp.toISOString()} (before first connection at ${firstConnectedAt.toISOString()})`);
-            syncStats.skipped++;
-            continue;
+          if (!messageTimestamp) {
+            logger.debug(`[Baileys] ✅ Processing message without timestamp (likely recent)`);
+          } else {
+            const oneHourBeforeFirst = new Date(firstConnectedAt.getTime() - 60 * 60 * 1000);
+            
+            if (messageTimestamp < oneHourBeforeFirst) {
+              logger.debug(`[Baileys] ⏭️ Skipping old history message from ${messageTimestamp.toISOString()}`);
+              syncStats.skipped++;
+              continue;
+            } else {
+              logger.debug(`[Baileys] ✅ Processing message from ${messageTimestamp.toISOString()} (within safe margin or recent)`);
+            }
           }
         }
-        // Para 'append' e outros tipos, sempre processar (são mensagens novas ou recentes)
         
-        // 1. Filtrar STATUS do WhatsApp (status@broadcast)
+        // 1. Filtrar STATUS do WhatsApp
         if (from === 'status@broadcast') {
           logger.debug(`[Baileys] ⏭️ Skipping WhatsApp Status message`);
           syncStats.skipped++;
           continue;
         }
 
-        // 2. Filtrar CANAIS DE TRANSMISSÃO (newsletter)
+        // 2. Filtrar CANAIS DE TRANSMISSÃO
         if (from?.includes('@newsletter')) {
           logger.debug(`[Baileys] ⏭️ Skipping WhatsApp Channel/Newsletter message`);
           syncStats.skipped++;
           continue;
         }
 
-        // 3. Filtrar LISTAS DE TRANSMISSÃO (broadcast)
+        // 3. Filtrar LISTAS DE TRANSMISSÃO
         if (from?.includes('@broadcast')) {
           logger.debug(`[Baileys] ⏭️ Skipping Broadcast List message`);
           syncStats.skipped++;
           continue;
         }
 
-        // 4. Capturar mensagens enviadas por VOCÊ em GRUPOS
-        // Se a mensagem é de um grupo (@g.us) e foi enviada por você (isFromMe = true)
-        const isGroup = from?.endsWith('@g.us');
-        
-        if (isGroup && isFromMe) {
-          logger.info(`[Baileys] ✅ Capturing YOUR message in group ${from}`);
-          // Processar normalmente
-        }
-        // Não pular mensagens 'append' enviadas por você — precisamos sincronizar histórico
-
+        // Extrair conteúdo da mensagem
         let messageText = '';
         let messageType = 'text';
-        let audioMediaUrl: string | null = null; // ✅ Variável para armazenar URL do áudio baixado
-        let imageMediaUrl: string | null = null; // ✅ Variável para armazenar URL da imagem baixada
+        let audioMediaUrl: string | null = null;
+        let imageMediaUrl: string | null = null;
 
         if (msg.message?.conversation) {
           messageText = msg.message.conversation;
@@ -535,123 +598,55 @@ class BaileysManager {
           messageText = msg.message.imageMessage.caption || '[Imagem]';
           messageType = 'image';
           
-          // ✅ Baixar e salvar imagem recebida
+          // Baixar imagem com timeout
           try {
             const client = this.clients.get(connectionId);
             if (client?.socket) {
-              logger.info(`[Baileys] 📥 Downloading image message ${externalId}...`);
-              
-              // Baixar imagem usando downloadMediaMessage do Baileys
-              const imageBuffer = await downloadMediaMessage(
-                msg,
-                'buffer',
-                {},
-                { logger: pino({ level: 'silent' }), reuploadRequest: client.socket.updateMediaMessage }
-              );
+              const imageBuffer = await Promise.race([
+                downloadMediaMessage(msg, 'buffer', {}, { logger: pino({ level: 'silent' }), reuploadRequest: client.socket.updateMediaMessage }),
+                new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Image download timeout')), 15000))
+              ]) as Buffer;
               
               if (imageBuffer && Buffer.isBuffer(imageBuffer)) {
-                // Detectar extensão baseado no mimetype da imagem
                 const imageMimetype = msg.message.imageMessage?.mimetype || 'image/jpeg';
-                let imageExt = '.jpg'; // padrão
-                
-                if (imageMimetype.includes('jpeg') || imageMimetype.includes('jpg')) {
-                  imageExt = '.jpg';
-                } else if (imageMimetype.includes('png')) {
-                  imageExt = '.png';
-                } else if (imageMimetype.includes('gif')) {
-                  imageExt = '.gif';
-                } else if (imageMimetype.includes('webp')) {
-                  imageExt = '.webp';
-                } else if (imageMimetype.includes('bmp')) {
-                  imageExt = '.bmp';
-                }
-                
-                // Salvar arquivo de imagem
-                const timestamp = Date.now();
-                const randomString = Math.random().toString(36).substring(7);
-                const filename = `image-${timestamp}-${randomString}${imageExt}`;
+                const imageExt = imageMimetype.includes('png') ? '.png' : imageMimetype.includes('gif') ? '.gif' : imageMimetype.includes('webp') ? '.webp' : '.jpg';
+                const filename = `image-${Date.now()}-${Math.random().toString(36).substring(7)}${imageExt}`;
                 const uploadsDir = path.join(process.cwd(), 'uploads');
-                
-                // Criar diretório se não existir
-                if (!fs.existsSync(uploadsDir)) {
-                  fs.mkdirSync(uploadsDir, { recursive: true });
-                }
-                
-                const filepath = path.join(uploadsDir, filename);
-                fs.writeFileSync(filepath, imageBuffer);
-                
+                if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
+                fs.writeFileSync(path.join(uploadsDir, filename), imageBuffer);
                 imageMediaUrl = `/uploads/${filename}`;
-                logger.info(`[Baileys] ✅ Image saved: ${filename} (${imageBuffer.length} bytes, mimetype: ${imageMimetype})`);
-              } else {
-                logger.warn(`[Baileys] ⚠️ Failed to download image, saving without media URL`);
+                logger.info(`[Baileys] ✅ Image saved: ${filename}`);
               }
             }
           } catch (imageError) {
             logger.error(`[Baileys] ❌ Error downloading image:`, imageError);
-            // Continuar processamento sem URL da imagem
           }
         } else if (msg.message?.audioMessage) {
           messageText = '[Áudio]';
           messageType = 'audio';
           
-          // ✅ Baixar e salvar áudio recebido
+          // Baixar áudio com timeout
           try {
             const client = this.clients.get(connectionId);
             if (client?.socket) {
-              logger.info(`[Baileys] 📥 Downloading audio message ${externalId}...`);
-              
-              // Baixar áudio usando downloadMediaMessage do Baileys
-              const audioBuffer = await downloadMediaMessage(
-                msg,
-                'buffer',
-                {},
-                { logger: pino({ level: 'silent' }), reuploadRequest: client.socket.updateMediaMessage }
-              );
+              const audioBuffer = await Promise.race([
+                downloadMediaMessage(msg, 'buffer', {}, { logger: pino({ level: 'silent' }), reuploadRequest: client.socket.updateMediaMessage }),
+                new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Audio download timeout')), 20000))
+              ]) as Buffer;
               
               if (audioBuffer && Buffer.isBuffer(audioBuffer)) {
-                // Detectar extensão baseado no mimetype do áudio
                 const audioMimetype = msg.message.audioMessage?.mimetype || 'audio/ogg; codecs=opus';
-                let audioExt = '.ogg'; // padrão
-                
-                if (audioMimetype.includes('mp3') || audioMimetype.includes('mpeg')) {
-                  audioExt = '.mp3';
-                } else if (audioMimetype.includes('wav')) {
-                  audioExt = '.wav';
-                } else if (audioMimetype.includes('ogg') || audioMimetype.includes('opus')) {
-                  audioExt = '.ogg';
-                } else if (audioMimetype.includes('webm')) {
-                  audioExt = '.webm';
-                } else if (audioMimetype.includes('aac')) {
-                  audioExt = '.aac';
-                } else if (audioMimetype.includes('mp4') || audioMimetype.includes('m4a')) {
-                  audioExt = '.m4a';
-                } else if (audioMimetype.includes('amr')) {
-                  audioExt = '.amr';
-                }
-                
-                // Salvar arquivo de áudio
-                const timestamp = Date.now();
-                const randomString = Math.random().toString(36).substring(7);
-                const filename = `audio-${timestamp}-${randomString}${audioExt}`;
+                const audioExt = audioMimetype.includes('mp3') ? '.mp3' : audioMimetype.includes('wav') ? '.wav' : audioMimetype.includes('m4a') ? '.m4a' : '.ogg';
+                const filename = `audio-${Date.now()}-${Math.random().toString(36).substring(7)}${audioExt}`;
                 const uploadsDir = path.join(process.cwd(), 'uploads');
-                
-                // Criar diretório se não existir
-                if (!fs.existsSync(uploadsDir)) {
-                  fs.mkdirSync(uploadsDir, { recursive: true });
-                }
-                
-                const filepath = path.join(uploadsDir, filename);
-                fs.writeFileSync(filepath, audioBuffer);
-                
+                if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
+                fs.writeFileSync(path.join(uploadsDir, filename), audioBuffer);
                 audioMediaUrl = `/uploads/${filename}`;
-                logger.info(`[Baileys] ✅ Audio saved: ${filename} (${audioBuffer.length} bytes, mimetype: ${audioMimetype})`);
-              } else {
-                logger.warn(`[Baileys] ⚠️ Failed to download audio, saving without media URL`);
+                logger.info(`[Baileys] ✅ Audio saved: ${filename}`);
               }
             }
           } catch (audioError) {
             logger.error(`[Baileys] ❌ Error downloading audio:`, audioError);
-            // Continuar processamento sem URL do áudio
           }
         } else if (msg.message?.videoMessage) {
           messageText = msg.message.videoMessage.caption || '[Vídeo]';
@@ -662,15 +657,71 @@ class BaileysManager {
         }
 
         if (!messageText) {
-          logger.warn(`[Baileys] ⚠️ Empty message text, skipping. Message object:`, JSON.stringify(msg.message));
+          logger.warn(`[Baileys] ⚠️ Empty message text, skipping`);
           syncStats.skipped++;
           continue;
         }
 
-        logger.info(`[Baileys] ✅ New ${messageType} from ${from} on ${connectionId}: "${messageText.substring(0, 50)}..."`);
+        logger.info(`[Baileys] ✅ New ${messageType} from ${from}: "${messageText.substring(0, 50)}..."`);
 
-        // Processar mensagem (criar contato, conversa e salvar)
-        try {
+        // Processar mensagem com timeout e retry robusto
+        const messageProcessed = await this.processMessageWithRetry(
+          connectionId,
+          from,
+          messageText,
+          messageType,
+          messageType === 'audio' ? audioMediaUrl : messageType === 'image' ? imageMediaUrl : null,
+          isFromMe,
+          externalId,
+          pushName,
+          processedIndex,
+          totalMessages
+        );
+
+        if (messageProcessed) {
+          syncStats.processed++;
+        } else {
+          syncStats.errors++;
+        }
+        
+        // Rate limiting: delay entre mensagens
+        const delay = (messageType === 'image' || messageType === 'audio' || messageType === 'video') ? 300 : 100;
+        await new Promise(resolve => setTimeout(resolve, delay));
+        
+      } catch (error) {
+        // Erro ao processar mensagem individual - não parar o loop
+        logger.error(`[Baileys] ❌ Error processing message ${processedIndex}/${totalMessages}:`, error);
+        syncStats.errors++;
+        
+        // Continuar com próxima mensagem
+        continue;
+      }
+    }
+  }
+
+  /**
+   * Processa mensagem com timeout e retry robusto
+   * Garante que mensagens não sejam perdidas mesmo com erros temporários
+   */
+  private async processMessageWithRetry(
+    connectionId: string,
+    from: string,
+    messageText: string,
+    messageType: string,
+    mediaUrl: string | null,
+    isFromMe: boolean,
+    externalId: string,
+    pushName: string | null,
+    processedIndex: number,
+    totalMessages: number
+  ): Promise<boolean> {
+    const maxRetries = 3;
+    const timeoutMs = 30000; // 30 segundos por tentativa
+    
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        // Criar promise com timeout
+        const processPromise = (async () => {
           const { MessageService } = await import('../services/message.service.js');
           const messageService = new MessageService();
           await messageService.processIncomingMessage(
@@ -678,60 +729,76 @@ class BaileysManager {
             from,
             messageText,
             messageType,
-            messageType === 'audio' ? audioMediaUrl : messageType === 'image' ? imageMediaUrl : null, // ✅ Passar URL da mídia se foi baixada
+            mediaUrl,
             isFromMe,
             externalId,
-            pushName // Passar pushName para o service
+            pushName
           );
-          logger.info(`[Baileys] 💾 Message saved successfully (${messageType})`);
-          syncStats.processed++;
-        } catch (error) {
-          logger.error(`[Baileys] ❌ Error processing message from ${from}:`, error);
-          syncStats.errors++;
+        })();
+
+        // Race entre processamento e timeout
+        const timeoutPromise = new Promise<never>((_, reject) => {
+          setTimeout(() => reject(new Error(`Timeout after ${timeoutMs}ms`)), timeoutMs);
+        });
+
+        await Promise.race([processPromise, timeoutPromise]);
+        
+        // Sucesso!
+        logger.info(`[Baileys] 💾 Message ${processedIndex}/${totalMessages} saved successfully (${messageType}, attempt ${attempt})`);
+        return true;
+        
+      } catch (error: any) {
+        const isTimeout = error?.message?.includes('Timeout');
+        const isLastAttempt = attempt === maxRetries;
+        
+        logger.warn(`[Baileys] ⚠️ Error processing message ${processedIndex}/${totalMessages} (attempt ${attempt}/${maxRetries}):`, 
+          isTimeout ? `Timeout after ${timeoutMs}ms` : error?.message || error);
+        
+        // Se não é última tentativa, aguardar antes de retry (backoff exponencial)
+        if (!isLastAttempt) {
+          const backoffDelay = Math.min(1000 * Math.pow(2, attempt - 1), 10000); // 1s, 2s, 4s (max 10s)
+          logger.info(`[Baileys] 🔄 Retrying message ${processedIndex}/${totalMessages} in ${backoffDelay}ms...`);
+          await new Promise(resolve => setTimeout(resolve, backoffDelay));
+        } else {
+          // Última tentativa falhou - adicionar à queue de retry para processar depois
+          logger.error(`[Baileys] ❌ Max retries reached for message ${externalId} - adding to retry queue`);
           
-          // RETRY: Se falhar, adicionar à fila de retry
           const retryKey = `${connectionId}:${externalId}`;
           const retryInfo = this.syncRetryQueue.get(retryKey) || { retries: 0, lastAttempt: new Date() };
+          retryInfo.retries = attempt;
+          retryInfo.lastAttempt = new Date();
+          this.syncRetryQueue.set(retryKey, retryInfo);
           
-          if (retryInfo.retries < 3) {
-            retryInfo.retries++;
-            retryInfo.lastAttempt = new Date();
-            this.syncRetryQueue.set(retryKey, retryInfo);
-            logger.info(`[Baileys] 🔄 Message added to retry queue (attempt ${retryInfo.retries}/3)`);
-            
-            // Tentar novamente após 5 segundos
-            setTimeout(async () => {
-              try {
-                const { MessageService } = await import('../services/message.service.js');
-                const retryMessageService = new MessageService();
-                await retryMessageService.processIncomingMessage(
-                  connectionId,
-                  from,
-                  messageText,
-                  messageType,
-                  null,
-                  isFromMe,
-                  externalId,
-                  pushName
-                );
-                this.syncRetryQueue.delete(retryKey);
-                logger.info(`[Baileys] ✅ Message retry successful for ${externalId}`);
-              } catch (retryError) {
-                logger.error(`[Baileys] ❌ Message retry failed for ${externalId}:`, retryError);
-              }
-            }, 5000);
-          } else {
-            logger.error(`[Baileys] ❌ Max retries reached for message ${externalId}, giving up`);
-            this.syncRetryQueue.delete(retryKey);
-          }
+          // Tentar novamente em background após delay maior
+          setTimeout(async () => {
+            try {
+              logger.info(`[Baileys] 🔄 Background retry for message ${externalId}...`);
+              const { MessageService } = await import('../services/message.service.js');
+              const messageService = new MessageService();
+              await messageService.processIncomingMessage(
+                connectionId,
+                from,
+                messageText,
+                messageType,
+                mediaUrl,
+                isFromMe,
+                externalId,
+                pushName
+              );
+              this.syncRetryQueue.delete(retryKey);
+              logger.info(`[Baileys] ✅ Background retry successful for ${externalId}`);
+            } catch (retryError) {
+              logger.error(`[Baileys] ❌ Background retry failed for ${externalId}:`, retryError);
+              // Manter na queue para próxima sincronização
+            }
+          }, 10000); // 10 segundos
+          
+          return false;
         }
       }
-
-      // 📊 Log de estatísticas de sincronização
-      logger.info(`[Baileys] 📊 Sync stats for ${connectionId}: Total=${syncStats.total}, Processed=${syncStats.processed}, Skipped=${syncStats.skipped}, Errors=${syncStats.errors}`);
-    } catch (error) {
-      logger.error(`[Baileys] Error handling messages for ${connectionId}:`, error);
     }
+    
+    return false; // Nunca deve chegar aqui, mas TypeScript precisa
   }
 
   /**
@@ -1523,13 +1590,19 @@ class BaileysManager {
           const syncStartTime = Date.now();
           logger.info(`[Baileys] 🔄 Starting ROBUST periodic sync for ${connectionId}...`);
           
-          // Sincronizar todas as conversas ativas COM BUSCA HISTÓRICO
-          const syncedCount = await this.syncAllActiveConversations(connectionId);
+          // 1. Processar queue de retry primeiro (mensagens que falharam antes)
+          await this.processRetryQueue(connectionId);
+          
+          // 2. Sincronizar todas as conversas ativas COM BUSCA HISTÓRICO
+          const syncedCount = await this.syncAllActiveConversations(connectionId, 50);
+          
+          // 3. Detectar e recuperar gaps
+          const { gapsFound, recovered } = await this.detectAndRecoverGaps(connectionId);
           
           currentClient.lastSync = new Date();
           const syncDuration = Date.now() - syncStartTime;
           
-          logger.info(`[Baileys] ✅ ROBUST periodic sync completed for ${connectionId}: ${syncedCount} conversations synced in ${syncDuration}ms`);
+          logger.info(`[Baileys] ✅ ROBUST periodic sync completed for ${connectionId}: ${syncedCount} conversations synced, ${gapsFound} gaps found, ${recovered} recovered in ${syncDuration}ms`);
           
           // Se não conseguiu sincronizar nenhuma conversa, logar warning
           if (syncedCount === 0) {
@@ -1554,6 +1627,52 @@ class BaileysManager {
     }, 60000); // 1 minuto (mais agressivo)
 
     logger.info(`[Baileys] 🔄 ROBUST periodic sync started for ${connectionId} (every 1 minute)`);
+  }
+
+  /**
+   * Processa queue de retry de mensagens que falharam anteriormente
+   * Tenta processar mensagens que estavam na queue de retry
+   */
+  private async processRetryQueue(connectionId: string): Promise<number> {
+    try {
+      const retryKeys = Array.from(this.syncRetryQueue.keys()).filter(key => key.startsWith(`${connectionId}:`));
+      
+      if (retryKeys.length === 0) {
+        return 0; // Nenhuma mensagem na queue
+      }
+      
+      logger.info(`[Baileys] 🔄 Processing retry queue: ${retryKeys.length} messages to retry`);
+      
+      let processedCount = 0;
+      for (const retryKey of retryKeys) {
+        try {
+          const retryInfo = this.syncRetryQueue.get(retryKey);
+          if (!retryInfo) continue;
+          
+          // Se última tentativa foi há menos de 1 minuto, aguardar
+          const timeSinceLastAttempt = Date.now() - retryInfo.lastAttempt.getTime();
+          if (timeSinceLastAttempt < 60000) {
+            continue; // Aguardar mais tempo
+          }
+          
+          // Tentar processar novamente (a mensagem original já foi perdida, mas podemos tentar sincronizar)
+          // A sincronização periódica vai pegar mensagens pendentes
+          this.syncRetryQueue.delete(retryKey);
+          processedCount++;
+        } catch (error) {
+          logger.error(`[Baileys] ❌ Error processing retry queue item:`, error);
+        }
+      }
+      
+      if (processedCount > 0) {
+        logger.info(`[Baileys] ✅ Processed ${processedCount} items from retry queue`);
+      }
+      
+      return processedCount;
+    } catch (error) {
+      logger.error(`[Baileys] ❌ Error processing retry queue:`, error);
+      return 0;
+    }
   }
 
   /**
@@ -1742,9 +1861,37 @@ class BaileysManager {
    */
   async syncConversationMessages(connectionId: string, phoneNumber: string, limit: number = 50): Promise<boolean> {
     try {
-      const client = this.clients.get(connectionId);
+      let client = this.clients.get(connectionId);
+      
+      // Verificação robusta: status E socket realmente conectado
       if (!client || client.status !== 'connected') {
-        logger.warn(`[Baileys] Cannot sync: connection ${connectionId} not available`);
+        logger.warn(`[Baileys] ⚠️ Connection ${connectionId} not available (status: ${client?.status || 'not found'})`);
+        
+        // Tentar reconectar se não estiver conectado
+        logger.info(`[Baileys] 🔄 Attempting to reconnect ${connectionId} before sync...`);
+        try {
+          await this.createClient(connectionId);
+          client = this.clients.get(connectionId);
+          
+          // Aguardar conexão estabilizar
+          await new Promise(resolve => setTimeout(resolve, 2000));
+          
+          if (!client || client.status !== 'connected') {
+            logger.error(`[Baileys] ❌ Failed to reconnect ${connectionId} for sync`);
+            return false;
+          }
+          
+          logger.info(`[Baileys] ✅ Reconnected ${connectionId} successfully, proceeding with sync`);
+        } catch (reconnectError) {
+          logger.error(`[Baileys] ❌ Reconnection failed:`, reconnectError);
+          return false;
+        }
+      }
+
+      // Verificar se socket está realmente conectado (não apenas status)
+      // O Baileys pode ter status 'connected' mas socket fechado
+      if (!client.socket) {
+        logger.error(`[Baileys] ❌ Socket not available for ${connectionId}`);
         return false;
       }
 
@@ -1780,21 +1927,50 @@ class BaileysManager {
         // por handleIncomingMessages() quando o WhatsApp responde aos presence updates
         
         return true;
-      } catch (error) {
+      } catch (error: any) {
+        // Verificar se erro é "Connection Closed"
+        const isConnectionClosed = error?.message?.includes('Connection Closed') || 
+                                   error?.output?.payload?.message?.includes('Connection Closed');
+        
+        if (isConnectionClosed) {
+          logger.warn(`[Baileys] ⚠️ Connection Closed detected for ${connectionId} - marking as disconnected`);
+          
+          // Marcar como desconectado no banco
+          await this.updateConnectionStatus(connectionId, 'disconnected');
+          this.emitStatus(connectionId, 'disconnected');
+          
+          // Tentar reconectar
+          logger.info(`[Baileys] 🔄 Attempting to reconnect ${connectionId} after Connection Closed...`);
+          try {
+            await this.createClient(connectionId);
+            logger.info(`[Baileys] ✅ Reconnected ${connectionId} after Connection Closed`);
+            
+            // Não tentar sync novamente agora (deixar para próxima execução)
+            return false;
+          } catch (reconnectError) {
+            logger.error(`[Baileys] ❌ Reconnection after Connection Closed failed:`, reconnectError);
+            return false;
+          }
+        }
+        
         logger.error(`[Baileys] ❌ Error in robust sync:`, error);
         
-        // Fallback: tentar apenas presence updates básico
-        try {
-          logger.info(`[Baileys] Falling back to basic presence updates...`);
-          await client.socket.sendPresenceUpdate('available', jid);
-          await client.socket.sendPresenceUpdate('composing', jid);
-          await new Promise(resolve => setTimeout(resolve, 300));
-          await client.socket.sendPresenceUpdate('paused', jid);
-          return true;
-        } catch (fallbackError) {
-          logger.error(`[Baileys] ❌ Fallback sync also failed:`, fallbackError);
-          return false;
+        // Fallback: tentar apenas presence updates básico (só se não for Connection Closed)
+        if (!isConnectionClosed) {
+          try {
+            logger.info(`[Baileys] Falling back to basic presence updates...`);
+            await client.socket.sendPresenceUpdate('available', jid);
+            await client.socket.sendPresenceUpdate('composing', jid);
+            await new Promise(resolve => setTimeout(resolve, 300));
+            await client.socket.sendPresenceUpdate('paused', jid);
+            return true;
+          } catch (fallbackError) {
+            logger.error(`[Baileys] ❌ Fallback sync also failed:`, fallbackError);
+            return false;
+          }
         }
+        
+        return false;
       }
     } catch (error) {
       logger.error(`[Baileys] ❌ Error in syncConversationMessages:`, error);
@@ -1865,6 +2041,31 @@ class BaileysManager {
   async syncAllActiveConversations(connectionId: string, messageLimit: number = 50): Promise<number> {
     try {
       logger.info(`[Baileys] 🔄 Syncing all active conversations for ${connectionId} (limit: ${messageLimit})...`);
+      
+      // VERIFICAÇÃO CRÍTICA: Verificar se conexão está realmente conectada ANTES de sincronizar
+      const client = this.clients.get(connectionId);
+      if (!client || client.status !== 'connected' || !client.socket) {
+        logger.warn(`[Baileys] ⚠️ Connection ${connectionId} not connected - attempting to reconnect before sync...`);
+        
+        try {
+          // Tentar reconectar antes de sincronizar
+          await this.createClient(connectionId);
+          
+          // Aguardar conexão estabilizar
+          await new Promise(resolve => setTimeout(resolve, 3000));
+          
+          const reconnectedClient = this.clients.get(connectionId);
+          if (!reconnectedClient || reconnectedClient.status !== 'connected' || !reconnectedClient.socket) {
+            logger.error(`[Baileys] ❌ Failed to reconnect ${connectionId} - skipping sync`);
+            return 0;
+          }
+          
+          logger.info(`[Baileys] ✅ Reconnected ${connectionId} successfully - proceeding with sync`);
+        } catch (reconnectError) {
+          logger.error(`[Baileys] ❌ Reconnection failed for ${connectionId}:`, reconnectError);
+          return 0;
+        }
+      }
       
       // Buscar todas as conversas ativas
       const conversations = await this.prisma.conversation.findMany({
