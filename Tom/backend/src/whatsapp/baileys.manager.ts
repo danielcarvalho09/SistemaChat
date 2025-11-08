@@ -2421,8 +2421,18 @@ class BaileysManager {
   }
 
   /**
-   * Sincronização COMPLETA e FORÇADA de todas as conexões
-   * Ideal para ser chamado por cronjobs externos
+   * Sincronização LEVE de todas as conexões (para cronjobs externos)
+   * Ideal para ser chamado por cronjobs externos a cada 3-5 minutos
+   * 
+   * ⚠️ IMPORTANTE: Esta função NÃO faz sincronização ativa de mensagens
+   * Ela apenas:
+   * 1. Verifica se as conexões estão vivas (keep-alive)
+   * 2. Detecta e recupera gaps (mensagens faltando)
+   * 
+   * Sincronização ativa completa só deve ocorrer em:
+   * - Reconexão após desconexão
+   * - Manualmente via botão/API de reconexão
+   * - Após detecção de gaps críticos
    */
   async syncAllConnections(): Promise<{ 
     totalConnections: number; 
@@ -2430,7 +2440,7 @@ class BaileysManager {
     gapsRecovered: number;
   }> {
     try {
-      logger.info(`[Baileys] 🔄 Starting FULL SYSTEM SYNC (all connections)...`);
+      logger.info(`[Baileys] 🔄 Starting GAP DETECTION (all connections)...`);
       
       // Buscar todas as conexões ativas
       const connections = await this.prisma.whatsAppConnection.findMany({
@@ -2439,31 +2449,27 @@ class BaileysManager {
 
       logger.info(`[Baileys] Found ${connections.length} active connections`);
 
-      let totalSynced = 0;
       let totalGapsRecovered = 0;
 
       for (const connection of connections) {
         try {
-          // 1. Sincronizar conversas ativas
-          const synced = await this.syncAllActiveConversations(connection.id, 50);
-          totalSynced += synced;
-
-          // 2. Detectar e recuperar gaps
+          // ✅ APENAS detectar e recuperar gaps (não sincronizar todas as conversas)
+          // Isso evita interferir com o envio normal de mensagens
           const { recovered } = await this.detectAndRecoverGaps(connection.id);
           totalGapsRecovered += recovered;
 
-          // Delay entre conexões
-          await new Promise(resolve => setTimeout(resolve, 1000));
+          // Delay menor entre conexões para não sobrecarregar
+          await new Promise(resolve => setTimeout(resolve, 500));
         } catch (error) {
-          logger.error(`[Baileys] Error syncing connection ${connection.id}:`, error);
+          logger.error(`[Baileys] Error checking gaps for connection ${connection.id}:`, error);
         }
       }
 
-      logger.info(`[Baileys] ✅ FULL SYSTEM SYNC completed: ${totalSynced} conversations, ${totalGapsRecovered} gaps recovered`);
+      logger.info(`[Baileys] ✅ GAP DETECTION completed: ${totalGapsRecovered} gaps recovered`);
       
       return {
         totalConnections: connections.length,
-        syncedConversations: totalSynced,
+        syncedConversations: 0, // Não sincronizamos ativamente (apenas gaps)
         gapsRecovered: totalGapsRecovered,
       };
     } catch (error) {
