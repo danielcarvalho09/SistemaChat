@@ -87,8 +87,8 @@ function ImageMessage({ mediaUrl, toAbsoluteUrl, messageId }: { mediaUrl: string
 
     return (
       <div 
-        className="mb-1 bg-gray-800 rounded-t-lg flex flex-col items-center justify-center cursor-pointer hover:bg-gray-700 transition-colors relative group"
-        style={{ minHeight: '200px', minWidth: '250px' }}
+        className="w-full bg-gray-800 rounded-t-lg flex flex-col items-center justify-center cursor-pointer hover:bg-gray-700 transition-colors relative group"
+        style={{ minHeight: '200px' }}
       >
         <div className="text-center text-gray-400" onClick={() => setLoaded(true)}>
           <ImageIcon className="w-12 h-12 mx-auto mb-2" />
@@ -116,12 +116,12 @@ function ImageMessage({ mediaUrl, toAbsoluteUrl, messageId }: { mediaUrl: string
   }
 
   return (
-    <div className="mb-1 relative group">
+    <div className="relative group w-full">
       <img
         src={toAbsoluteUrl(mediaUrl)}
         alt="Imagem"
-        className="max-w-full h-auto rounded-t-lg"
-        style={{ maxHeight: '300px', objectFit: 'cover' }}
+        className="w-full h-auto rounded-t-lg block"
+        style={{ maxHeight: '300px', objectFit: 'contain' }}
       />
       <button
         onClick={handleDownload}
@@ -174,20 +174,18 @@ export function MessageList({ messages, onReply }: MessageListProps) {
     const preview = getQuotedPreview(quoted);
 
     const containerClasses = cn(
-      'mb-2 rounded-lg border-l-4 px-3 py-2',
-      isFromMe ? 'border-[#34d399] bg-white/10' : 'border-[#00a884] bg-white/5'
+      'mb-2 rounded-md border-l-4 px-2 py-1.5 bg-black/20',
+      isFromMe ? 'border-[#06cf9c]' : 'border-[#8696a0]'
     );
 
     return (
-      <div className="px-3 pt-3">
-        <div className={containerClasses}>
-          <p className="text-xs font-semibold text-gray-200 mb-1">
-            {quotedTitle}
-          </p>
-          <p className="text-[13px] text-gray-200 line-clamp-2 break-words">
-            {preview}
-          </p>
-        </div>
+      <div className={containerClasses}>
+        <p className="text-xs font-semibold mb-0.5" style={{ color: isFromMe ? '#06cf9c' : '#8696a0' }}>
+          {quotedTitle}
+        </p>
+        <p className="text-[13px] text-gray-200 line-clamp-2 break-words">
+          {preview}
+        </p>
       </div>
     );
   };
@@ -251,29 +249,36 @@ export function MessageList({ messages, onReply }: MessageListProps) {
           <div
             key={message.id}
             className={cn(
-              'flex',
+              'flex w-full',
               isFromMe ? 'justify-end' : 'justify-start'
             )}
           >
-            <div className="relative group">
+            <div className="relative group" style={{ maxWidth: '70%' }}>
               <div
                 className={cn(
-                  'max-w-[70%] rounded-lg shadow-sm relative overflow-hidden',
+                  'rounded-lg shadow-sm relative',
                   isFromMe
                     ? 'bg-[#005c4b] text-white rounded-br-none'
                     : 'bg-[#202c33] text-white rounded-bl-none'
                 )}
                 onDoubleClick={() => onReply?.(message)}
               >
-                {renderQuotedMessage(message, isFromMe)}
+                {/* Citação da mensagem */}
+                {message.quotedMessage && (
+                  <div className="px-3 pt-3">
+                    {renderQuotedMessage(message, isFromMe)}
+                  </div>
+                )}
 
                 {/* Renderizar mídia */}
                 {message.messageType === 'image' && message.mediaUrl && (
-                  <ImageMessage mediaUrl={message.mediaUrl} toAbsoluteUrl={toAbsoluteUrl} messageId={message.id} />
+                  <div className={message.quotedMessage ? 'overflow-hidden' : 'pt-1 overflow-hidden'}>
+                    <ImageMessage mediaUrl={message.mediaUrl} toAbsoluteUrl={toAbsoluteUrl} messageId={message.id} />
+                  </div>
                 )}
 
                 {message.messageType === 'audio' && message.mediaUrl && (
-                  <div className="mb-1">
+                  <div className={cn("px-3 pb-2", message.quotedMessage ? 'pt-2' : 'pt-3')}>
                     <audio 
                       controls 
                       className="w-full" 
@@ -290,8 +295,8 @@ export function MessageList({ messages, onReply }: MessageListProps) {
                 )}
 
                 {message.messageType === 'video' && message.mediaUrl && (
-                  <div className="mb-1">
-                    <video controls className="max-w-full h-auto rounded-t-lg" style={{ maxHeight: '300px' }}>
+                  <div className={cn("px-3 pb-2", message.quotedMessage ? 'pt-2' : 'pt-3')}>
+                    <video controls className="w-full h-auto rounded-lg" style={{ maxHeight: '300px' }}>
                       <source src={toAbsoluteUrl(message.mediaUrl)} type="video/mp4" />
                       Seu navegador não suporta vídeo.
                     </video>
@@ -299,7 +304,7 @@ export function MessageList({ messages, onReply }: MessageListProps) {
                 )}
 
                 {message.messageType === 'document' && message.mediaUrl && (
-                  <div className="mb-1">
+                  <div className={cn("px-3 pb-2", message.quotedMessage ? 'pt-2' : 'pt-3')}>
                     {(() => {
                       const fileUrl = toAbsoluteUrl(message.mediaUrl);
                       const extension = (message.mediaUrl || '').split('.').pop()?.toLowerCase();
@@ -402,26 +407,27 @@ export function MessageList({ messages, onReply }: MessageListProps) {
 
                 {/* Texto/Caption */}
                 {message.content && message.messageType !== 'document' && (
-                  <div
-                    className={cn(
-                      'px-3 pb-2',
-                      message.quotedMessage ? 'pt-1' : 'pt-2'
-                    )}
-                  >
+                  <div className="px-3 py-2 min-w-0">
                     {/* Nome do usuário em negrito (apenas para mensagens enviadas) */}
                     {isFromMe && message.sender && (
-                      <p className="text-[13px] font-bold text-[#00a884] mb-1">
+                      <p className="text-[13px] font-bold text-[#00a884] mb-1 break-words">
                         {message.sender.name}:
                       </p>
                     )}
-                    <p className="text-[14px] whitespace-pre-wrap break-words leading-5">
+                    <p 
+                      className="text-[14px] whitespace-pre-wrap break-words leading-5"
+                      style={{ wordBreak: 'break-word', overflowWrap: 'anywhere' }}
+                    >
                       {message.content}
                     </p>
                   </div>
                 )}
 
                 {/* Hora e status */}
-                <div className="flex items-center justify-end gap-1 px-3 pb-2">
+                <div className={cn(
+                  "flex items-center justify-end gap-1 px-3 pb-2",
+                  !message.content || message.messageType === 'document' ? 'pt-2' : ''
+                )}>
                   <span className="text-[11px] text-gray-400">
                     {formatTime(message.timestamp || message.createdAt)}
                   </span>

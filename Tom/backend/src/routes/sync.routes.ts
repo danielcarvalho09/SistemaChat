@@ -342,7 +342,7 @@ export async function syncRoutes(fastify: FastifyInstance) {
       return reply.status(500).send({
         success: false,
         message: error.message || 'Error getting queue stats',
-      });
-    }
+    });
+  }
   });
 }
