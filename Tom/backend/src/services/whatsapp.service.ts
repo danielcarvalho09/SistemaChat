@@ -1,5 +1,5 @@
 import { getPrismaClient } from '../config/database.js';
-import { baileysManager } from '../whatsapp/baileys.manager.js';
+import { baileysManager, ClientCreationInProgressError } from '../whatsapp/baileys.manager.js';
 import { logger } from '../config/logger.js';
 import { NotFoundError, ConflictError } from '../middlewares/error.middleware.js';
 
@@ -168,13 +168,22 @@ export class WhatsAppService {
       // Criar cliente Baileys (QR Code será emitido via Socket.IO)
       logger.info(`[WhatsApp] Connecting ${connectionId}...`);
       await baileysManager.createClient(connectionId);
-
+      
       return {
         connectionId,
         status: 'connecting',
         message: 'Connection initiated. QR Code will be sent via WebSocket.',
       };
     } catch (error) {
+      if (error instanceof ClientCreationInProgressError) {
+        logger.warn(`[WhatsApp] Connect request for ${connectionId} ignored - client creation already in progress.`);
+        return {
+          connectionId,
+          status: 'connecting',
+          message: 'Client creation already in progress. Aguarde alguns segundos.',
+        };
+      }
+      
       logger.error(`[WhatsApp] Error connecting ${connectionId}:`, error);
       throw error;
     }

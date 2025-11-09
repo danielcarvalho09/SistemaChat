@@ -19,6 +19,13 @@ import { getSocketServer } from '../websocket/socket.server.js';
 import { getPrismaClient } from '../config/database.js';
 import { encrypt, decrypt, isEncrypted } from '../utils/encryption.js';
 
+export class ClientCreationInProgressError extends Error {
+  constructor(connectionId: string) {
+    super(`Client creation already in progress for ${connectionId}`);
+    this.name = 'ClientCreationInProgressError';
+  }
+}
+
 /**
  * Interface do cliente Baileys
  */
@@ -73,7 +80,7 @@ class BaileysManager {
       // Verificar se já está em processo de criação/reconexão
       if (this.reconnectionLocks.get(connectionId)) {
         logger.warn(`[Baileys] Client ${connectionId} is already being created/reconnected, skipping...`);
-        throw new Error('Client creation already in progress');
+        throw new ClientCreationInProgressError(connectionId);
       }
 
       // Marcar como em processo de criação
@@ -2060,19 +2067,28 @@ class BaileysManager {
       this.reconnectionLocks.delete(connectionId);
       
       // Criar novo cliente (vai usar credenciais do banco se existirem)
-      await this.createClient(connectionId);
-      
-      if (hasCredentialsInDB) {
-        return {
-          status: 'reconnecting',
-          message: 'Reconectando com credenciais existentes...',
-        };
-      } else {
-        return {
-          status: 'awaiting_qr',
-          message: 'Aguardando QR code...',
-        };
+      try {
+        await this.createClient(connectionId);
+      } catch (error) {
+        if (error instanceof ClientCreationInProgressError) {
+          logger.info(`[Baileys] 🔁 Manual reconnect for ${connectionId} ignored - client creation already in progress.`);
+          return {
+            status: 'already_reconnecting',
+            message: 'Já existe um processo de conexão em andamento.',
+          };
+        }
+        throw error;
       }
+      
+      return hasCredentialsInDB
+        ? {
+            status: 'reconnecting',
+            message: 'Reconectando com credenciais existentes...',
+          }
+        : {
+            status: 'awaiting_qr',
+            message: 'Aguardando QR code...',
+          };
     }
 
     // Se o cliente existe e está reconectando, informar
@@ -2093,7 +2109,18 @@ class BaileysManager {
     
     // Remover cliente atual e criar novo (vai usar credenciais do banco)
     await this.removeClient(connectionId, false);
-    await this.createClient(connectionId);
+    try {
+      await this.createClient(connectionId);
+    } catch (error) {
+      if (error instanceof ClientCreationInProgressError) {
+        logger.info(`[Baileys] 🔁 Manual reconnect for ${connectionId} skipped - client creation already in progress.`);
+        return {
+          status: 'already_reconnecting',
+          message: 'Já existe um processo de conexão em andamento.',
+        };
+      }
+      throw error;
+    }
 
     return {
       status: 'reconnecting',
