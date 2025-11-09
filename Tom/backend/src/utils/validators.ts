@@ -74,6 +74,7 @@ export const sendMessageSchema = z.object({
     .enum(['text', 'image', 'video', 'audio', 'document', 'location'])
     .default('text'),
   mediaUrl: z.string().url('Invalid media URL').optional(),
+  quotedMessageId: z.string().uuid('Invalid quotedMessageId').optional(),
 });
 
 // ==================== VALIDADORES DE DEPARTAMENTO ====================

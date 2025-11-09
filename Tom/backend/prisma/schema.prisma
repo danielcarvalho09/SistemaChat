@@ -295,11 +295,16 @@ model Message {
   metadata       Json? // Dados adicionais (ex: localização, duração de áudio)
   externalId     String? // ID da mensagem no WhatsApp (para evitar duplicatas)
   createdAt      DateTime @default(now())
-
+  
+  // ==================== CITAÇÃO/RESPOSTA DE MENSAGEM ====================
+  quotedMessageId String? // ID da mensagem que está sendo respondida/citada
+  
   // Relações
-  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  connection   WhatsAppConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
-  sender       User?        @relation(fields: [senderId], references: [id], onDelete: SetNull)
+  conversation    Conversation       @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  connection      WhatsAppConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  sender          User?              @relation(fields: [senderId], references: [id], onDelete: SetNull)
+  quotedMessage   Message?           @relation("QuotedMessage", fields: [quotedMessageId], references: [id], onDelete: SetNull)
+  quotingMessages Message[]          @relation("QuotedMessage")
 
   @@index([conversationId])
   @@index([connectionId])
@@ -307,6 +312,7 @@ model Message {
   @@index([timestamp])
   @@index([isFromContact])
   @@index([externalId])
+  @@index([quotedMessageId])
   @@unique([conversationId, externalId])
   @@map("messages")
 }

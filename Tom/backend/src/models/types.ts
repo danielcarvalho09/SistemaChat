@@ -152,6 +152,21 @@ export interface MessageResponse {
   isFromContact: boolean;
   timestamp: Date;
   createdAt: Date;
+  quotedMessageId: string | null;
+  quotedMessage: QuotedMessageResponse | null;
+}
+
+export interface QuotedMessageResponse {
+  id: string | null;
+  content: string;
+  messageType: MessageType;
+  mediaUrl: string | null;
+  isFromContact: boolean;
+  senderName: string | null;
+  senderAvatar: string | null;
+  senderId: string | null;
+  timestamp: string | null;
+  status: MessageStatus | null;
 }
 
 export enum MessageType {
@@ -176,6 +191,7 @@ export interface SendMessageRequest {
   content: string;
   messageType?: MessageType;
   mediaUrl?: string;
+  quotedMessageId?: string;
 }
 
 // ==================== TIPOS DE DEPARTAMENTO ====================

@@ -5,6 +5,7 @@ import {
   ConversationStatus,
   PaginatedResponse,
   PaginationParams,
+  MessageStatus,
 } from '../models/types.js';
 import { NotFoundError, ConflictError, ForbiddenError } from '../middlewares/error.middleware.js';
 import { logger } from '../config/logger.js';
@@ -121,6 +122,13 @@ export class ConversationService {
           messages: {
             orderBy: { timestamp: 'desc' },
             take: 1,
+            include: {
+              quotedMessage: {
+                include: {
+                  sender: true,
+                },
+              },
+            },
           },
         },
       }),
@@ -160,6 +168,13 @@ export class ConversationService {
         messages: {
           orderBy: { timestamp: 'desc' },
           take: 1,
+          include: {
+            quotedMessage: {
+              include: {
+                sender: true,
+              },
+            },
+          },
         },
       },
     });
@@ -456,6 +471,9 @@ export class ConversationService {
    * Formata resposta da conversa
    */
   private formatConversationResponse(conversation: any): ConversationResponse {
+    const lastMessage = conversation.messages?.[0] || null;
+    const quoted = lastMessage?.quotedMessage || null;
+
     return {
       id: conversation.id,
       contact: {
@@ -512,18 +530,33 @@ export class ConversationService {
       firstResponseAt: conversation.firstResponseAt?.toISOString() || null,
       resolvedAt: conversation.resolvedAt?.toISOString() || null,
       unreadCount: conversation.unreadCount,
-      lastMessage: conversation.messages[0]
+      lastMessage: lastMessage
         ? {
-            id: conversation.messages[0].id,
-            conversationId: conversation.messages[0].conversationId,
+            id: lastMessage.id,
+            conversationId: lastMessage.conversationId,
             sender: null,
-            content: conversation.messages[0].content,
-            messageType: conversation.messages[0].messageType,
-            mediaUrl: conversation.messages[0].mediaUrl,
-            status: conversation.messages[0].status,
-            isFromContact: conversation.messages[0].isFromContact,
-            timestamp: conversation.messages[0].timestamp.toISOString(),
-            createdAt: conversation.messages[0].createdAt.toISOString(),
+            content: lastMessage.content,
+            messageType: lastMessage.messageType,
+            mediaUrl: lastMessage.mediaUrl,
+            status: lastMessage.status,
+            isFromContact: lastMessage.isFromContact,
+            timestamp: lastMessage.timestamp.toISOString(),
+            createdAt: lastMessage.createdAt.toISOString(),
+            quotedMessageId: lastMessage.quotedMessageId || null,
+            quotedMessage: quoted
+              ? {
+                  id: quoted.id,
+                  content: quoted.content,
+                  messageType: quoted.messageType,
+                  mediaUrl: quoted.mediaUrl,
+                  isFromContact: quoted.isFromContact,
+                  senderName: quoted.sender ? quoted.sender.name : null,
+                  senderAvatar: quoted.sender ? quoted.sender.avatar : null,
+                  senderId: quoted.senderId || null,
+                  timestamp: quoted.timestamp ? quoted.timestamp.toISOString() : null,
+                  status: quoted.status ? (quoted.status as MessageStatus) : null,
+                }
+              : null,
           }
         : null,
       internalNotes: conversation.internalNotes,

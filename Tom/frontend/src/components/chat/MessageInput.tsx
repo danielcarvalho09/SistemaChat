@@ -4,12 +4,16 @@ import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { EmojiPicker } from './EmojiPicker';
 import { FileUpload } from './FileUpload';
+import type { Message } from '../../types';
 
 interface MessageInputProps {
   onSendMessage: (content: string, file?: File) => void;
+  replyingTo?: Message | null;
+  onCancelReply?: () => void;
+  contactName?: string;
 }
 
-export function MessageInput({ onSendMessage }: MessageInputProps) {
+export function MessageInput({ onSendMessage, replyingTo, onCancelReply, contactName }: MessageInputProps) {
   const [message, setMessage] = useState('');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -18,6 +22,38 @@ export function MessageInput({ onSendMessage }: MessageInputProps) {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
+
+  const getReplyPreview = (message: Message) => {
+    if (message.messageType === 'text') {
+      return message.content;
+    }
+
+    const labelMap: Record<Message['messageType'], string> = {
+      text: 'Mensagem',
+      image: 'Imagem',
+      audio: 'Áudio',
+      video: 'Vídeo',
+      document: 'Documento',
+      location: 'Localização',
+    };
+
+    const label = labelMap[message.messageType] || 'Mensagem';
+
+    if (message.content) {
+      return `${label}: ${message.content}`;
+    }
+
+    return label;
+  };
+
+  const replyTargetName = replyingTo
+    ? replyingTo.isFromContact
+      ? contactName || 'Contato'
+      : replyingTo.sender?.name || 'Você'
+    : null;
+  const replyHeading = replyTargetName
+    ? `Respondendo a ${replyTargetName}`
+    : 'Respondendo mensagem';
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -116,6 +152,33 @@ export function MessageInput({ onSendMessage }: MessageInputProps) {
 
   return (
     <div className="bg-[#202c33] border-t border-[#2a3942]">
+      {replyingTo && (
+        <div className="px-4 pt-3 pb-2 border-b border-[#2a3942]">
+          <div className="flex items-start gap-3 bg-[#2a3942] rounded-lg p-3">
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-semibold text-[#00a884] uppercase">
+                {replyHeading}
+              </p>
+              <p className="text-sm text-gray-200 line-clamp-2 break-words">
+                {getReplyPreview(replyingTo)}
+              </p>
+            </div>
+            {onCancelReply && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={onCancelReply}
+                className="text-gray-300 hover:text-white"
+                aria-label="Cancelar resposta"
+              >
+                <X className="w-4 h-4" />
+              </Button>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Preview de arquivo */}
       {selectedFile && (
         <div className="px-4 pt-3 pb-2 border-b border-[#2a3942]">

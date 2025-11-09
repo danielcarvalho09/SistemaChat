@@ -7,6 +7,7 @@ import { MessageInput } from './MessageInput';
 import { TransferModal } from './TransferModal';
 import { ConversationTagMenu } from '../tags/ConversationTagMenu';
 import './whatsapp-bg.css';
+import type { Message } from '../../types';
 
 interface ChatAreaProps {
   conversationId: string;
@@ -18,6 +19,7 @@ export function ChatArea({ conversationId, onToggleDetails }: ChatAreaProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [showMenu, setShowMenu] = useState(false);
   const [showTransferModal, setShowTransferModal] = useState(false);
+  const [replyingTo, setReplyingTo] = useState<Message | null>(null);
 
   const conversation = conversations.find((c) => c.id === conversationId);
 
@@ -28,6 +30,10 @@ export function ChatArea({ conversationId, onToggleDetails }: ChatAreaProps) {
       clearUnread(conversationId);
     }
   }, [conversationId, fetchMessages, clearUnread]);
+
+  useEffect(() => {
+    setReplyingTo(null);
+  }, [conversationId]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -95,6 +101,7 @@ export function ChatArea({ conversationId, onToggleDetails }: ChatAreaProps) {
             content: content || file.name,
             messageType,
             mediaUrl,
+            quotedMessageId: replyingTo?.id || undefined,
           }),
         });
 
@@ -102,8 +109,10 @@ export function ChatArea({ conversationId, onToggleDetails }: ChatAreaProps) {
           throw new Error('Erro ao enviar mensagem');
         }
         // Não adicionar manualmente - deixar o WebSocket fazer isso para evitar duplicação
+        setReplyingTo(null);
       } else {
-        await sendMessage(conversationId, content);
+        await sendMessage(conversationId, content, replyingTo?.id || undefined);
+        setReplyingTo(null);
       }
     } catch (error) {
       console.error('Erro ao enviar mensagem:', error);
@@ -231,12 +240,25 @@ export function ChatArea({ conversationId, onToggleDetails }: ChatAreaProps) {
 
       {/* Messages Area */}
       <div className="flex-1 overflow-y-auto p-4 whatsapp-bg-dark">
-        <MessageList messages={messages[conversationId] || []} />
+        <MessageList
+          messages={messages[conversationId] || []}
+          onReply={(message) => setReplyingTo(message)}
+        />
         <div ref={messagesEndRef} />
       </div>
 
       {/* Message Input */}
-      <MessageInput onSendMessage={handleSendMessage} />
+      <MessageInput
+        onSendMessage={handleSendMessage}
+        replyingTo={replyingTo}
+        onCancelReply={() => setReplyingTo(null)}
+        contactName={
+          conversation?.contact.name ||
+          conversation?.contact.pushName ||
+          conversation?.contact.phoneNumber ||
+          'Contato'
+        }
+      />
 
       {/* Transfer Modal */}
       {showTransferModal && (

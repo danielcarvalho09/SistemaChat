@@ -38,6 +38,20 @@ export interface BaileysClient {
   lastSync?: Date; // Última vez que sincronizou mensagens
 }
 
+interface QuotedMessagePayload {
+  stanzaId: string;
+  messageId: string;
+  messageType: string;
+  content: string;
+  mediaUrl: string | null;
+  isFromContact: boolean;
+  metadata?: any;
+}
+
+interface SendMessageOptions {
+  quotedMessage?: QuotedMessagePayload;
+}
+
 /**
  * Gerenciador de conexões Baileys
  * Baseado 100% na documentação oficial: https://baileys.wiki/docs/intro/
@@ -697,6 +711,13 @@ class BaileysManager {
 
         logger.info(`[Baileys] ✅ New ${messageType} from ${from}: "${messageText.substring(0, 50)}..."`);
 
+        const quotedContext = this.extractQuotedContext(msg);
+        if (quotedContext?.stanzaId) {
+          logger.info(
+            `[Baileys] 🧷 Message ${externalId} is replying to stanza ${quotedContext.stanzaId}`
+          );
+        }
+
         // Processar mensagem com timeout e retry robusto
         const messageProcessed = await this.processMessageWithRetry(
           connectionId,
@@ -707,6 +728,7 @@ class BaileysManager {
           isFromMe,
           externalId,
           pushName,
+          quotedContext,
           processedIndex,
           totalMessages
         );
@@ -745,6 +767,11 @@ class BaileysManager {
     isFromMe: boolean,
     externalId: string,
     pushName: string | null,
+    quotedContext: {
+      stanzaId?: string;
+      participant?: string;
+      quotedMessage?: any;
+    } | null,
     processedIndex: number,
     totalMessages: number
   ): Promise<boolean> {
@@ -765,7 +792,8 @@ class BaileysManager {
             mediaUrl,
             isFromMe,
             externalId,
-            pushName
+            pushName,
+            quotedContext || undefined
           );
         })();
 
@@ -816,7 +844,8 @@ class BaileysManager {
                 mediaUrl,
                 isFromMe,
                 externalId,
-                pushName
+                pushName,
+                quotedContext || undefined
               );
               this.syncRetryQueue.delete(retryKey);
               logger.info(`[Baileys] ✅ Background retry successful for ${externalId}`);
@@ -1045,7 +1074,8 @@ class BaileysManager {
     connectionId: string,
     to: string,
     content: string | { url: string; caption?: string },
-    messageType: 'text' | 'image' | 'audio' | 'video' | 'document' = 'text'
+    messageType: 'text' | 'image' | 'audio' | 'video' | 'document' = 'text',
+    options?: SendMessageOptions
   ): Promise<string | undefined> {
     const client = this.clients.get(connectionId);
     if (!client) {
@@ -1253,6 +1283,21 @@ class BaileysManager {
       if (!client.socket || client.status !== 'connected') {
         throw new Error(`Socket disconnected before sending message (status: ${client.status})`);
       }
+
+      let sendOptions: Record<string, any> | undefined;
+
+      if (options?.quotedMessage) {
+        const stanzaId = options.quotedMessage.stanzaId || options.quotedMessage.messageId;
+        logger.info(`[Baileys] 🧷 Preparing reply to message ${stanzaId} for ${jid}`);
+        const quotedPayload = await this.resolveQuotedMessagePayload(client, jid, options.quotedMessage);
+
+        if (quotedPayload) {
+          sendOptions = { quoted: quotedPayload };
+          logger.info(`[Baileys] 🧷 Quoted payload ready for stanza ${stanzaId}`);
+        } else {
+          logger.warn(`[Baileys] ⚠️ Could not build quoted payload for stanza ${stanzaId} - sending without reply context`);
+        }
+      }
       
       // ✅ ENVIAR MENSAGEM conforme documentação do Baileys
       // Documentação: https://baileys.wiki/docs/sending-messages/
@@ -1268,7 +1313,11 @@ class BaileysManager {
         hasDocument: !!messageContent.document,
       });
       
-      const sent = await client.socket.sendMessage(jid, messageContent);
+      const sent = await client.socket.sendMessage(
+        jid,
+        messageContent,
+        sendOptions
+      );
       
       // ✅ EXTRAIR EXTERNAL ID DE FORMA ROBUSTA
       // O Baileys pode retornar o ID em diferentes formatos
@@ -1339,6 +1388,132 @@ class BaileysManager {
       
       throw error;
     }
+  }
+
+  private async resolveQuotedMessagePayload(
+    client: BaileysClient,
+    jid: string,
+    quoted: QuotedMessagePayload
+  ): Promise<any | null> {
+    const stanzaId = quoted.stanzaId || quoted.messageId;
+    if (!stanzaId) {
+      return null;
+    }
+
+    let resolved: any = null;
+
+    try {
+      const loadMessageFn = (client.socket as any)?.loadMessage;
+      if (typeof loadMessageFn === 'function') {
+        resolved = await loadMessageFn(jid, stanzaId);
+        if (resolved) {
+          logger.info(`[Baileys] ♻️ Loaded quoted message ${stanzaId} from store`);
+        }
+      }
+    } catch (error) {
+      logger.warn(`[Baileys] ⚠️ Failed to load quoted message ${stanzaId} from store:`, error);
+    }
+
+    if (!resolved) {
+      resolved = this.buildFallbackQuotedMessage(jid, quoted);
+      if (resolved) {
+        logger.info(`[Baileys] 🧩 Using fallback quoted payload for ${stanzaId}`);
+      }
+    }
+
+    return resolved;
+  }
+
+  private buildFallbackQuotedMessage(jid: string, quoted: QuotedMessagePayload): any | null {
+    const stanzaId = quoted.stanzaId || quoted.messageId;
+    if (!stanzaId) {
+      return null;
+    }
+
+    const placeholderText =
+      quoted.content && quoted.content.trim().length > 0
+        ? quoted.content
+        : this.getQuotedPlaceholder(quoted.messageType);
+
+    const key: any = {
+      remoteJid: jid,
+      fromMe: !quoted.isFromContact,
+      id: stanzaId,
+    };
+
+    if (quoted.metadata?.participant) {
+      key.participant = quoted.metadata.participant;
+    }
+
+    const message =
+      quoted.messageType === 'text'
+        ? { conversation: placeholderText }
+        : {
+            extendedTextMessage: {
+              text: placeholderText,
+            },
+          };
+
+    return {
+      key,
+      message,
+    };
+  }
+
+  private getQuotedPlaceholder(messageType: string): string {
+    switch (messageType) {
+      case 'image':
+        return '[Imagem]';
+      case 'video':
+        return '[Vídeo]';
+      case 'audio':
+        return '[Áudio]';
+      case 'document':
+        return '[Documento]';
+      case 'location':
+        return '[Localização]';
+      default:
+        return '[Mensagem]';
+    }
+  }
+
+  private extractQuotedContext(
+    msg: any
+  ): { stanzaId?: string; participant?: string; quotedMessage?: any } | null {
+    try {
+      if (!msg?.message) {
+        return null;
+      }
+
+      let messageNode = msg.message;
+
+      if (messageNode?.ephemeralMessage?.message) {
+        messageNode = messageNode.ephemeralMessage.message;
+      }
+
+      if (!messageNode) {
+        return null;
+      }
+
+      const messageKeys = Object.keys(messageNode);
+      for (const key of messageKeys) {
+        const value = (messageNode as any)[key];
+        if (value?.contextInfo) {
+          const contextInfo = value.contextInfo;
+          if (contextInfo?.quotedMessage || contextInfo?.stanzaId) {
+            return {
+              stanzaId: contextInfo.stanzaId || undefined,
+              participant: contextInfo.participant || contextInfo.remoteJid || undefined,
+              quotedMessage: contextInfo.quotedMessage || null,
+            };
+          }
+        }
+      }
+    } catch (error) {
+      logger.warn('[Baileys] ⚠️ Failed to extract quoted context:', error);
+    }
+
+    return null;
   }
 
   /**

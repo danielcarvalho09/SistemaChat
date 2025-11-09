@@ -77,6 +77,7 @@ export interface Contact {
   id: string;
   phoneNumber: string;
   name: string | null;
+  pushName?: string | null;
   avatar: string | null;
   email: string | null;
   tags: string[];
@@ -84,24 +85,43 @@ export interface Contact {
 
 // ==================== TIPOS DE MENSAGEM ====================
 
+export type MessageType = 'text' | 'image' | 'video' | 'audio' | 'document' | 'location';
+export type MessageStatus = 'sending' | 'sent' | 'delivered' | 'read' | 'failed';
+
 export interface Message {
   id: string;
   conversationId: string;
   sender: User | null;
   content: string;
-  messageType: 'text' | 'image' | 'video' | 'audio' | 'document' | 'location';
+  messageType: MessageType;
   mediaUrl: string | null;
-  status: 'sent' | 'delivered' | 'read' | 'failed';
+  status: MessageStatus;
   isFromContact: boolean;
   timestamp: string;
   createdAt: string;
+  quotedMessageId: string | null;
+  quotedMessage: QuotedMessage | null;
+}
+
+export interface QuotedMessage {
+  id: string | null;
+  content: string;
+  messageType: MessageType;
+  mediaUrl: string | null;
+  isFromContact: boolean;
+  senderName: string | null;
+  senderAvatar: string | null;
+  senderId: string | null;
+  timestamp: string | null;
+  status: MessageStatus | null;
 }
 
 export interface SendMessageData {
   conversationId: string;
   content: string;
-  messageType?: Message['messageType'];
+  messageType?: MessageType;
   mediaUrl?: string;
+  quotedMessageId?: string;
 }
 
 // ==================== TIPOS DE DEPARTAMENTO ====================

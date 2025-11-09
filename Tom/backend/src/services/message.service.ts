@@ -48,6 +48,17 @@ export class MessageService {
               },
             },
           },
+          quotedMessage: {
+            include: {
+              sender: {
+                include: {
+                  roles: {
+                    include: { role: true },
+                  },
+                },
+              },
+            },
+          },
         },
       }),
       this.prisma.message.count({ where: { conversationId } }),
@@ -70,7 +81,7 @@ export class MessageService {
    * Envia mensagem
    */
   async sendMessage(data: SendMessageRequest, userId: string, userRoles: string[] = []): Promise<MessageResponse> {
-    const { conversationId, content, messageType = 'text', mediaUrl } = data;
+    const { conversationId, content, messageType = 'text', mediaUrl, quotedMessageId } = data;
 
     // Buscar conversa
     const conversation = await this.prisma.conversation.findUnique({
@@ -90,6 +101,30 @@ export class MessageService {
       where: { id: userId },
       select: { name: true },
     });
+
+    let quotedMessage: any = null;
+    if (quotedMessageId) {
+      quotedMessage = await this.prisma.message.findUnique({
+        where: { id: quotedMessageId },
+        include: {
+          sender: {
+            include: {
+              roles: {
+                include: { role: true },
+              },
+            },
+          },
+        },
+      });
+
+      if (!quotedMessage) {
+        throw new NotFoundError('Quoted message not found');
+      }
+
+      if (quotedMessage.conversationId !== conversationId) {
+        throw new ForbiddenError('Cannot quote a message from another conversation');
+      }
+    }
 
     // Verificar permissão
     const isAdmin = userRoles.includes('admin');
@@ -164,12 +199,24 @@ export class MessageService {
         isFromContact: false,
         timestamp: new Date(),
         externalId: null, // Será atualizado após envio
+        quotedMessageId: quotedMessage?.id || null,
       },
       include: {
         sender: {
           include: {
             roles: {
               include: { role: true },
+            },
+          },
+        },
+        quotedMessage: {
+          include: {
+            sender: {
+              include: {
+                roles: {
+                  include: { role: true },
+                },
+              },
             },
           },
         },
@@ -223,13 +270,30 @@ export class MessageService {
         
         let externalId: string | undefined;
         
+        const quotedForSend = quotedMessage && quotedMessage.externalId
+          ? {
+              stanzaId: quotedMessage.externalId as string,
+              messageId: quotedMessage.id,
+              messageType: quotedMessage.messageType,
+              content: quotedMessage.content,
+              mediaUrl: quotedMessage.mediaUrl,
+              isFromContact: quotedMessage.isFromContact,
+              metadata: quotedMessage.metadata ?? null,
+            }
+          : undefined;
+
+        if (quotedMessage && !quotedMessage.externalId) {
+          logger.warn(`⚠️ [BACKGROUND] Quoted message ${quotedMessage.id} has no externalId - WhatsApp reply will be sent without reference`);
+        }
+
         if (messageType === 'text') {
           logger.info(`📤 [BACKGROUND] Sending text message...`);
           externalId = await baileysManager.sendMessage(
             conversation.connectionId,
             conversation.contact.phoneNumber,
             formattedContent,
-            'text'
+            'text',
+            quotedForSend ? { quotedMessage: quotedForSend } : undefined
           );
           logger.info(`📤 [BACKGROUND] Text message sent, externalId: ${externalId || 'none'}`);
         } else if (mediaUrl) {
@@ -238,7 +302,8 @@ export class MessageService {
             conversation.connectionId,
             conversation.contact.phoneNumber,
             { url: mediaUrl, caption: formattedContent },
-            messageType as 'image' | 'audio' | 'video' | 'document'
+            messageType as 'image' | 'audio' | 'video' | 'document',
+            quotedForSend ? { quotedMessage: quotedForSend } : undefined
           );
           logger.info(`📤 [BACKGROUND] Media message sent, externalId: ${externalId || 'none'}`);
         } else {
@@ -272,6 +337,17 @@ export class MessageService {
                   include: {
                     roles: {
                       include: { role: true },
+                    },
+                  },
+                },
+                quotedMessage: {
+                  include: {
+                    sender: {
+                      include: {
+                        roles: {
+                          include: { role: true },
+                        },
+                      },
                     },
                   },
                 },
@@ -331,6 +407,17 @@ export class MessageService {
                     },
                   },
                 },
+                quotedMessage: {
+                  include: {
+                    sender: {
+                      include: {
+                        roles: {
+                          include: { role: true },
+                        },
+                      },
+                    },
+                  },
+                },
               },
             });
             
@@ -381,7 +468,12 @@ export class MessageService {
     mediaUrl: string | null = null,
     isFromMe: boolean = false,
     externalId?: string,
-    pushName?: string | null
+    pushName?: string | null,
+    quotedContext?: {
+      stanzaId?: string;
+      participant?: string;
+      quotedMessage?: any;
+    }
   ): Promise<void> {
     try {
       // 🔒 DEDUPLICAÇÃO: Verificar se mensagem já foi processada
@@ -548,6 +640,34 @@ export class MessageService {
         }
       }
 
+      let referencedMessageId: string | null = null;
+      if (quotedContext?.stanzaId) {
+        const referencedMessage = await this.prisma.message.findFirst({
+          where: {
+            connectionId,
+            externalId: quotedContext.stanzaId,
+          },
+          select: { id: true },
+        });
+
+        if (referencedMessage) {
+          referencedMessageId = referencedMessage.id;
+          logger.info(
+            `[MessageService] 🧷 Linking incoming message ${externalId || 'without-external-id'} to quoted message ${referencedMessageId}`
+          );
+        } else {
+          logger.warn(
+            `[MessageService] ⚠️ Quoted stanza ${quotedContext.stanzaId} not found for connection ${connectionId}`
+          );
+        }
+      }
+
+      const additionalMetadata: Record<string, any> = {};
+      if (quotedContext?.participant) {
+        additionalMetadata.quotedParticipant = quotedContext.participant;
+      }
+      const hasMetadata = Object.keys(additionalMetadata).length > 0;
+
       // Salvar mensagem
       // 💾 Salvar mensagem com proteção contra duplicatas
       const message = await this.prisma.message.create({
@@ -561,6 +681,28 @@ export class MessageService {
           mediaUrl,
           externalId: externalId || `generated-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
           timestamp: new Date(),
+          quotedMessageId: referencedMessageId,
+          ...(hasMetadata ? { metadata: additionalMetadata } : {}),
+        },
+        include: {
+          sender: {
+            include: {
+              roles: {
+                include: { role: true },
+              },
+            },
+          },
+          quotedMessage: {
+            include: {
+              sender: {
+                include: {
+                  roles: {
+                    include: { role: true },
+                  },
+                },
+              },
+            },
+          },
         },
       });
       
@@ -676,6 +818,10 @@ export class MessageService {
    * Formata resposta da mensagem
    */
   private formatMessageResponse(message: any): MessageResponse {
+    const senderRoles = message.sender?.roles || [];
+
+    const quotedMessageData = message.quotedMessage || null;
+
     return {
       id: message.id,
       conversationId: message.conversationId,
@@ -687,7 +833,7 @@ export class MessageService {
             avatar: message.sender.avatar,
             status: message.sender.status,
             isActive: message.sender.isActive,
-            roles: message.sender.roles.map((ur: any) => ({
+            roles: senderRoles.map((ur: any) => ({
               id: ur.role.id,
               name: ur.role.name,
               description: ur.role.description,
@@ -703,6 +849,29 @@ export class MessageService {
       isFromContact: message.isFromContact,
       timestamp: message.timestamp.toISOString(),
       createdAt: message.createdAt.toISOString(),
+      quotedMessageId: message.quotedMessageId || null,
+      quotedMessage: quotedMessageData
+        ? {
+            id: quotedMessageData.id,
+            content: quotedMessageData.content,
+            messageType: quotedMessageData.messageType,
+            mediaUrl: quotedMessageData.mediaUrl,
+            isFromContact: quotedMessageData.isFromContact,
+            senderName: quotedMessageData.sender
+              ? quotedMessageData.sender.name
+              : null,
+            senderAvatar: quotedMessageData.sender
+              ? quotedMessageData.sender.avatar
+              : null,
+            senderId: quotedMessageData.senderId || null,
+            timestamp: quotedMessageData.timestamp
+              ? quotedMessageData.timestamp.toISOString()
+              : null,
+            status: quotedMessageData.status
+              ? (quotedMessageData.status as MessageStatus)
+              : null,
+          }
+        : null,
     };
   }
 }

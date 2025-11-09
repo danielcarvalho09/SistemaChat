@@ -190,11 +190,12 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
     }
   },
 
-  sendMessage: async (conversationId: string, content: string) => {
+  sendMessage: async (conversationId: string, content: string, quotedMessageId?: string | null) => {
     try {
       await api.post(`/conversations/${conversationId}/messages`, {
         content,
-        type: 'text',
+        messageType: 'text',
+        ...(quotedMessageId ? { quotedMessageId } : {}),
       });
       
       // NÃO adicionar mensagem aqui!
