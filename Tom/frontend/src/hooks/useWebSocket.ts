@@ -4,7 +4,7 @@ import { useConversationStore } from '../store/conversationStore';
 import { Message, Conversation } from '../types';
 
 export function useWebSocket() {
-  const { addMessage, addConversation, updateConversation, fetchConversations } = useConversationStore();
+  const { addMessage, addConversation, updateConversation, updateMessage, fetchConversations } = useConversationStore();
 
   useEffect(() => {
     // Pegar token do localStorage (chave correta: accessToken)
@@ -38,14 +38,17 @@ export function useWebSocket() {
         // Adicionar mensagem ao store
         addMessage(data.conversationId, data.message);
         console.log('✅ Mensagem adicionada');
-        
-        // Atualizar conversa (última mensagem, timestamp)
-        updateConversation(data.conversationId, {
-          lastMessageAt: data.message.timestamp || new Date().toISOString(),
-        });
       } else {
-        console.log('⚠️ Mensagem já existe, ignorando duplicação');
+        // Atualizar mensagem existente (status, conteúdo, quoted etc.)
+        updateMessage(data.conversationId, data.message.id, data.message);
+        console.log('🔄 Mensagem já existia, dados atualizados');
       }
+
+      // Atualizar metadados da conversa (última mensagem/timestamp)
+      updateConversation(data.conversationId, {
+        lastMessageAt: data.message.timestamp || new Date().toISOString(),
+        lastMessage: data.message,
+      });
     });
 
     // Escutar novas conversas
@@ -79,8 +82,7 @@ export function useWebSocket() {
     // Escutar status de mensagem
     socketService.on('message_status_update', (data: { conversationId: string; messageId: string; status: string }) => {
       console.log('✅ Status de mensagem atualizado via WebSocket:', data);
-      // Atualizar status da mensagem no store
-      // TODO: Implementar updateMessage no store se necessário
+      updateMessage(data.conversationId, data.messageId, { status: data.status as Message['status'] });
     });
 
     // Cleanup ao desmontar - apenas remover listeners, NÃO desconectar
@@ -91,5 +93,5 @@ export function useWebSocket() {
       socketService.off('conversation_assigned');
       socketService.off('message_status_update');
     };
-  }, [addMessage, addConversation, updateConversation, fetchConversations]);
+  }, [addMessage, addConversation, updateConversation, updateMessage, fetchConversations]);
 }
