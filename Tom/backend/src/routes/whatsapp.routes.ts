@@ -47,6 +47,12 @@ export async function whatsappRoutes(fastify: FastifyInstance) {
     handler: whatsappController.manualReconnectConnection,
   });
 
+  // Resetar conexão e gerar novo QR code (limpa credenciais corrompidas)
+  fastify.post('/:connectionId/reset', {
+    preHandler: [requireAdmin],
+    handler: whatsappController.resetConnection,
+  });
+
   // Deletar conexão (apenas admin)
   fastify.delete('/:connectionId', {
     preHandler: [requireAdmin],

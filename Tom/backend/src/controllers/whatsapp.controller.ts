@@ -104,6 +104,24 @@ export class WhatsAppController {
   };
 
   /**
+   * POST /api/v1/connections/:connectionId/reset
+   * Reseta conexão e gera novo QR code (limpa credenciais corrompidas)
+   */
+  resetConnection = async (
+    request: FastifyRequest<{ Params: { connectionId: string } }>,
+    reply: FastifyReply
+  ) => {
+    const { connectionId } = request.params;
+    const result = await this.whatsappService.resetConnection(connectionId);
+
+    return reply.status(200).send({
+      success: true,
+      message: 'Conexão resetada. Novo QR code será gerado.',
+      data: result,
+    });
+  };
+
+  /**
    * POST /api/v1/connections/:connectionId/disconnect
    * Desconecta conexão
    */

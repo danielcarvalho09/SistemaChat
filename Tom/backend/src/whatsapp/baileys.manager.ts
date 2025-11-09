@@ -2035,25 +2035,8 @@ class BaileysManager {
       };
     }
 
-    if (!client) {
-      logger.info(`[Baileys] 🔁 Manual reconnect requested - no client found for ${connectionId}. Creating new client...`);
-      await this.createClient(connectionId);
-      return {
-        status: 'connecting',
-        message: 'Cliente recriado. QR code será emitido automaticamente se necessário.',
-      };
-    }
-
-    if (!client.hasCredentials) {
-      logger.warn(`[Baileys] 🔁 Manual reconnect for ${connectionId} - no credentials stored. Generating new QR...`);
-      await this.createClient(connectionId);
-      return {
-        status: 'awaiting_qr',
-        message: 'Credenciais ausentes. Novo QR code será emitido para pareamento.',
-      };
-    }
-
-    if (client.isReconnecting || this.reconnectionLocks.get(connectionId)) {
+    // Verificar se há lock de reconexão ativo
+    if (this.reconnectionLocks.get(connectionId)) {
       logger.info(`[Baileys] 🔁 Manual reconnect for ${connectionId} ignored - reconnection already in progress.`);
       return {
         status: 'already_reconnecting',
@@ -2061,12 +2044,56 @@ class BaileysManager {
       };
     }
 
+    // Verificar se há credenciais no banco de dados
+    const connection = await this.prisma.whatsAppConnection.findUnique({
+      where: { id: connectionId },
+      select: { authData: true },
+    });
+
+    const hasCredentialsInDB = connection && connection.authData !== null;
+
+    // Se não há cliente, criar novo
+    if (!client) {
+      logger.info(`[Baileys] 🔁 Manual reconnect for ${connectionId} - no client found, creating new one...`);
+      
+      // Limpar locks
+      this.reconnectionLocks.delete(connectionId);
+      
+      // Criar novo cliente (vai usar credenciais do banco se existirem)
+      await this.createClient(connectionId);
+      
+      if (hasCredentialsInDB) {
+        return {
+          status: 'reconnecting',
+          message: 'Reconectando com credenciais existentes...',
+        };
+      } else {
+        return {
+          status: 'awaiting_qr',
+          message: 'Aguardando QR code...',
+        };
+      }
+    }
+
+    // Se o cliente existe e está reconectando, informar
+    if (client.isReconnecting) {
+      logger.info(`[Baileys] 🔁 Manual reconnect for ${connectionId} ignored - reconnection already in progress.`);
+      return {
+        status: 'already_reconnecting',
+        message: 'Já existe um processo de reconexão em andamento.',
+      };
+    }
+
+    // Resetar contadores e flags
     client.reconnectAttempts = 0;
     client.isReconnecting = false;
     this.reconnectionLocks.delete(connectionId);
 
     logger.info(`[Baileys] 🔁 Manual reconnect initiated for ${connectionId}`);
-    await this.attemptReconnection(connectionId);
+    
+    // Remover cliente atual e criar novo (vai usar credenciais do banco)
+    await this.removeClient(connectionId, false);
+    await this.createClient(connectionId);
 
     return {
       status: 'reconnecting',
@@ -2076,7 +2103,7 @@ class BaileysManager {
 
   /**
    * Agenda reconexão automática quando a sessão fica inválida
-   * Mantém credenciais salvas (não limpa authData)
+   * MANTÉM as credenciais para permitir reconexão via botão
    */
   private async handleSessionInvalidation(
     connectionId: string,
@@ -2088,7 +2115,7 @@ class BaileysManager {
     const client = this.clients.get(connectionId);
     if (client) {
       client.status = 'disconnected';
-      client.hasCredentials = false;
+      // NÃO marcar hasCredentials = false, pois queremos manter as credenciais
     }
 
     // Remover locks pendentes para permitir recriação
@@ -2097,14 +2124,17 @@ class BaileysManager {
     // Remover cliente atual sem forçar logout (sessão já inválida)
     await this.removeClient(connectionId, false);
 
+    // ✅ NÃO LIMPAR credenciais - manter para permitir reconexão via botão
+    logger.info(`[Baileys] 💾 Keeping credentials for ${connectionId} - user can reconnect via button`);
+
     await this.updateConnectionStatus(connectionId, 'disconnected');
     this.emitStatus(connectionId, 'disconnected');
 
     try {
       const socketServer = getSocketServer();
       const message = reason === 'logged_out'
-        ? 'A sessão do WhatsApp foi encerrada no aparelho. Escaneie o QR code novamente.'
-        : 'A sessão do WhatsApp ficou inválida. Escaneie o QR code novamente no aparelho.';
+        ? 'A sessão do WhatsApp foi encerrada. Clique em "Reconectar" para tentar novamente.'
+        : 'A sessão do WhatsApp ficou inválida. Clique em "Reconectar" para tentar novamente.';
 
       socketServer.emitWhatsAppConnectionFailed(connectionId, message);
     } catch (notifyError) {
@@ -2115,16 +2145,16 @@ class BaileysManager {
       logger.debug(`[Baileys] Session invalidation raw error for ${connectionId}:`, error);
     }
 
-    // Tentar reconectar automaticamente com as mesmas credenciais após pequeno delay
+    // Tentar reconectar automaticamente após pequeno delay (mantendo credenciais)
     setTimeout(() => {
       this.createClient(connectionId)
         .then(() => {
-          logger.info(`[Baileys] 🔁 Client recreation scheduled after ${reason} for ${connectionId}`);
+          logger.info(`[Baileys] 🔁 Client recreated after ${reason} for ${connectionId} - attempting to reconnect with existing credentials`);
         })
         .catch((creationError) => {
           logger.error(`[Baileys] ❌ Failed to recreate client for ${connectionId} after ${reason}:`, creationError);
         });
-    }, 2000);
+    }, 3000); // 3 segundos de delay
   }
 
   /**

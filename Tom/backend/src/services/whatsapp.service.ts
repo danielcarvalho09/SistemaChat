@@ -204,6 +204,43 @@ export class WhatsAppService {
   }
 
   /**
+   * Reseta conexão e gera novo QR code (limpa credenciais corrompidas)
+   */
+  async resetConnection(connectionId: string) {
+    const connection = await this.prisma.whatsAppConnection.findUnique({
+      where: { id: connectionId },
+    });
+
+    if (!connection) {
+      throw new NotFoundError('Connection not found');
+    }
+
+    logger.info(`[WhatsApp] Resetting connection ${connectionId} - clearing credentials...`);
+
+    // 1. Remover cliente atual (sem fazer logout, pois sessão está inválida)
+    await baileysManager.removeClient(connectionId, false);
+
+    // 2. Limpar credenciais do banco
+    await this.prisma.whatsAppConnection.update({
+      where: { id: connectionId },
+      data: {
+        authData: null,
+        status: 'disconnected',
+      },
+    });
+
+    // 3. Criar novo cliente (vai gerar QR code)
+    logger.info(`[WhatsApp] Creating new client for ${connectionId}...`);
+    await baileysManager.createClient(connectionId);
+
+    return {
+      connectionId,
+      status: 'awaiting_qr',
+      message: 'Credenciais limpas. Novo QR code será gerado.',
+    };
+  }
+
+  /**
    * Desconecta uma conexão
    */
   async disconnectConnection(connectionId: string) {
