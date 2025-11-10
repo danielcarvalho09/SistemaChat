@@ -59,6 +59,24 @@ interface SendMessageOptions {
   quotedMessage?: QuotedMessagePayload;
 }
 
+type IncomingRetryItem = {
+  connectionId: string;
+  from: string;
+  messageText: string;
+  messageType: string;
+  mediaUrl: string | null;
+  isFromMe: boolean;
+  externalId: string;
+  pushName: string | null;
+  quotedContext?: {
+    stanzaId?: string;
+    participant?: string;
+    quotedMessage?: any;
+  };
+  retries: number;
+  lastAttempt: Date;
+};
+
 /**
  * Gerenciador de conexões Baileys
  * Baseado 100% na documentação oficial: https://baileys.wiki/docs/intro/
@@ -67,7 +85,7 @@ class BaileysManager {
   private clients: Map<string, BaileysClient> = new Map();
   private prisma = getPrismaClient();
   private reconnectionLocks: Map<string, boolean> = new Map(); // Previne reconexões simultâneas
-  private syncRetryQueue: Map<string, { retries: number; lastAttempt: Date }> = new Map(); // Fila de retry para sincronização
+  private syncRetryQueue: Map<string, IncomingRetryItem> = new Map(); // Fila de retry para sincronização
   private readonly MAX_RECONNECT_ATTEMPTS = 10;
   private readonly QR_RESET_DELAY_MS = 2000;
 
@@ -607,9 +625,9 @@ class BaileysManager {
           if (!messageTimestamp) {
             logger.debug(`[Baileys] ✅ Processing message without timestamp (likely recent)`);
           } else {
-            const oneHourBeforeFirst = new Date(firstConnectedAt.getTime() - 60 * 60 * 1000);
+            const safeWindowStart = new Date(firstConnectedAt.getTime() - 6 * 60 * 60 * 1000);
             
-            if (messageTimestamp < oneHourBeforeFirst) {
+            if (messageTimestamp < safeWindowStart) {
               logger.debug(`[Baileys] ⏭️ Skipping old history message from ${messageTimestamp.toISOString()}`);
               syncStats.skipped++;
               continue;
@@ -830,38 +848,31 @@ class BaileysManager {
           logger.info(`[Baileys] 🔄 Retrying message ${processedIndex}/${totalMessages} in ${backoffDelay}ms...`);
           await new Promise(resolve => setTimeout(resolve, backoffDelay));
         } else {
-          // Última tentativa falhou - adicionar à queue de retry para processar depois
-          logger.error(`[Baileys] ❌ Max retries reached for message ${externalId} - adding to retry queue`);
+          // Última tentativa falhou - armazenar na fila de retry para processamento posterior
+          logger.error(`[Baileys] ❌ Max retries reached for message ${externalId} - enqueueing for background retry`);
           
           const retryKey = `${connectionId}:${externalId}`;
-          const retryInfo = this.syncRetryQueue.get(retryKey) || { retries: 0, lastAttempt: new Date() };
-          retryInfo.retries = attempt;
-          retryInfo.lastAttempt = new Date();
-          this.syncRetryQueue.set(retryKey, retryInfo);
+          const existingRetry = this.syncRetryQueue.get(retryKey);
+          const retryItem: IncomingRetryItem = {
+            connectionId,
+            from,
+            messageText,
+            messageType,
+            mediaUrl,
+            isFromMe,
+            externalId,
+            pushName,
+            quotedContext: quotedContext || undefined,
+            retries: existingRetry ? existingRetry.retries + 1 : attempt,
+            lastAttempt: new Date(),
+          };
+          this.syncRetryQueue.set(retryKey, retryItem);
           
-          // Tentar novamente em background após delay maior
-          setTimeout(async () => {
-            try {
-              logger.info(`[Baileys] 🔄 Background retry for message ${externalId}...`);
-              const { MessageService } = await import('../services/message.service.js');
-              const messageService = new MessageService();
-              await messageService.processIncomingMessage(
-                connectionId,
-                from,
-                messageText,
-                messageType,
-                mediaUrl,
-                isFromMe,
-                externalId,
-                pushName,
-                quotedContext || undefined
-              );
-              this.syncRetryQueue.delete(retryKey);
-              logger.info(`[Baileys] ✅ Background retry successful for ${externalId}`);
-            } catch (retryError) {
-              logger.error(`[Baileys] ❌ Background retry failed for ${externalId}:`, retryError);
-              // Manter na queue para próxima sincronização
-            }
+          // Disparar retry em background após pequeno delay
+          setTimeout(() => {
+            this.retryIncomingMessage(retryKey).catch((retryError) => {
+              logger.error(`[Baileys] ❌ Background retry promise rejected for ${externalId}:`, retryError);
+            });
           }, 10000); // 10 segundos
           
           return false;
@@ -870,6 +881,64 @@ class BaileysManager {
     }
     
     return false; // Nunca deve chegar aqui, mas TypeScript precisa
+  }
+
+  private async retryIncomingMessage(retryKey: string): Promise<void> {
+    const retryItem = this.syncRetryQueue.get(retryKey);
+    if (!retryItem) {
+      return;
+    }
+
+    const maxBackgroundRetries = 6;
+
+    if (retryItem.retries >= maxBackgroundRetries) {
+      logger.error(
+        `[Baileys] ❌ Giving up on message ${retryItem.externalId} after ${retryItem.retries} background retries`
+      );
+      this.syncRetryQueue.delete(retryKey);
+      return;
+    }
+
+    try {
+      logger.info(
+        `[Baileys] 🔄 Background retry #${retryItem.retries} for message ${retryItem.externalId}...`
+      );
+      const { MessageService } = await import('../services/message.service.js');
+      const messageService = new MessageService();
+      await messageService.processIncomingMessage(
+        retryItem.connectionId,
+        retryItem.from,
+        retryItem.messageText,
+        retryItem.messageType,
+        retryItem.mediaUrl,
+        retryItem.isFromMe,
+        retryItem.externalId,
+        retryItem.pushName,
+        retryItem.quotedContext
+      );
+      this.syncRetryQueue.delete(retryKey);
+      logger.info(
+        `[Baileys] ✅ Background retry successful for message ${retryItem.externalId}`
+      );
+    } catch (error) {
+      retryItem.retries += 1;
+      retryItem.lastAttempt = new Date();
+      this.syncRetryQueue.set(retryKey, retryItem);
+      logger.error(
+        `[Baileys] ❌ Background retry failed for message ${retryItem.externalId} (attempt ${retryItem.retries}):`,
+        error
+      );
+
+      const nextDelay = Math.min(60000, 10000 * retryItem.retries); // 10s, 20s, ... up to 60s
+      setTimeout(() => {
+        this.retryIncomingMessage(retryKey).catch((err) =>
+          logger.error(
+            `[Baileys] ❌ Background retry promise rejected for ${retryItem.externalId}:`,
+            err
+          )
+        );
+      }, nextDelay);
+    }
   }
 
   /**
@@ -1963,9 +2032,7 @@ class BaileysManager {
             continue; // Aguardar mais tempo
           }
           
-          // Tentar processar novamente (a mensagem original já foi perdida, mas podemos tentar sincronizar)
-          // A sincronização periódica vai pegar mensagens pendentes
-          this.syncRetryQueue.delete(retryKey);
+          await this.retryIncomingMessage(retryKey);
           processedCount++;
         } catch (error) {
           logger.error(`[Baileys] ❌ Error processing retry queue item:`, error);
@@ -2308,6 +2375,12 @@ class BaileysManager {
             // Também detectar e recuperar gaps
             const { gapsFound, recovered } = await this.detectAndRecoverGaps(connectionId);
             logger.info(`[Baileys] ✅ Detecção de gaps: ${gapsFound} encontrados, ${recovered} em recuperação`);
+
+            // Processar fila de mensagens que falharam anteriormente
+            const retried = await this.processRetryQueue(connectionId);
+            if (retried > 0) {
+              logger.info(`[Baileys] ✅ Retry queue drained: ${retried} mensagens reprocesadas após reconexão`);
+            }
           } catch (syncError) {
             logger.error(`[Baileys] ❌ Erro na sincronização pós-reconexão:`, syncError);
           }
@@ -2774,6 +2847,11 @@ class BaileysManager {
           // Isso evita interferir com o envio normal de mensagens
           const { recovered } = await this.detectAndRecoverGaps(connection.id);
           totalGapsRecovered += recovered;
+
+          const retried = await this.processRetryQueue(connection.id);
+          if (retried > 0) {
+            logger.info(`[Baileys] 🔁 Retry queue processed for ${connection.id}: ${retried} mensagens reaplicadas`);
+          }
 
           // Delay menor entre conexões para não sobrecarregar
           await new Promise(resolve => setTimeout(resolve, 500));
