@@ -68,6 +68,8 @@ class BaileysManager {
   private prisma = getPrismaClient();
   private reconnectionLocks: Map<string, boolean> = new Map(); // Previne reconexões simultâneas
   private syncRetryQueue: Map<string, { retries: number; lastAttempt: Date }> = new Map(); // Fila de retry para sincronização
+  private readonly MAX_RECONNECT_ATTEMPTS = 10;
+  private readonly QR_RESET_DELAY_MS = 2000;
 
   /**
    * Cria um novo cliente Baileys para uma conexão
@@ -939,9 +941,10 @@ class BaileysManager {
 
     // 3. Não reconectar se excedeu limite de tentativas (30 tentativas = ~10 minutos)
     // Isso garante que tentará reconectar por muito tempo antes de desistir
-    const maxAttempts = 30;
-    if (client.reconnectAttempts && client.reconnectAttempts >= maxAttempts) {
-      logger.warn(`[Baileys] ⏭️ Skipping reconnection for ${connectionId}: Max attempts (${maxAttempts}) reached`);
+    if (client.reconnectAttempts && client.reconnectAttempts >= this.MAX_RECONNECT_ATTEMPTS) {
+      logger.warn(
+        `[Baileys] ⏭️ Skipping reconnection for ${connectionId}: Max attempts (${this.MAX_RECONNECT_ATTEMPTS}) reached`
+      );
       return false;
     }
 
@@ -1006,7 +1009,9 @@ class BaileysManager {
       delay = 30000; // Após 15 tentativas: 30s
     }
     
-    logger.info(`[Baileys] 🔄 Reconnection attempt ${client.reconnectAttempts}/30 for ${connectionId} in ${delay}ms...`);
+    logger.info(
+      `[Baileys] 🔄 Reconnection attempt ${client.reconnectAttempts}/${this.MAX_RECONNECT_ATTEMPTS} for ${connectionId} in ${delay}ms...`
+    );
     
     // Aguardar antes de reconectar
     await new Promise(resolve => setTimeout(resolve, delay));
@@ -1047,7 +1052,7 @@ class BaileysManager {
         logger.warn(`[Baileys] 💡 Will retry after longer delay (30s)`);
         
         // Aguardar 30 segundos antes de tentar novamente (se não excedeu limite)
-        if (client.reconnectAttempts < 30) {
+        if (client.reconnectAttempts < this.MAX_RECONNECT_ATTEMPTS) {
           setTimeout(() => {
             this.attemptReconnection(connectionId).catch(err => {
               logger.error(`[Baileys] Failed to retry reconnection after 503:`, err);
@@ -1056,6 +1061,14 @@ class BaileysManager {
         }
       }
       
+      if (client.reconnectAttempts >= this.MAX_RECONNECT_ATTEMPTS) {
+        logger.warn(
+          `[Baileys] ❌ Maximum reconnection attempts reached for ${connectionId} - forcing credential reset`
+        );
+        await this.resetCredentialsAndEmitQR(connectionId, 'max_attempts');
+        return;
+      }
+
       // Marcar como desconectado se falhou
       await this.updateConnectionStatus(connectionId, 'disconnected');
       this.emitStatus(connectionId, 'disconnected');
@@ -1996,6 +2009,69 @@ class BaileysManager {
     }
   }
 
+  private async resetCredentialsAndEmitQR(
+    connectionId: string,
+    reason: 'bad_session' | 'logged_out' | 'max_attempts'
+  ): Promise<void> {
+    logger.warn(`[Baileys] 🔐 Resetting credentials for ${connectionId} due to ${reason}`);
+
+    const client = this.clients.get(connectionId);
+    if (client) {
+      client.status = 'disconnected';
+      client.hasCredentials = false;
+      client.isReconnecting = false;
+      client.reconnectAttempts = 0;
+    }
+
+    this.reconnectionLocks.delete(connectionId);
+
+    try {
+      await this.removeClient(connectionId, false);
+    } catch (error) {
+      logger.error(`[Baileys] ❌ Error removing client during credential reset for ${connectionId}:`, error);
+    }
+
+    try {
+      await this.prisma.whatsAppConnection.update({
+        where: { id: connectionId },
+        data: {
+          authData: null,
+          status: 'disconnected',
+        },
+      });
+    } catch (error) {
+      logger.error(`[Baileys] ❌ Error clearing stored credentials for ${connectionId}:`, error);
+    }
+
+    this.emitStatus(connectionId, 'disconnected');
+
+    try {
+      const socketServer = getSocketServer();
+      let message = 'A sessão do WhatsApp ficou inválida. Escaneie o novo QR code para reconectar.';
+      if (reason === 'logged_out') {
+        message = 'A sessão do WhatsApp foi encerrada no aparelho. Escaneie o novo QR code para reconectar.';
+      } else if (reason === 'max_attempts') {
+        message = 'A conexão não respondeu após várias tentativas. Escaneie o novo QR code para reconectar.';
+      }
+      socketServer.emitWhatsAppConnectionFailed(connectionId, message);
+    } catch (error) {
+      logger.error(`[Baileys] ❌ Error notifying credential reset for ${connectionId}:`, error);
+    }
+
+    setTimeout(() => {
+      this.createClient(connectionId)
+        .then(() => {
+          logger.info(`[Baileys] 📲 New QR code requested for ${connectionId} after ${reason}`);
+        })
+        .catch((creationError) => {
+          logger.error(
+            `[Baileys] ❌ Failed to recreate client for ${connectionId} after ${reason}:`,
+            creationError
+          );
+        });
+    }, this.QR_RESET_DELAY_MS);
+  }
+
   /**
    * Emite QR Code via Socket.IO
    */
@@ -2138,6 +2214,11 @@ class BaileysManager {
     error?: any
   ): Promise<void> {
     logger.warn(`[Baileys] 🛑 Session invalidation detected for ${connectionId} (${reason})`);
+
+    if (reason === 'bad_session' || reason === 'logged_out') {
+      await this.resetCredentialsAndEmitQR(connectionId, reason);
+      return;
+    }
 
     const client = this.clients.get(connectionId);
     if (client) {
