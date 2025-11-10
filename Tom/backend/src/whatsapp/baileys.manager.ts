@@ -43,6 +43,9 @@ export interface BaileysClient {
   isReconnecting?: boolean; // Flag para evitar múltiplas reconexões simultâneas
   lastHeartbeat?: Date; // Última vez que o heartbeat foi bem-sucedido
   lastSync?: Date; // Última vez que sincronizou mensagens
+  lastDisconnectAt?: Date | null;
+  lastSyncFrom?: Date | null;
+  lastSyncTo?: Date | null;
 }
 
 interface QuotedMessagePayload {
@@ -372,15 +375,33 @@ class BaileysManager {
     if (connection === 'open') {
       client.status = 'connected';
       logger.info(`[Baileys] ✅ Connected: ${connectionId}`);
-      
+
       // Resetar contador de reconexão ao conectar com sucesso
       this.resetReconnectionAttempts(connectionId);
-      
+
+      let lastDisconnectAt: Date | null = null;
+      try {
+        const connectionRecord = await this.prisma.whatsAppConnection.findUnique({
+          where: { id: connectionId },
+          select: { lastDisconnectAt: true },
+        });
+        lastDisconnectAt = connectionRecord?.lastDisconnectAt ?? null;
+      } catch (fetchError) {
+        logger.warn(`[Baileys] ⚠️ Could not read lastDisconnectAt for ${connectionId}:`, fetchError);
+      }
+
+      client.lastDisconnectAt = lastDisconnectAt;
+      client.lastSyncFrom = lastDisconnectAt;
+      client.lastSyncTo = null;
+
       // Salvar firstConnectedAt se for a primeira conexão
       // E forçar sincronização de mensagens desde a primeira conexão ao reconectar
       await this.saveFirstConnectedAt(connectionId);
-      
-      await this.updateConnectionStatus(connectionId, 'connected');
+
+      await this.updateConnectionStatus(connectionId, 'connected', {
+        lastSyncFrom: lastDisconnectAt,
+        lastSyncTo: null,
+      });
       this.emitStatus(connectionId, 'connected');
       return;
     }
@@ -401,6 +422,11 @@ class BaileysManager {
       logger.warn(`[Baileys] 🔢 DisconnectReason.badSession = ${DisconnectReason.badSession}`);
       logger.warn(`[Baileys] 🔢 DisconnectReason.timedOut = ${DisconnectReason.timedOut}`);
       logger.warn(`[Baileys] 📋 Full error:`, JSON.stringify(lastDisconnect?.error, null, 2));
+
+      const disconnectAt = new Date();
+      client.lastDisconnectAt = disconnectAt;
+      client.lastSyncFrom = null;
+      client.lastSyncTo = null;
 
       // Restart required (normal após QR scan)
       if (statusCode === DisconnectReason.restartRequired) {
@@ -448,7 +474,9 @@ class BaileysManager {
           }
         }, 30000); // 30 segundos para erro 503
         
-        await this.updateConnectionStatus(connectionId, 'disconnected');
+        await this.updateConnectionStatus(connectionId, 'disconnected', {
+          lastDisconnectAt: disconnectAt,
+        });
         this.emitStatus(connectionId, 'disconnected');
         return;
       }
@@ -471,7 +499,9 @@ class BaileysManager {
         }
         
         logger.warn(`[Baileys] ❌ Disconnected: ${connectionId} (code: ${statusCode}).`);
-        await this.updateConnectionStatus(connectionId, 'disconnected');
+        await this.updateConnectionStatus(connectionId, 'disconnected', {
+          lastDisconnectAt: disconnectAt,
+        });
         this.emitStatus(connectionId, 'disconnected');
       }
     }
@@ -546,7 +576,14 @@ class BaileysManager {
           logger.info(`[Baileys] 📦 Processing batch ${batchIndex + 1}/${batches.length} (${batch.length} messages)...`);
           
           // Processar lote (usar mesmo código de processamento)
-          await this.processMessageBatch(connectionId, batch, type, firstConnectedAt || null, syncStats);
+          await this.processMessageBatch(
+            connectionId,
+            batch,
+            type,
+            firstConnectedAt || null,
+            syncStats,
+            client?.lastSyncFrom ?? null
+          );
           
           // Delay entre lotes para evitar sobrecarga
           if (batchIndex < batches.length - 1) {
@@ -561,7 +598,14 @@ class BaileysManager {
       }
       
       // Processar mensagens normalmente (se não foi processado em lotes)
-      await this.processMessageBatch(connectionId, messages, type, firstConnectedAt || null, syncStats);
+      await this.processMessageBatch(
+        connectionId,
+        messages,
+        type,
+        firstConnectedAt || null,
+        syncStats,
+        client?.lastSyncFrom ?? null
+      );
     } catch (error) {
       logger.error(`[Baileys] ❌ Error handling messages for ${connectionId}:`, error);
       // Não propagar erro - continuar funcionamento
@@ -577,7 +621,8 @@ class BaileysManager {
     messages: any[],
     type: string,
     firstConnectedAt: Date | null,
-    syncStats: { total: number; processed: number; skipped: number; errors: number; type: string }
+    syncStats: { total: number; processed: number; skipped: number; errors: number; type: string },
+    syncWindowStart: Date | null
   ): Promise<void> {
     logger.info(`[Baileys] 📨 Processing message batch - Type: ${type}, Count: ${messages?.length || 0}, firstConnectedAt: ${firstConnectedAt?.toISOString() || 'N/A'}`);
     
@@ -612,16 +657,27 @@ class BaileysManager {
 
         logger.info(`[Baileys] 📱 Processing message ${processedIndex}/${totalMessages} from ${from}, isFromMe: ${isFromMe}, pushName: ${pushName}`);
 
+        let messageTimestamp: Date | null = null;
+        if (msg.messageTimestamp) {
+          messageTimestamp = new Date(Number(msg.messageTimestamp) * 1000);
+        } else if (msg.key?.messageTimestamp) {
+          messageTimestamp = new Date(Number(msg.key.messageTimestamp) * 1000);
+        }
+
+        if (syncWindowStart && (type === 'history' || type === 'append')) {
+          if (messageTimestamp && messageTimestamp < syncWindowStart) {
+            logger.debug(
+              `[Baileys] ⏭️ Skipping message before last disconnect window (${messageTimestamp.toISOString()})`
+            );
+            syncStats.skipped++;
+            continue;
+          }
+        }
+
         // ===== FILTROS =====
         
         // 0. Filtrar mensagens antigas (anteriores à primeira conexão)
         if (firstConnectedAt && type === 'history') {
-          const messageTimestamp = msg.messageTimestamp 
-            ? new Date(Number(msg.messageTimestamp) * 1000) 
-            : msg.key?.messageTimestamp 
-              ? new Date(Number(msg.key.messageTimestamp) * 1000)
-              : null;
-          
           if (!messageTimestamp) {
             logger.debug(`[Baileys] ✅ Processing message without timestamp (likely recent)`);
           } else {
@@ -2082,12 +2138,17 @@ class BaileysManager {
   ): Promise<void> {
     logger.warn(`[Baileys] 🔐 Resetting credentials for ${connectionId} due to ${reason}`);
 
+    const resetAt = new Date();
+
     const client = this.clients.get(connectionId);
     if (client) {
       client.status = 'disconnected';
       client.hasCredentials = false;
       client.isReconnecting = false;
       client.reconnectAttempts = 0;
+      client.lastDisconnectAt = resetAt;
+      client.lastSyncFrom = null;
+      client.lastSyncTo = null;
     }
 
     this.reconnectionLocks.delete(connectionId);
@@ -2104,6 +2165,9 @@ class BaileysManager {
         data: {
           authData: null,
           status: 'disconnected',
+          lastDisconnectAt: resetAt,
+          lastSyncFrom: null,
+          lastSyncTo: null,
         },
       });
     } catch (error) {
@@ -2381,6 +2445,21 @@ class BaileysManager {
             if (retried > 0) {
               logger.info(`[Baileys] ✅ Retry queue drained: ${retried} mensagens reprocesadas após reconexão`);
             }
+
+            const syncEnd = new Date();
+            const currentClient = this.clients.get(connectionId);
+            if (currentClient) {
+              currentClient.lastSyncTo = syncEnd;
+            }
+
+            await this.prisma.whatsAppConnection.update({
+              where: { id: connectionId },
+              data: {
+                lastSyncTo: syncEnd,
+              },
+            }).catch((updateError) => {
+              logger.warn(`[Baileys] ⚠️ Could not update lastSyncTo for ${connectionId}:`, updateError);
+            });
           } catch (syncError) {
             logger.error(`[Baileys] ❌ Erro na sincronização pós-reconexão:`, syncError);
           }
@@ -2394,14 +2473,24 @@ class BaileysManager {
   /**
    * Atualiza status no banco
    */
-  private async updateConnectionStatus(connectionId: string, status: string) {
+  private async updateConnectionStatus(
+    connectionId: string,
+    status: string,
+    extraData: Record<string, any> = {}
+  ) {
     try {
+      const data: Record<string, any> = {
+        status,
+        ...extraData,
+      };
+
+      if (status === 'connected' && typeof data.lastConnected === 'undefined') {
+        data.lastConnected = new Date();
+      }
+
       await this.prisma.whatsAppConnection.update({
         where: { id: connectionId },
-        data: {
-          status,
-          lastConnected: status === 'connected' ? new Date() : undefined,
-        },
+        data,
       });
     } catch (error: any) {
       // Se a conexão não existe mais no banco, apenas logar warning (não é erro crítico)
@@ -2510,6 +2599,10 @@ class BaileysManager {
         logger.error(`[Baileys] ❌ Socket not available for ${connectionId}`);
         return false;
       }
+
+    if (!client.lastSyncFrom && client.lastDisconnectAt) {
+      client.lastSyncFrom = client.lastDisconnectAt;
+    }
 
       const jid = phoneNumber.includes('@') ? phoneNumber : `${phoneNumber}@s.whatsapp.net`;
       
@@ -2719,6 +2812,7 @@ class BaileysManager {
       }
 
       logger.info(`[Baileys] ✅ Synced ${syncedCount}/${conversations.length} conversations`);
+
       return syncedCount;
     } catch (error) {
       logger.error(`[Baileys] ❌ Error in syncAllActiveConversations:`, error);

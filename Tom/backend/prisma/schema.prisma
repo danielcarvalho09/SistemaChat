@@ -155,6 +155,9 @@ model WhatsAppConnection {
   authData      String? // Auth state do Baileys (credenciais + keys)
   lastConnected DateTime?
   firstConnectedAt DateTime? // Timestamp da primeira conexão bem-sucedida
+  lastDisconnectAt DateTime?
+  lastSyncFrom DateTime?
+  lastSyncTo DateTime?
   isActive      Boolean  @default(true)
   isMatriz      Boolean  @default(false) // Conexão matriz vê todas as conversas
   userId        String?  // Conexão agora pertence a um usuário específico
