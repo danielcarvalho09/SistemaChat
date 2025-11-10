@@ -110,7 +110,23 @@ export function Kanban() {
     try {
       const response = await api.get('/kanban/board');
       const data = response.data?.data || response.data || [];
-      setBoard(Array.isArray(data) ? data : []);
+      const normalized: BoardColumn[] = Array.isArray(data) ? data : [];
+
+      const atendimentoColumns = normalized.filter((column) =>
+        column?.stage?.name?.toLowerCase().includes('atendimento')
+      );
+
+      const nextBoard =
+        atendimentoColumns.length > 0 ? atendimentoColumns : normalized;
+
+      const withSortedConversations = nextBoard.map((column) => ({
+        ...column,
+        conversations: [...column.conversations].sort((a, b) =>
+          new Date(b.lastMessageAt).getTime() - new Date(a.lastMessageAt).getTime()
+        ),
+      }));
+
+      setBoard(withSortedConversations);
     } catch (error) {
       console.error('Erro ao carregar Kanban:', error);
       toast.error('Erro ao carregar Kanban');
@@ -342,7 +358,7 @@ export function Kanban() {
 
                 {/* Cards Container - Droppable */}
                 <DroppableColumn id={column.stage.id}>
-                  <div className="flex-1 overflow-y-auto p-3 space-y-3 min-h-[200px]">
+                  <div className="flex-1 overflow-y-auto p-3 space-y-3 min-h-[200px] max-h-[calc(100vh-260px)]">
                     {column.conversations.map((conversation) => (
                       <DraggableCard key={conversation.id} id={conversation.id}>
                         <div className="bg-gray-50 border border-gray-200 p-4 cursor-move hover:shadow-md transition-shadow">

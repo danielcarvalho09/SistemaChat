@@ -42,27 +42,36 @@ export function ConnectionStatus() {
 
   // Determinar cor do indicador
   const getIndicatorColor = () => {
-    if (status.connected && status.lastPong < 30000) {
-      return 'bg-green-500'; // Verde - tudo OK
-    } else if (status.connected && status.lastPong < 60000) {
-      return 'bg-yellow-500'; // Amarelo - conectado mas pong atrasado
-    } else if (status.reconnectAttempts > 0) {
-      return 'bg-orange-500 animate-pulse'; // Laranja piscando - reconectando
-    } else {
-      return 'bg-red-500'; // Vermelho - desconectado
+    if (!status.connected) {
+      return status.reconnectAttempts > 0
+        ? 'bg-orange-500 animate-pulse'
+        : 'bg-red-500';
     }
+
+    if (status.lastPong > 60000) {
+      return 'bg-yellow-500';
+    }
+
+    return 'bg-green-500';
   };
 
   const getStatusText = () => {
-    if (status.connected && status.lastPong < 30000) {
-      return 'Conectado';
-    } else if (status.connected && status.lastPong < 60000) {
-      return 'Conectado (lento)';
-    } else if (status.reconnectAttempts > 0) {
-      return `Reconectando... (${status.reconnectAttempts})`;
-    } else {
+    if (!status.connected) {
+      if (status.reconnectAttempts > 0) {
+        return `Reconectando... (${status.reconnectAttempts})`;
+      }
       return 'Desconectado';
     }
+
+    if (status.lastPong > 60000) {
+      return 'Conectado (aguardando ping)';
+    }
+
+    if (status.lastPong > 30000) {
+      return 'Conectado (lento)';
+    }
+
+    return 'Conectado';
   };
 
   const formatTime = (ms: number) => {

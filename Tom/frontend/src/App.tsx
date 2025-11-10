@@ -6,6 +6,7 @@ import RegisterPage from './pages/RegisterPage';
 import { Dashboard } from './pages/Dashboard';
 import { DashboardLayout } from './pages/dashboard/DashboardLayout';
 import { Kanban } from './pages/dashboard/Kanban';
+import { Agenda } from './pages/dashboard/Agenda';
 import { AdminRoutes } from './routes/AdminRoutes';
 import { Toaster } from './components/ui/toaster';
 import { ConnectionStatus } from './components/ConnectionStatus';
@@ -52,6 +53,7 @@ function App() {
         >
           <Route index element={<Dashboard />} />
           <Route path="kanban" element={<Kanban />} />
+          <Route path="agenda" element={<Agenda />} />
         </Route>
         
         {/* Rotas Admin */}

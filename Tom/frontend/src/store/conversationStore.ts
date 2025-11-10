@@ -93,10 +93,22 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
   addMessage: (conversationId, message) => {
     set((state) => {
       const existingMessages = state.messages[conversationId] || [];
+      const index = existingMessages.findIndex((msg) => msg.id === message.id);
+
+      let updatedMessages: Message[];
+      if (index >= 0) {
+        // Atualizar mensagem existente (status, conteúdo, quoted etc.)
+        updatedMessages = existingMessages.map((msg, idx) =>
+          idx === index ? { ...msg, ...message } : msg
+        );
+      } else {
+        updatedMessages = [...existingMessages, message];
+      }
+
       return {
         messages: {
           ...state.messages,
-          [conversationId]: [...existingMessages, message],
+          [conversationId]: updatedMessages,
         },
       };
     });

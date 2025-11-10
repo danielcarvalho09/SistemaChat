@@ -2539,7 +2539,9 @@ class BaileysManager {
       const conversations = await this.prisma.conversation.findMany({
         where: {
           connectionId,
-          status: { in: ['waiting', 'in_progress', 'transferred'] },
+          status: {
+            in: ['waiting', 'in_progress', 'transferred', 'resolved', 'closed'],
+          },
         },
         include: {
           contact: { select: { phoneNumber: true } },
@@ -2583,7 +2585,9 @@ class BaileysManager {
       const conversations = await this.prisma.conversation.findMany({
         where: {
           connectionId,
-          status: { in: ['waiting', 'in_progress', 'transferred'] },
+          status: {
+            in: ['waiting', 'in_progress', 'transferred', 'resolved', 'closed'],
+          },
           lastMessageAt: {
             gte: new Date(Date.now() - 24 * 60 * 60 * 1000), // Últimas 24 horas
           },
