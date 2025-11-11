@@ -72,7 +72,7 @@ export class ConversationController {
     reply: FastifyReply
   ) => {
     const { conversationId } = request.params;
-    const { departmentId } = validate(acceptConversationSchema, request.body);
+    const { departmentId } = validate(acceptConversationSchema, request.body ?? {});
     const userId = request.user!.userId;
 
     const conversation = await this.conversationService.acceptConversation(
