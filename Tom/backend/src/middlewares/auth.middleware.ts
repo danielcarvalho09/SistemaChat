@@ -1,10 +1,6 @@
-import '@fastify/cookie';
 import { FastifyRequest, FastifyReply } from 'fastify';
-import { verifyAccessToken, extractTokenFromHeader } from '../utils/jwt.js';
-import { getPrismaClient } from '../config/database.js';
-import { logger } from '../config/logger.js';
+import { PUBLIC_REQUEST_USER } from '../constants/public-user.js';
 
-// Estender FastifyRequest para incluir user
 declare module 'fastify' {
   interface FastifyRequest {
     user?: {
@@ -16,150 +12,24 @@ declare module 'fastify' {
   }
 }
 
-/**
- * Middleware de autenticação JWT
- * Verifica se o token é válido e adiciona informações do usuário à request
- */
+const attachPublicUser = (request: FastifyRequest): void => {
+  request.user = { ...PUBLIC_REQUEST_USER };
+};
+
 export const authenticate = async (
   request: FastifyRequest,
-  reply: FastifyReply
+  _reply: FastifyReply
 ): Promise<void> => {
-  try {
-    const cookieToken = request.cookies?.accessToken;
-    const headerToken = extractTokenFromHeader(request.headers.authorization);
-    const token = cookieToken || headerToken;
-
-    if (!token) {
-      return reply.status(401).send({
-        statusCode: 401,
-        message: 'Authentication token is required',
-      });
-    }
-
-    // Verificar e decodificar token
-    const decoded = verifyAccessToken(token);
-
-    // Buscar usuário no banco para verificar se ainda está ativo
-    const prisma = getPrismaClient();
-    const user = await prisma.user.findUnique({
-      where: { id: decoded.userId },
-      include: {
-        roles: {
-          include: {
-            role: {
-              include: {
-                permissions: {
-                  include: {
-                    permission: true,
-                  },
-                },
-              },
-            },
-          },
-        },
-      },
-    });
-
-    if (!user || !user.isActive) {
-      return reply.status(401).send({
-        statusCode: 401,
-        message: 'User not found or inactive',
-      });
-    }
-
-    // Extrair roles e permissões do banco (não do JWT)
-    const roles = user.roles.map((userRole) => userRole.role.name);
-    const permissions = user.roles.flatMap((userRole) =>
-      userRole.role.permissions.map((rp) => rp.permission.name)
-    );
-
-    // Adicionar informações do usuário à request
-    request.user = {
-      userId: user.id,
-      email: user.email,
-      roles: roles, // Usar roles do banco, não do JWT
-      permissions: [...new Set(permissions)], // Remove duplicatas
-    };
-  } catch (error: any) {
-    logger.error('Authentication error:', error);
-    return reply.status(401).send({
-      statusCode: 401,
-      message: error.message || 'Invalid or expired token',
-    });
-  }
+  attachPublicUser(request);
 };
 
-/**
- * Middleware opcional de autenticação
- * Não retorna erro se não houver token, apenas não adiciona user à request
- */
 export const optionalAuthenticate = async (
   request: FastifyRequest,
-  reply: FastifyReply
+  _reply: FastifyReply
 ): Promise<void> => {
-  try {
-    const cookieToken = request.cookies?.accessToken;
-    const token = cookieToken || extractTokenFromHeader(request.headers.authorization);
-
-    if (token) {
-      const decoded = verifyAccessToken(token);
-      const prisma = getPrismaClient();
-      const user = await prisma.user.findUnique({
-        where: { id: decoded.userId },
-        include: {
-          roles: {
-            include: {
-              role: {
-                include: {
-                  permissions: {
-                    include: {
-                      permission: true,
-                    },
-                  },
-                },
-              },
-            },
-          },
-        },
-      });
-
-      if (user && user.isActive) {
-        const permissions = user.roles.flatMap((userRole) =>
-          userRole.role.permissions.map((rp) => rp.permission.name)
-        );
-
-        request.user = {
-          userId: user.id,
-          email: user.email,
-          roles: decoded.roles,
-          permissions: [...new Set(permissions)],
-        };
-      }
-    }
-  } catch (error) {
-    // Silenciosamente ignora erros de autenticação
-    logger.debug('Optional authentication failed:', error);
-  }
+  attachPublicUser(request);
 };
 
-/**
- * Middleware que requer autenticação
- */
 export const requireAuth = authenticate;
 
-/**
- * Middleware que requer role de admin
- */
-export const requireAdmin = async (
-  request: FastifyRequest,
-  reply: FastifyReply
-): Promise<void> => {
-  await authenticate(request, reply);
-  
-  if (!request.user?.roles.includes('admin')) {
-    return reply.status(403).send({
-      statusCode: 403,
-      message: 'Admin access required',
-    });
-  }
-};
+export const requireAdmin = authenticate;
