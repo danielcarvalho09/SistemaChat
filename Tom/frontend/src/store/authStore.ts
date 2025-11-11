@@ -5,24 +5,27 @@ import api from '../lib/axios';
 import socketService from '../lib/socket';
 
 const DEFAULT_USER_NAME = import.meta.env.VITE_APP_USER_NAME || 'Administrador';
-const DEFAULT_USER_EMAIL = import.meta.env.VITE_APP_USER_EMAIL || 'admin@empresa.com';
 
-const DEFAULT_USER: User = {
-  id: 'public-user',
-  email: DEFAULT_USER_EMAIL,
-  name: DEFAULT_USER_NAME,
-  avatar: null,
-  status: 'online',
-  isActive: true,
-  roles: [
-    {
-      id: 'role-public',
-      name: 'admin',
-      description: null,
-    },
-  ],
-  createdAt: new Date(0).toISOString(),
-  updatedAt: new Date(0).toISOString(),
+const buildUser = (email: string, name?: string): User => {
+  const derivedName = name?.trim() || DEFAULT_USER_NAME || email.split('@')[0] || 'Usuário';
+  const timestamp = new Date().toISOString();
+  return {
+    id: `user-${email}`,
+    email,
+    name: derivedName,
+    avatar: null,
+    status: 'online',
+    isActive: true,
+    roles: [
+      {
+        id: 'role-public',
+        name: 'admin',
+        description: null,
+      },
+    ],
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  };
 };
 
 const applyUserHeaders = (user: User | null) => {
@@ -39,15 +42,12 @@ const applyUserHeaders = (user: User | null) => {
   }
 };
 
-applyUserHeaders(DEFAULT_USER);
-
 interface AuthState {
   user: User | null;
   isAuthenticated: boolean;
   isLoading: boolean;
   error: string | null;
 
-  // Actions
   login: (email: string, password: string) => Promise<void>;
   register: (email: string, password: string, name: string) => Promise<void>;
   logout: () => Promise<void>;
@@ -59,23 +59,19 @@ interface AuthState {
 export const useAuthStore = create<AuthState>()(
   persist(
     (set, get) => ({
-      user: DEFAULT_USER,
-      isAuthenticated: true,
+      user: null,
+      isAuthenticated: false,
       isLoading: false,
       error: null,
 
       login: async (email: string, _password: string) => {
         set({ isLoading: true, error: null });
         try {
-          // Opcionalmente ainda chamamos o endpoint para manter compatibilidade
           await api.post('/auth/login', { email, password: _password });
         } catch (error) {
-          // Ignorar erros (autenticação desativada)
+          /* ignora erros - auth desativada */
         } finally {
-          const user = {
-            ...DEFAULT_USER,
-            email,
-          };
+          const user = buildUser(email);
           applyUserHeaders(user);
           set({
             user,
@@ -91,13 +87,9 @@ export const useAuthStore = create<AuthState>()(
         try {
           await api.post('/auth/register', { email, password, name });
         } catch (error) {
-          // Ignorar erros de registro (autenticação desativada)
+          /* ignora erros - auth desativada */
         } finally {
-          const user = {
-            ...DEFAULT_USER,
-            email,
-            name,
-          };
+          const user = buildUser(email, name);
           applyUserHeaders(user);
           set({
             user,
@@ -112,14 +104,14 @@ export const useAuthStore = create<AuthState>()(
         try {
           await api.post('/auth/logout');
         } catch (error) {
-          // Ignorar erros
+          /* ignora erros */
         } finally {
           localStorage.removeItem('user');
           socketService.disconnect();
           applyUserHeaders(null);
           set({
             user: null,
-            isAuthenticated: true,
+            isAuthenticated: false,
             error: null,
           });
         }
@@ -127,7 +119,7 @@ export const useAuthStore = create<AuthState>()(
 
       setUser: (user: User) => {
         applyUserHeaders(user);
-        set({ user });
+        set({ user, isAuthenticated: true });
       },
 
       clearError: () => {
@@ -138,14 +130,13 @@ export const useAuthStore = create<AuthState>()(
         try {
           await api.get('/auth/me');
         } catch (error) {
-          // Ignorar 401 - continuamos usando o usuário padrão
+          /* ignora 401 */
         } finally {
-          const fallbackUser = get().user ?? DEFAULT_USER;
-          applyUserHeaders(fallbackUser);
-          set((state) => ({
-            user: state.user ?? DEFAULT_USER,
-            isAuthenticated: true,
-          }));
+          const currentUser = get().user;
+          applyUserHeaders(currentUser ?? null);
+          set({
+            isAuthenticated: Boolean(currentUser),
+          });
         }
       },
     }),
@@ -155,11 +146,11 @@ export const useAuthStore = create<AuthState>()(
         user: state.user,
         isAuthenticated: state.isAuthenticated,
       }),
-      onRehydrateStorage: () => (state) => {
-        if (state?.user) {
+      onRehydrateStorage: () => (state, error) => {
+        if (!error && state?.user) {
           applyUserHeaders(state.user);
         } else {
-          applyUserHeaders(DEFAULT_USER);
+          applyUserHeaders(null);
         }
       },
     }
