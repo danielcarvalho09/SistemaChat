@@ -1,7 +1,14 @@
 import jwt from 'jsonwebtoken';
 import { config } from '../config/env.js';
-import { JWTPayload, AuthTokens, RefreshTokenPayload } from '../models/types.js';
+import { JWTPayload, AuthTokens } from '../models/types.js';
 import { logger } from '../config/logger.js';
+
+export interface RefreshTokenPayload {
+  userId: string;
+  fingerprint?: string | null;
+  iat?: number;
+  exp?: number;
+}
 
 /**
  * Gera access token e refresh token para um usuário

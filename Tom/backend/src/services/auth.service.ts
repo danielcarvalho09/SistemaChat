@@ -1,14 +1,13 @@
 import crypto from 'crypto';
 import { getPrismaClient } from '../config/database.js';
 import { hashPassword, comparePassword } from '../utils/password.js';
-import { generateTokens, verifyRefreshToken } from '../utils/jwt.js';
+import { generateTokens, verifyRefreshToken, RefreshTokenPayload } from '../utils/jwt.js';
 import {
   LoginRequest,
   RegisterRequest,
   AuthTokens,
   UserResponse,
   JWTPayload,
-  RefreshTokenPayload,
 } from '../models/types.js';
 import { UnauthorizedError, ConflictError, NotFoundError } from '../middlewares/error.middleware.js';
 import { logger } from '../config/logger.js';
@@ -21,7 +20,6 @@ interface LoginContext {
 
 const FAILED_LOGIN_MAX_ATTEMPTS = 5;
 const FAILED_LOGIN_WINDOW_MS = 15 * 60 * 1000; // 15 minutos
-const SESSION_TTL_MS = 24 * 60 * 60 * 1000; // 24 horas
 
 export class AuthService {
   private prisma = getPrismaClient();
@@ -64,39 +62,6 @@ export class AuthService {
     return record.count;
   }
 
-  private buildSessionUpdate(data: {
-    fingerprint?: string;
-    ip?: string;
-    userAgent?: string;
-    csrfToken?: string;
-    failedCount?: number;
-    failedAt?: Date;
-  }) {
-    const update: Record<string, unknown> = {
-      updatedAt: new Date(),
-      expiresAt: new Date(Date.now() + SESSION_TTL_MS),
-    };
-
-    if (data.fingerprint) {
-      update.fingerprint = data.fingerprint;
-    }
-    if (data.ip) {
-      update.ipAddress = data.ip;
-    }
-    if (data.userAgent) {
-      update.userAgent = data.userAgent;
-    }
-    if (data.csrfToken) {
-      update.csrfToken = data.csrfToken;
-    }
-    if (typeof data.failedCount === 'number') {
-      update.failedCount = data.failedCount;
-      update.lastFailedAt = data.failedAt ?? new Date();
-    }
-
-    return update;
-  }
-
   private async upsertSession(
     userId: string,
     data: {
@@ -108,20 +73,10 @@ export class AuthService {
       failedAt?: Date;
     },
   ) {
-    await this.prisma.userSession.upsert({
-      where: { userId },
-      create: {
-        userId,
-        fingerprint: data.fingerprint,
-        ipAddress: data.ip,
-        userAgent: data.userAgent,
-        csrfToken: data.csrfToken,
-        expiresAt: new Date(Date.now() + SESSION_TTL_MS),
-        failedCount: data.failedCount ?? 0,
-        lastFailedAt: data.failedAt,
-      },
-      update: this.buildSessionUpdate(data),
-    });
+    // Session persistence disabled - intentionally left blank
+    void userId;
+    void data;
+    return;
   }
 
   async issueCsrfToken(
@@ -346,16 +301,6 @@ export class AuthService {
       throw new UnauthorizedError('Security validation failed');
     }
 
-    const session = await this.prisma.userSession.findUnique({
-      where: { userId: storedToken.user.id },
-    });
-
-    if (session?.fingerprint && fingerprint && session.fingerprint !== fingerprint) {
-      logger.error('Session fingerprint mismatch', { userId: storedToken.user.id });
-      await this.prisma.refreshToken.deleteMany({ where: { userId: storedToken.user.id } });
-      throw new UnauthorizedError('Security validation failed');
-    }
-
     const roles = storedToken.user.roles.map((ur) => ur.role.name);
     const payload: JWTPayload = {
       userId: storedToken.user.id,
@@ -387,10 +332,7 @@ export class AuthService {
 
   async revokeAllTokens(userId: string): Promise<void> {
     await this.prisma.refreshToken.deleteMany({ where: { userId } });
-    await this.prisma.userSession.updateMany({
-      where: { userId },
-      data: { csrfToken: null, fingerprint: null },
-    });
+    // Sessions disabled
   }
 
   async logout(userId: string, refreshToken?: string): Promise<void> {
@@ -412,13 +354,7 @@ export class AuthService {
       data: { status: 'offline' },
     });
 
-    await this.prisma.userSession.updateMany({
-      where: { userId },
-      data: {
-        csrfToken: null,
-        expiresAt: new Date(Date.now() + SESSION_TTL_MS),
-      },
-    });
+    // Sessions disabled
 
     logger.info(`User logged out: ${userId}`);
   }
