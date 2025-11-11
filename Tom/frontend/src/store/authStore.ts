@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
+import { persist, createJSONStorage } from 'zustand/middleware';
 import { User } from '../types';
 import api from '../lib/axios';
 import socketService from '../lib/socket';
@@ -106,7 +106,6 @@ export const useAuthStore = create<AuthState>()(
         } catch (error) {
           /* ignora erros */
         } finally {
-          localStorage.removeItem('user');
           socketService.disconnect();
           applyUserHeaders(null);
           set({
@@ -142,6 +141,7 @@ export const useAuthStore = create<AuthState>()(
     }),
     {
       name: 'auth-storage',
+      storage: createJSONStorage(() => sessionStorage),
       partialize: (state) => ({
         user: state.user,
         isAuthenticated: state.isAuthenticated,

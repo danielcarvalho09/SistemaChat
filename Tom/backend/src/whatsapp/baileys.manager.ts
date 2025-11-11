@@ -1013,8 +1013,8 @@ class BaileysManager {
         if (status === 3) newStatus = 'delivered'; // DELIVERY_ACK
         if (status === 4) newStatus = 'read'; // READ
 
-        // Atualizar status no banco
-        await this.prisma.message.updateMany({
+        // Atualizar status no banco e buscar conversationId
+        const updatedMessages = await this.prisma.message.updateMany({
           where: {
             externalId: messageId,
             connectionId,
@@ -1026,14 +1026,27 @@ class BaileysManager {
 
         logger.info(`[Baileys] Message ${messageId} status updated to ${newStatus}`);
 
+        // Buscar a mensagem para obter o conversationId
+        const message = await this.prisma.message.findFirst({
+          where: {
+            externalId: messageId,
+            connectionId,
+          },
+          select: {
+            id: true,
+            conversationId: true,
+          },
+        });
+
         // Emitir evento via Socket.IO para atualizar frontend em tempo real
         const socketServer = getSocketServer();
-        if (socketServer) {
+        if (socketServer && message) {
           socketServer.getIO().emit('message_status_update', {
-            messageId,
+            conversationId: message.conversationId,
+            messageId: message.id,
             status: newStatus,
-            connectionId,
           });
+          logger.info(`[Baileys] Emitted message_status_update for conversation ${message.conversationId}`);
         }
       }
     } catch (error) {

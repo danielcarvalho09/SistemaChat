@@ -15,7 +15,7 @@ const WebSocketContext = createContext<WebSocketContextType>({
 });
 
 export function WebSocketProvider({ children }: { children: React.ReactNode }) {
-  const { addMessage, addConversation, updateConversation, fetchConversations } = useConversationStore();
+  const { addMessage, addConversation, updateConversation, updateMessage, fetchConversations } = useConversationStore();
   const { isAuthenticated } = useAuthStore();
   const [isConnected, setIsConnected] = React.useState(false);
   const hasInitialized = useRef(false);
@@ -84,21 +84,30 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
         return;
       }
       
-      // Verificar duplicação
+      // Verificar se mensagem já existe
       const { messages } = useConversationStore.getState();
       const conversationMessages = messages[data.conversationId] || [];
-      const exists = conversationMessages.some(m => m.id === data.message.id);
+      const existingMessage = conversationMessages.find(m => m.id === data.message.id);
       
-      if (!exists) {
+      if (existingMessage) {
+        // Mensagem já existe - atualizar (pode ser mudança de status: sending -> sent)
+        console.log('🔄 Mensagem já existe, atualizando status:', {
+          id: data.message.id,
+          oldStatus: existingMessage.status,
+          newStatus: data.message.status
+        });
+        updateMessage(data.conversationId, data.message.id, data.message);
+        console.log('✅ Mensagem atualizada');
+      } else {
+        // Nova mensagem - adicionar
         addMessage(data.conversationId, data.message);
         console.log('✅ Mensagem adicionada');
-        
-        updateConversation(data.conversationId, {
-          lastMessageAt: data.message.timestamp || new Date().toISOString(),
-        });
-      } else {
-        console.log('⚠️ Mensagem já existe, ignorando duplicação');
       }
+      
+      // Atualizar timestamp da conversa
+      updateConversation(data.conversationId, {
+        lastMessageAt: data.message.timestamp || new Date().toISOString(),
+      });
     });
 
     // Escutar novas conversas
@@ -131,6 +140,12 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
     // Escutar status de mensagem
     socket.on('message_status_update', (data: { conversationId: string; messageId: string; status: string }) => {
       console.log('✅ Status de mensagem atualizado via WebSocket:', data);
+      
+      // Atualizar status da mensagem no store
+      if (data.conversationId && data.messageId && data.status) {
+        updateMessage(data.conversationId, data.messageId, { status: data.status as any });
+        console.log(`✅ Mensagem ${data.messageId} atualizada para status: ${data.status}`);
+      }
     });
 
     // Cleanup APENAS ao deslogar (não ao trocar de rota)
@@ -150,7 +165,7 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
         socketService.disconnect();
       }
     };
-  }, [isAuthenticated, addMessage, addConversation, updateConversation, fetchConversations]);
+  }, [isAuthenticated, addMessage, addConversation, updateConversation, updateMessage, fetchConversations]);
 
   // Função pública para forçar sincronização manual
   const syncMessages = async () => {
