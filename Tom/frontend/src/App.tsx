@@ -13,7 +13,7 @@ import { ConnectionStatus } from './components/ConnectionStatus';
 import { WebSocketProvider } from './contexts/WebSocketContext';
 
 function App() {
-  const { isAuthenticated, fetchMe } = useAuthStore();
+  const { isAuthenticated, fetchMe, logout } = useAuthStore();
   const hasCheckedAuth = useRef(false);
 
   // Verificar autenticação ao carregar (apenas uma vez)
@@ -21,9 +21,17 @@ function App() {
     if (hasCheckedAuth.current) return;
     hasCheckedAuth.current = true;
 
-    fetchMe();
+    const token = localStorage.getItem('accessToken');
+    
+    // Se tem token, validar
+    if (token) {
+      fetchMe();
+    } else if (isAuthenticated) {
+      // Se não tem token mas está marcado como autenticado, fazer logout
+      logout();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, []); // Executar apenas uma vez ao montar
 
   return (
     <WebSocketProvider>

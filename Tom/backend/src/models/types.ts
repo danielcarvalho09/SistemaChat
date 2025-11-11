@@ -11,11 +11,6 @@ export interface AuthTokens {
   refreshToken: string;
 }
 
-export interface RefreshTokenPayload {
-  userId: string;
-  fingerprint?: string;
-}
-
 export interface LoginRequest {
   email: string;
   password: string;

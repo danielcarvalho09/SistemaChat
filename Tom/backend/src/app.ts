@@ -91,7 +91,6 @@ export async function buildApp(): Promise<FastifyInstance> {
 
   // Cookies
   await app.register(cookie, {
-    hook: 'onRequest',
     parseOptions: {
       httpOnly: true,
       sameSite: 'strict',
@@ -115,8 +114,8 @@ export async function buildApp(): Promise<FastifyInstance> {
 
   // Servir arquivos estáticos (uploads)
   await app.register(fastifyStatic, {
-    root: path.join(process.cwd(), 'uploads'),
-    prefix: '/uploads/',
+    root: path.join(process.cwd(), 'secure-uploads'),
+    prefix: '/secure-uploads/',
     setHeaders: (res, path) => {
       // Configurar CORS para arquivos estáticos
       const allowedOrigin = Array.isArray(config.security.corsOrigin) 

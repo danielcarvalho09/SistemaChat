@@ -54,7 +54,7 @@ export class UploadController {
   private readonly uploadsDir: string;
 
   constructor() {
-    this.uploadsDir = path.join(process.cwd(), 'uploads');
+    this.uploadsDir = path.join(process.cwd(), 'secure-uploads');
 
     if (!fs.existsSync(this.uploadsDir)) {
       fs.mkdirSync(this.uploadsDir, { recursive: true, mode: 0o700 });
@@ -70,18 +70,6 @@ export class UploadController {
       return `${base.slice(0, 255 - ext.length)}${ext}`;
     }
     return sanitized;
-  }
-
-  private resolveUploadPath(filename: string): string {
-    const sanitized = this.sanitizeFileName(filename);
-    const resolved = path.resolve(path.join(this.uploadsDir, sanitized));
-    const uploadsRoot = path.resolve(this.uploadsDir);
-
-    if (!resolved.startsWith(uploadsRoot)) {
-      throw new Error('Invalid file path');
-    }
-
-    return resolved;
   }
 
   private async detectMime(buffer: Buffer): Promise<{ isValid: boolean; mime?: string; error?: string }> {
@@ -115,7 +103,7 @@ export class UploadController {
   checkFile = async (request: FastifyRequest<{ Params: { filename: string } }>, reply: FastifyReply) => {
     try {
       const safeName = this.sanitizeFileName(request.params.filename);
-      const filepath = this.resolveUploadPath(safeName);
+      const filepath = path.join(this.uploadsDir, safeName);
       const exists = fs.existsSync(filepath);
 
       return reply.status(200).send({
@@ -168,14 +156,14 @@ export class UploadController {
       }
 
       const uniqueName = `${Date.now()}_${crypto.randomBytes(12).toString('hex')}${ext}`;
-      const filepath = this.resolveUploadPath(uniqueName);
+      const filepath = path.join(this.uploadsDir, uniqueName);
       savedPath = filepath;
 
       fs.writeFileSync(filepath, buffer, { mode: 0o600 });
 
       const response = {
         filename: uniqueName,
-        url: `/uploads/${uniqueName}`,
+        url: `/secure-uploads/${uniqueName}`,
         mimetype: typeCheck.mime,
         size: total,
         hash: crypto.createHash('sha256').update(buffer).digest('hex'),
@@ -223,7 +211,7 @@ export class UploadController {
 
       const existingFilename = message.mediaUrl.split('/').pop();
       if (existingFilename) {
-        const existingPath = this.resolveUploadPath(existingFilename);
+        const existingPath = path.join(this.uploadsDir, this.sanitizeFileName(existingFilename));
         if (fs.existsSync(existingPath)) {
           return reply.status(200).send({
             success: true,
@@ -248,10 +236,10 @@ export class UploadController {
 
       const ext = path.extname(message.mediaUrl) || '';
       const filename = `${Date.now()}_redownload${ext}`;
-      const filepath = this.resolveUploadPath(filename);
+      const filepath = path.join(this.uploadsDir, filename);
       fs.writeFileSync(filepath, buffer, { mode: 0o600 });
 
-      const newUrl = `/uploads/${filename}`;
+      const newUrl = `/secure-uploads/${filename}`;
       await prisma.message.update({ where: { id: message.id }, data: { mediaUrl: newUrl } });
 
       logger.info('Media re-downloaded', {

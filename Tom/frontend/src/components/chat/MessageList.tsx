@@ -2,7 +2,6 @@ import { useState } from 'react';
 import { format } from 'date-fns';
 import { Check, CheckCheck, FileText, Download, ExternalLink, Image as ImageIcon, Loader2, CornerDownLeft } from 'lucide-react';
 import { cn } from '../../lib/utils';
-import api from '../../lib/axios';
 import type { Message as ChatMessage, QuotedMessage } from '../../types';
 
 // Componente para carregar imagem sob demanda
@@ -15,8 +14,17 @@ function ImageMessage({ mediaUrl, toAbsoluteUrl, messageId }: { mediaUrl: string
   const checkImageExists = async () => {
     try {
       const filename = mediaUrl.split('/').pop();
-      const response = await api.get(`/upload/check/${filename}`);
-      setImageExists(response.data?.data?.exists || false);
+      const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+      const token = localStorage.getItem('accessToken');
+      
+      const response = await fetch(`${API_URL}/api/v1/upload/check/${filename}`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      });
+      
+      const data = await response.json();
+      setImageExists(data.data?.exists || false);
     } catch (error) {
       console.error('Error checking image:', error);
       setImageExists(false);
@@ -30,15 +38,26 @@ function ImageMessage({ mediaUrl, toAbsoluteUrl, messageId }: { mediaUrl: string
     if (imageExists === false) {
       setIsRedownloading(true);
       try {
-        const response = await api.post(`/upload/redownload/${messageId}`);
-        if (response.data?.success) {
+        const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+        const token = localStorage.getItem('accessToken');
+        
+        const response = await fetch(`${API_URL}/api/v1/upload/redownload/${messageId}`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+          },
+        });
+        
+        const data = await response.json();
+        
+        if (response.ok) {
           // Imagem re-baixada com sucesso
           setImageExists(true);
           alert('Imagem baixada com sucesso!');
           // Recarregar para mostrar a imagem
           window.location.reload();
         } else {
-          alert(response.data?.message || 'Não foi possível baixar a imagem novamente');
+          alert(data.message || 'Não foi possível baixar a imagem novamente');
         }
       } catch (error) {
         console.error('Error re-downloading:', error);

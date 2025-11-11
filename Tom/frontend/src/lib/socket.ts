@@ -5,6 +5,7 @@ const WS_URL = import.meta.env.VITE_WS_URL || 'http://localhost:3000';
 
 class SocketService {
   private socket: Socket | null = null;
+  private token: string | null = null;
   private heartbeatInterval: NodeJS.Timeout | null = null;
   private syncInterval: NodeJS.Timeout | null = null;
   private reconnectAttempts: number = 0;
@@ -17,7 +18,9 @@ class SocketService {
   private lastSyncTime: number = Date.now();
   private forceSyncOnNextVisible: boolean = false;
 
-  connect(token?: string): Socket {
+  connect(token: string): Socket {
+    this.token = token;
+
     if (this.socket?.connected) {
       console.log('✅ Socket já conectado, reutilizando...');
       return this.socket;
@@ -33,7 +36,9 @@ class SocketService {
     console.log(`🔌 Conectando ao WebSocket: ${WS_URL}`);
     
     this.socket = io(WS_URL, {
-      auth: token ? { token } : undefined,
+      auth: {
+        token,
+      },
       transports: ['websocket', 'polling'],
       reconnection: true,
       reconnectionDelay: 1000,        // Começar com 1s
@@ -68,7 +73,7 @@ class SocketService {
       console.log(`🔄 Tentando reconectar em ${delay/1000}s (tentativa #${this.reconnectAttempts})...`);
       
       setTimeout(() => {
-        if (this.socket) {
+        if (this.token && this.socket) {
           this.socket.connect();
         }
       }, delay);
@@ -242,7 +247,7 @@ class SocketService {
     // Detectar quando rede volta online
     window.addEventListener('online', () => {
       console.log('🌐 Rede voltou online - reconectando...');
-        if (!this.socket?.connected) {
+      if (!this.socket?.connected && this.token) {
         this.socket?.connect();
       }
     });

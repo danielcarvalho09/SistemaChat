@@ -1,21 +1,23 @@
 import { useEffect } from 'react';
 import { socketService } from '../lib/socket';
 import { useConversationStore } from '../store/conversationStore';
-import { useAuthStore } from '../store/authStore';
 import { Message, Conversation } from '../types';
 
 export function useWebSocket() {
   const { addMessage, addConversation, updateConversation, updateMessage, fetchConversations } = useConversationStore();
 
-  const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
-
   useEffect(() => {
-    if (!isAuthenticated) {
-      console.warn('⚠️ Usuário não autenticado, WebSocket suspenso');
+    // Pegar token do localStorage (chave correta: accessToken)
+    const token = localStorage.getItem('accessToken');
+    if (!token) {
+      console.warn('⚠️ No token found, skipping WebSocket connection');
       return;
     }
 
-    socketService.connect();
+    console.log('✅ Token found, connecting to WebSocket...');
+    
+    // Conectar ao WebSocket
+    socketService.connect(token);
 
     // Escutar novas mensagens
     socketService.on('new_message', (data: { conversationId: string; message: Message }) => {
@@ -91,5 +93,5 @@ export function useWebSocket() {
       socketService.off('conversation_assigned');
       socketService.off('message_status_update');
     };
-  }, [isAuthenticated, addMessage, addConversation, updateConversation, updateMessage, fetchConversations]);
+  }, [addMessage, addConversation, updateConversation, updateMessage, fetchConversations]);
 }

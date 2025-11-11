@@ -8,7 +8,6 @@ import { TransferModal } from './TransferModal';
 import { ConversationTagMenu } from '../tags/ConversationTagMenu';
 import './whatsapp-bg.css';
 import type { Message } from '../../types';
-import api from '../../lib/axios';
 
 interface ChatAreaProps {
   conversationId: string;
@@ -60,17 +59,26 @@ export function ChatArea({ conversationId, onToggleDetails }: ChatAreaProps) {
         const formData = new FormData();
         formData.append('file', file);
 
-        const uploadResponse = await api.post('/upload', formData, {
-          headers: { 'Content-Type': 'multipart/form-data' },
-        });
-
-        if (!uploadResponse.data?.success) {
-          throw new Error(uploadResponse.data?.message || 'Erro ao fazer upload do arquivo');
+        const token = localStorage.getItem('accessToken');
+        if (!token) {
+          throw new Error('Token não encontrado. Faça login novamente.');
         }
 
-        const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:3000';
-        const uploadedPath: string = uploadResponse.data.data.url;
-        const mediaUrl = `${apiBase}${uploadedPath.startsWith('/') ? '' : '/'}${uploadedPath}`;
+        const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+        const uploadResponse = await fetch(`${API_URL}/api/v1/upload`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+          },
+          body: formData,
+        });
+
+        if (!uploadResponse.ok) {
+          throw new Error('Erro ao fazer upload do arquivo');
+        }
+
+        const uploadData = await uploadResponse.json();
+        const mediaUrl = `${API_URL}${uploadData.data.url}`;
 
         // Determinar tipo de mensagem
         let messageType = 'document';
@@ -83,12 +91,23 @@ export function ChatArea({ conversationId, onToggleDetails }: ChatAreaProps) {
         }
 
         // Enviar mensagem com mídia
-        await api.post(`/conversations/${conversationId}/messages`, {
-          content: content || file.name,
-          messageType,
-          mediaUrl,
-          quotedMessageId: replyingTo?.id || undefined,
+        const messageResponse = await fetch(`${API_URL}/api/v1/conversations/${conversationId}/messages`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            content: content || file.name,
+            messageType,
+            mediaUrl,
+            quotedMessageId: replyingTo?.id || undefined,
+          }),
         });
+
+        if (!messageResponse.ok) {
+          throw new Error('Erro ao enviar mensagem');
+        }
         // Não adicionar manualmente - deixar o WebSocket fazer isso para evitar duplicação
         setReplyingTo(null);
       } else {

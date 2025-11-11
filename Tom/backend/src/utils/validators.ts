@@ -22,6 +22,10 @@ export const loginSchema = z.object({
   password: z.string().min(1, 'Password is required'),
 });
 
+export const refreshTokenSchema = z.object({
+  refreshToken: z.string().min(1, 'Refresh token is required'),
+});
+
 // ==================== VALIDADORES DE CONEXÃO ====================
 
 export const createConnectionSchema = z.object({
