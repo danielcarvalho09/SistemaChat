@@ -25,6 +25,22 @@ const DEFAULT_USER: User = {
   updatedAt: new Date(0).toISOString(),
 };
 
+const applyUserHeaders = (user: User | null) => {
+  if (user) {
+    api.defaults.headers.common['X-User-Email'] = user.email;
+    if (user.name) {
+      api.defaults.headers.common['X-User-Name'] = user.name;
+    } else {
+      delete api.defaults.headers.common['X-User-Name'];
+    }
+  } else {
+    delete api.defaults.headers.common['X-User-Email'];
+    delete api.defaults.headers.common['X-User-Name'];
+  }
+};
+
+applyUserHeaders(DEFAULT_USER);
+
 interface AuthState {
   user: User | null;
   isAuthenticated: boolean;
@@ -60,6 +76,7 @@ export const useAuthStore = create<AuthState>()(
             ...DEFAULT_USER,
             email,
           };
+          applyUserHeaders(user);
           set({
             user,
             isAuthenticated: true,
@@ -81,6 +98,7 @@ export const useAuthStore = create<AuthState>()(
             email,
             name,
           };
+          applyUserHeaders(user);
           set({
             user,
             isAuthenticated: true,
@@ -98,6 +116,7 @@ export const useAuthStore = create<AuthState>()(
         } finally {
           localStorage.removeItem('user');
           socketService.disconnect();
+          applyUserHeaders(null);
           set({
             user: null,
             isAuthenticated: true,
@@ -107,6 +126,7 @@ export const useAuthStore = create<AuthState>()(
       },
 
       setUser: (user: User) => {
+        applyUserHeaders(user);
         set({ user });
       },
 
@@ -120,6 +140,8 @@ export const useAuthStore = create<AuthState>()(
         } catch (error) {
           // Ignorar 401 - continuamos usando o usuário padrão
         } finally {
+          const fallbackUser = get().user ?? DEFAULT_USER;
+          applyUserHeaders(fallbackUser);
           set((state) => ({
             user: state.user ?? DEFAULT_USER,
             isAuthenticated: true,
@@ -133,6 +155,13 @@ export const useAuthStore = create<AuthState>()(
         user: state.user,
         isAuthenticated: state.isAuthenticated,
       }),
+      onRehydrateStorage: () => (state) => {
+        if (state?.user) {
+          applyUserHeaders(state.user);
+        } else {
+          applyUserHeaders(DEFAULT_USER);
+        }
+      },
     }
   )
 );
