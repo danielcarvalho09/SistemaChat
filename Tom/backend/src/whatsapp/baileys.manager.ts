@@ -89,8 +89,11 @@ class BaileysManager {
   private prisma = getPrismaClient();
   private reconnectionLocks: Map<string, boolean> = new Map(); // Previne reconexões simultâneas
   private syncRetryQueue: Map<string, IncomingRetryItem> = new Map(); // Fila de retry para sincronização
-  private readonly MAX_RECONNECT_ATTEMPTS = 10;
+  private readonly MAX_RECONNECT_ATTEMPTS = 15; // Aumentado de 10 para 15
   private readonly QR_RESET_DELAY_MS = 2000;
+  private circuitBreaker: Map<string, { failures: number; lastFailure: Date; state: 'closed' | 'open' | 'half-open' }> = new Map();
+  private readonly CIRCUIT_BREAKER_THRESHOLD = 5; // Abrir circuit após 5 falhas consecutivas
+  private readonly CIRCUIT_BREAKER_TIMEOUT = 60000; // 1 minuto antes de tentar novamente
 
   /**
    * Cria um novo cliente Baileys para uma conexão
@@ -378,6 +381,9 @@ class BaileysManager {
 
       // Resetar contador de reconexão ao conectar com sucesso
       this.resetReconnectionAttempts(connectionId);
+      
+      // ✅ Resetar circuit breaker após conexão bem-sucedida
+      this.resetCircuitBreaker(connectionId);
 
       let lastDisconnectAt: Date | null = null;
       try {
@@ -455,7 +461,41 @@ class BaileysManager {
       }
 
       // Sessão inválida / credenciais corrompidas (stream:error ack -> badSession)
+      // ✅ TRATAMENTO ESPECÍFICO PARA ERRO 500
       if (statusCode === DisconnectReason.badSession || statusCode === 500) {
+        logger.warn(`[Baileys] ⚠️ Bad session or error 500 detected for ${connectionId}`);
+        
+        // Verificar circuit breaker antes de tentar reconectar
+        const circuitState = this.getCircuitBreakerState(connectionId);
+        
+        if (circuitState === 'open') {
+          logger.warn(`[Baileys] 🚫 Circuit breaker OPEN for ${connectionId} - too many failures, waiting before retry`);
+          await this.updateConnectionStatus(connectionId, 'disconnected', { lastDisconnectAt: disconnectAt });
+          this.emitStatus(connectionId, 'disconnected');
+          
+          // Aguardar timeout do circuit breaker antes de resetar credenciais
+          setTimeout(async () => {
+            logger.info(`[Baileys] 🔄 Circuit breaker timeout expired for ${connectionId}, resetting credentials...`);
+            await this.handleSessionInvalidation(connectionId, 'bad_session', lastDisconnect?.error);
+          }, this.CIRCUIT_BREAKER_TIMEOUT);
+          return;
+        }
+        
+        // Registrar falha no circuit breaker
+        this.recordCircuitBreakerFailure(connectionId);
+        
+        // Tentar reconexão inteligente antes de resetar credenciais
+        const reconnectAttempts = client.reconnectAttempts || 0;
+        const shouldRetry = reconnectAttempts < 3; // Tentar 3 vezes antes de resetar
+        
+        if (shouldRetry) {
+          logger.info(`[Baileys] 🔄 Attempting smart reconnection for ${connectionId} (attempt ${reconnectAttempts + 1}/3)`);
+          await this.attemptReconnection(connectionId);
+          return;
+        }
+        
+        // Após 3 tentativas, resetar credenciais
+        logger.warn(`[Baileys] 🔄 Max retry attempts reached, resetting credentials for ${connectionId}`);
         await this.handleSessionInvalidation(connectionId, 'bad_session', lastDisconnect?.error);
         return;
       }
@@ -1055,6 +1095,67 @@ class BaileysManager {
   }
 
   /**
+   * ✅ CIRCUIT BREAKER: Obtém estado do circuit breaker
+   */
+  private getCircuitBreakerState(connectionId: string): 'closed' | 'open' | 'half-open' {
+    const breaker = this.circuitBreaker.get(connectionId);
+    
+    if (!breaker) {
+      return 'closed'; // Sem histórico de falhas
+    }
+    
+    // Se está aberto, verificar se já passou o timeout
+    if (breaker.state === 'open') {
+      const timeSinceLastFailure = Date.now() - breaker.lastFailure.getTime();
+      
+      if (timeSinceLastFailure >= this.CIRCUIT_BREAKER_TIMEOUT) {
+        // Timeout expirado, mudar para half-open (permitir uma tentativa)
+        breaker.state = 'half-open';
+        logger.info(`[Baileys] 🔓 Circuit breaker HALF-OPEN for ${connectionId} - allowing retry`);
+        return 'half-open';
+      }
+      
+      return 'open'; // Ainda no período de timeout
+    }
+    
+    return breaker.state;
+  }
+
+  /**
+   * ✅ CIRCUIT BREAKER: Registra falha
+   */
+  private recordCircuitBreakerFailure(connectionId: string): void {
+    const breaker = this.circuitBreaker.get(connectionId) || {
+      failures: 0,
+      lastFailure: new Date(),
+      state: 'closed' as const,
+    };
+    
+    breaker.failures += 1;
+    breaker.lastFailure = new Date();
+    
+    // Abrir circuit se atingiu threshold
+    if (breaker.failures >= this.CIRCUIT_BREAKER_THRESHOLD) {
+      breaker.state = 'open';
+      logger.warn(`[Baileys] 🚫 Circuit breaker OPENED for ${connectionId} - ${breaker.failures} consecutive failures`);
+    }
+    
+    this.circuitBreaker.set(connectionId, breaker);
+  }
+
+  /**
+   * ✅ CIRCUIT BREAKER: Reseta contador de falhas (após sucesso)
+   */
+  private resetCircuitBreaker(connectionId: string): void {
+    const breaker = this.circuitBreaker.get(connectionId);
+    
+    if (breaker) {
+      logger.info(`[Baileys] ✅ Circuit breaker RESET for ${connectionId} - connection successful`);
+      this.circuitBreaker.delete(connectionId);
+    }
+  }
+
+  /**
    * Verifica se deve tentar reconectar automaticamente
    */
   private shouldAttemptReconnection(connectionId: string, statusCode?: number): boolean {
@@ -1130,22 +1231,17 @@ class BaileysManager {
     client.isReconnecting = true;
     client.reconnectAttempts = (client.reconnectAttempts || 0) + 1;
 
-    // Estratégia de reconexão com delays maiores para evitar conflitos:
-    // - Primeira tentativa: 3s (dar tempo para a conexão anterior fechar completamente)
-    // - Primeiras 5 tentativas: 5s entre cada
-    // - Tentativas 6-15: 10s entre cada
-    // - Após 15 tentativas: 30s entre cada (para não sobrecarregar)
-    let delay = 3000; // Padrão: 3 segundos
+    // ✅ RETRY EXPONENCIAL COM JITTER para evitar thundering herd
+    // Fórmula: min(maxDelay, baseDelay * 2^attempt) + random jitter
+    const baseDelay = 2000; // 2 segundos base
+    const maxDelay = 60000; // Máximo 60 segundos
+    const exponentialDelay = Math.min(maxDelay, baseDelay * Math.pow(2, client.reconnectAttempts - 1));
     
-    if (client.reconnectAttempts === 1) {
-      delay = 3000; // 1ª tentativa: 3s
-    } else if (client.reconnectAttempts <= 5) {
-      delay = 5000; // Tentativas 2-5: 5s
-    } else if (client.reconnectAttempts <= 15) {
-      delay = 10000; // Tentativas 6-15: 10s
-    } else {
-      delay = 30000; // Após 15 tentativas: 30s
-    }
+    // Adicionar jitter aleatório de ±20% para evitar reconexões simultâneas
+    const jitter = exponentialDelay * 0.2 * (Math.random() * 2 - 1);
+    const delay = Math.max(1000, exponentialDelay + jitter); // Mínimo 1 segundo
+    
+    logger.info(`[Baileys] ⏱️ Calculated delay: ${Math.round(delay)}ms (exponential: ${exponentialDelay}ms, jitter: ${Math.round(jitter)}ms)`);
     
     logger.info(
       `[Baileys] 🔄 Reconnection attempt ${client.reconnectAttempts}/${this.MAX_RECONNECT_ATTEMPTS} for ${connectionId} in ${delay}ms...`
@@ -1226,6 +1322,47 @@ class BaileysManager {
   }
 
   /**
+   * ✅ Valida se a sessão está saudável antes de enviar mensagem
+   */
+  private async validateSession(connectionId: string): Promise<boolean> {
+    try {
+      const client = this.clients.get(connectionId);
+      
+      if (!client || !client.socket) {
+        logger.warn(`[Baileys] ⚠️ Session validation failed: client or socket not found for ${connectionId}`);
+        return false;
+      }
+      
+      if (client.status !== 'connected') {
+        logger.warn(`[Baileys] ⚠️ Session validation failed: status is ${client.status} for ${connectionId}`);
+        return false;
+      }
+      
+      // Verificar se tem credenciais válidas
+      const connection = await this.prisma.whatsAppConnection.findUnique({
+        where: { id: connectionId },
+        select: { authData: true, status: true },
+      });
+      
+      if (!connection || !connection.authData) {
+        logger.warn(`[Baileys] ⚠️ Session validation failed: no auth data in database for ${connectionId}`);
+        return false;
+      }
+      
+      if (connection.status !== 'connected') {
+        logger.warn(`[Baileys] ⚠️ Session validation failed: database status is ${connection.status} for ${connectionId}`);
+        return false;
+      }
+      
+      logger.debug(`[Baileys] ✅ Session validation passed for ${connectionId}`);
+      return true;
+    } catch (error) {
+      logger.error(`[Baileys] ❌ Error validating session for ${connectionId}:`, error);
+      return false;
+    }
+  }
+
+  /**
    * Envia mensagem via WhatsApp
    */
   async sendMessage(
@@ -1238,6 +1375,12 @@ class BaileysManager {
     const client = this.clients.get(connectionId);
     if (!client) {
       throw new Error(`Connection ${connectionId} not found`);
+    }
+
+    // ✅ VALIDAÇÃO ROBUSTA DE SESSÃO antes de enviar
+    const isSessionValid = await this.validateSession(connectionId);
+    if (!isSessionValid) {
+      throw new Error(`Session validation failed for ${connectionId} - connection may be unstable or disconnected`);
     }
 
     // ✅ VERIFICAÇÃO ROBUSTA: Verificar status E socket realmente conectado
