@@ -9,19 +9,19 @@ const AnalyticsView = () => <div className="p-8">Analytics (Em desenvolvimento)<
 const SettingsView = () => <div className="p-8">Configurações (Em desenvolvimento)</div>;
 
 export default function DashboardPage() {
-  const { accessToken, user } = useAuthStore();
+  const { isAuthenticated, user } = useAuthStore();
 
   useEffect(() => {
     // Conectar WebSocket quando entrar no dashboard
-    if (accessToken) {
-      socketService.connect(accessToken);
+    if (isAuthenticated) {
+      socketService.connect();
     }
 
     return () => {
       // Desconectar ao sair
       socketService.disconnect();
     };
-  }, [accessToken]);
+  }, [isAuthenticated]);
 
   return (
     <div className="flex h-screen bg-gray-100">

@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import { getPrismaClient } from '../config/database.js';
 import { hashPassword, comparePassword } from '../utils/password.js';
 import { generateTokens, verifyRefreshToken } from '../utils/jwt.js';
@@ -7,22 +8,140 @@ import {
   AuthTokens,
   UserResponse,
   JWTPayload,
+  RefreshTokenPayload,
 } from '../models/types.js';
-import {
-  UnauthorizedError,
-  ConflictError,
-  NotFoundError,
-} from '../middlewares/error.middleware.js';
+import { UnauthorizedError, ConflictError, NotFoundError } from '../middlewares/error.middleware.js';
 import { logger } from '../config/logger.js';
+
+interface LoginContext {
+  ip: string;
+  userAgent?: string;
+  fingerprint: string;
+}
+
+const FAILED_LOGIN_MAX_ATTEMPTS = 5;
+const FAILED_LOGIN_WINDOW_MS = 15 * 60 * 1000; // 15 minutos
+const SESSION_TTL_MS = 24 * 60 * 60 * 1000; // 24 horas
 
 export class AuthService {
   private prisma = getPrismaClient();
+  private static failedLoginAttempts = new Map<string, { count: number; firstAttemptAt: number; lastAttemptAt: number }>();
 
-  /**
-   * Registra um novo usuário
-   */
-  async register(data: RegisterRequest): Promise<{ user: UserResponse; tokens: AuthTokens }> {
-    // Verificar se email já existe
+  private static registerFailedAttempt(ip: string): number {
+    const now = Date.now();
+    const record = AuthService.failedLoginAttempts.get(ip);
+
+    if (!record || now - record.firstAttemptAt > FAILED_LOGIN_WINDOW_MS) {
+      AuthService.failedLoginAttempts.set(ip, {
+        count: 1,
+        firstAttemptAt: now,
+        lastAttemptAt: now,
+      });
+      return 1;
+    }
+
+    record.count += 1;
+    record.lastAttemptAt = now;
+    AuthService.failedLoginAttempts.set(ip, record);
+    return record.count;
+  }
+
+  private static resetFailedAttempts(ip: string): void {
+    AuthService.failedLoginAttempts.delete(ip);
+  }
+
+  getFailedAttempts(ip: string): number {
+    const record = AuthService.failedLoginAttempts.get(ip);
+    if (!record) {
+      return 0;
+    }
+
+    if (Date.now() - record.firstAttemptAt > FAILED_LOGIN_WINDOW_MS) {
+      AuthService.failedLoginAttempts.delete(ip);
+      return 0;
+    }
+
+    return record.count;
+  }
+
+  private buildSessionUpdate(data: {
+    fingerprint?: string;
+    ip?: string;
+    userAgent?: string;
+    csrfToken?: string;
+    failedCount?: number;
+    failedAt?: Date;
+  }) {
+    const update: Record<string, unknown> = {
+      updatedAt: new Date(),
+      expiresAt: new Date(Date.now() + SESSION_TTL_MS),
+    };
+
+    if (data.fingerprint) {
+      update.fingerprint = data.fingerprint;
+    }
+    if (data.ip) {
+      update.ipAddress = data.ip;
+    }
+    if (data.userAgent) {
+      update.userAgent = data.userAgent;
+    }
+    if (data.csrfToken) {
+      update.csrfToken = data.csrfToken;
+    }
+    if (typeof data.failedCount === 'number') {
+      update.failedCount = data.failedCount;
+      update.lastFailedAt = data.failedAt ?? new Date();
+    }
+
+    return update;
+  }
+
+  private async upsertSession(
+    userId: string,
+    data: {
+      fingerprint?: string;
+      ip?: string;
+      userAgent?: string;
+      csrfToken?: string;
+      failedCount?: number;
+      failedAt?: Date;
+    },
+  ) {
+    await this.prisma.userSession.upsert({
+      where: { userId },
+      create: {
+        userId,
+        fingerprint: data.fingerprint,
+        ipAddress: data.ip,
+        userAgent: data.userAgent,
+        csrfToken: data.csrfToken,
+        expiresAt: new Date(Date.now() + SESSION_TTL_MS),
+        failedCount: data.failedCount ?? 0,
+        lastFailedAt: data.failedAt,
+      },
+      update: this.buildSessionUpdate(data),
+    });
+  }
+
+  async issueCsrfToken(
+    userId: string,
+    params: { fingerprint?: string; ip?: string; userAgent?: string } = {},
+  ): Promise<string> {
+    const csrfToken = crypto.randomBytes(32).toString('hex');
+    await this.upsertSession(userId, {
+      fingerprint: params.fingerprint,
+      ip: params.ip,
+      userAgent: params.userAgent,
+      csrfToken,
+    });
+    return csrfToken;
+  }
+
+  async register(
+    data: RegisterRequest,
+    context?: LoginContext,
+  ): Promise<{ user: UserResponse; tokens: AuthTokens }> {
     const existingUser = await this.prisma.user.findUnique({
       where: { email: data.email },
     });
@@ -31,10 +150,8 @@ export class AuthService {
       throw new ConflictError('Email already registered');
     }
 
-    // Hash da senha
     const hashedPassword = await hashPassword(data.password);
 
-    // Criar usuário
     const user = await this.prisma.user.create({
       data: {
         email: data.email,
@@ -50,7 +167,6 @@ export class AuthService {
       },
     });
 
-    // Atribuir role padrão "user"
     const userRole = await this.prisma.role.findUnique({
       where: { name: 'user' },
     });
@@ -64,25 +180,20 @@ export class AuthService {
       });
     }
 
-    // Criar preferências de notificação padrão
     await this.prisma.notificationPreference.create({
-      data: {
-        userId: user.id,
-      },
+      data: { userId: user.id },
     });
 
-    // Gerar tokens
+    const roles = ['user'];
     const payload: JWTPayload = {
       userId: user.id,
       email: user.email,
-      roles: ['user'],
+      roles,
     };
 
-    const tokens = generateTokens(payload);
+    const tokens = generateTokens(payload, { fingerprint: context?.fingerprint });
 
-    // Salvar refresh token
-    const expiresAt = new Date();
-    expiresAt.setDate(expiresAt.getDate() + 30); // 30 dias
+    const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000); // 30 dias
 
     await this.prisma.refreshToken.create({
       data: {
@@ -92,7 +203,15 @@ export class AuthService {
       },
     });
 
-    logger.info(`User registered: ${user.email}`);
+    if (context) {
+      await this.upsertSession(user.id, {
+        fingerprint: context.fingerprint,
+        ip: context.ip,
+        userAgent: context.userAgent,
+      });
+    }
+
+    logger.info(`User registered: ${user.email}`, { ip: context?.ip });
 
     return {
       user: this.formatUserResponse(user),
@@ -100,11 +219,10 @@ export class AuthService {
     };
   }
 
-  /**
-   * Autentica um usuário
-   */
-  async login(data: LoginRequest): Promise<{ user: UserResponse; tokens: AuthTokens }> {
-    // Buscar usuário
+  async login(
+    data: LoginRequest,
+    context: LoginContext,
+  ): Promise<{ user: UserResponse; tokens: AuthTokens }> {
     const user = await this.prisma.user.findUnique({
       where: { email: data.email },
       include: {
@@ -117,22 +235,32 @@ export class AuthService {
     });
 
     if (!user) {
+      const attempts = AuthService.registerFailedAttempt(context.ip);
+      logger.warn('Failed login attempt - user not found', {
+        email: data.email,
+        ip: context.ip,
+        attempts,
+      });
       throw new UnauthorizedError('Invalid email or password');
     }
 
-    // Verificar se usuário está ativo
     if (!user.isActive) {
       throw new UnauthorizedError('Account is inactive');
     }
 
-    // Verificar senha
     const isPasswordValid = await comparePassword(data.password, user.password);
 
     if (!isPasswordValid) {
+      const attempts = AuthService.registerFailedAttempt(context.ip);
+      await this.upsertSession(user.id, {
+        failedCount: attempts,
+        failedAt: new Date(),
+      });
       throw new UnauthorizedError('Invalid email or password');
     }
 
-    // Gerar tokens
+    AuthService.resetFailedAttempts(context.ip);
+
     const roles = user.roles.map((ur) => ur.role.name);
     const payload: JWTPayload = {
       userId: user.id,
@@ -140,11 +268,9 @@ export class AuthService {
       roles,
     };
 
-    const tokens = generateTokens(payload);
+    const tokens = generateTokens(payload, { fingerprint: context.fingerprint });
 
-    // Salvar refresh token
-    const expiresAt = new Date();
-    expiresAt.setDate(expiresAt.getDate() + 30);
+    const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
 
     await this.prisma.refreshToken.create({
       data: {
@@ -154,13 +280,19 @@ export class AuthService {
       },
     });
 
-    // Atualizar status para online
     await this.prisma.user.update({
       where: { id: user.id },
       data: { status: 'online' },
     });
 
-    logger.info(`User logged in: ${user.email}`);
+    await this.upsertSession(user.id, {
+      fingerprint: context.fingerprint,
+      ip: context.ip,
+      userAgent: context.userAgent,
+      failedCount: 0,
+    });
+
+    logger.info(`User logged in: ${user.email}`, { ip: context.ip });
 
     return {
       user: this.formatUserResponse(user),
@@ -168,14 +300,15 @@ export class AuthService {
     };
   }
 
-  /**
-   * Refresh de tokens
-   */
-  async refreshTokens(refreshToken: string): Promise<AuthTokens> {
-    // Verificar refresh token
-    const decoded = verifyRefreshToken(refreshToken);
+  async refreshTokens(refreshToken: string, fingerprint?: string): Promise<AuthTokens> {
+    let decoded: RefreshTokenPayload;
+    try {
+      decoded = verifyRefreshToken(refreshToken);
+    } catch (error) {
+      logger.warn('Refresh token verification failed', { error });
+      throw new UnauthorizedError('Invalid refresh token');
+    }
 
-    // Buscar refresh token no banco
     const storedToken = await this.prisma.refreshToken.findUnique({
       where: { token: refreshToken },
       include: {
@@ -195,20 +328,34 @@ export class AuthService {
       throw new UnauthorizedError('Invalid refresh token');
     }
 
-    // Verificar se token expirou
     if (storedToken.expiresAt < new Date()) {
-      await this.prisma.refreshToken.delete({
-        where: { id: storedToken.id },
-      });
+      await this.prisma.refreshToken.delete({ where: { id: storedToken.id } });
       throw new UnauthorizedError('Refresh token expired');
     }
 
-    // Verificar se usuário está ativo
     if (!storedToken.user.isActive) {
       throw new UnauthorizedError('Account is inactive');
     }
 
-    // Gerar novos tokens
+    // Verificar fingerprint (defesa contra roubo de token)
+    if (decoded.fingerprint && fingerprint && decoded.fingerprint !== fingerprint) {
+      logger.error('Fingerprint mismatch on refresh token', {
+        userId: storedToken.user.id,
+      });
+      await this.prisma.refreshToken.deleteMany({ where: { userId: storedToken.user.id } });
+      throw new UnauthorizedError('Security validation failed');
+    }
+
+    const session = await this.prisma.userSession.findUnique({
+      where: { userId: storedToken.user.id },
+    });
+
+    if (session?.fingerprint && fingerprint && session.fingerprint !== fingerprint) {
+      logger.error('Session fingerprint mismatch', { userId: storedToken.user.id });
+      await this.prisma.refreshToken.deleteMany({ where: { userId: storedToken.user.id } });
+      throw new UnauthorizedError('Security validation failed');
+    }
+
     const roles = storedToken.user.roles.map((ur) => ur.role.name);
     const payload: JWTPayload = {
       userId: storedToken.user.id,
@@ -216,17 +363,11 @@ export class AuthService {
       roles,
     };
 
-    const tokens = generateTokens(payload);
+    const tokens = generateTokens(payload, { fingerprint });
 
-    // Deletar refresh token antigo
-    await this.prisma.refreshToken.delete({
-      where: { id: storedToken.id },
-    });
+    await this.prisma.refreshToken.delete({ where: { id: storedToken.id } });
 
-    // Salvar novo refresh token
-    const expiresAt = new Date();
-    expiresAt.setDate(expiresAt.getDate() + 30);
-
+    const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
     await this.prisma.refreshToken.create({
       data: {
         token: tokens.refreshToken,
@@ -235,17 +376,25 @@ export class AuthService {
       },
     });
 
+    await this.upsertSession(storedToken.user.id, {
+      fingerprint,
+    });
+
     logger.info(`Tokens refreshed for user: ${storedToken.user.email}`);
 
     return tokens;
   }
 
-  /**
-   * Logout (invalida refresh token)
-   */
+  async revokeAllTokens(userId: string): Promise<void> {
+    await this.prisma.refreshToken.deleteMany({ where: { userId } });
+    await this.prisma.userSession.updateMany({
+      where: { userId },
+      data: { csrfToken: null, fingerprint: null },
+    });
+  }
+
   async logout(userId: string, refreshToken?: string): Promise<void> {
     if (refreshToken) {
-      // Deletar refresh token específico
       await this.prisma.refreshToken.deleteMany({
         where: {
           userId,
@@ -253,24 +402,27 @@ export class AuthService {
         },
       });
     } else {
-      // Deletar todos os refresh tokens do usuário
       await this.prisma.refreshToken.deleteMany({
         where: { userId },
       });
     }
 
-    // Atualizar status para offline
     await this.prisma.user.update({
       where: { id: userId },
       data: { status: 'offline' },
     });
 
+    await this.prisma.userSession.updateMany({
+      where: { userId },
+      data: {
+        csrfToken: null,
+        expiresAt: new Date(Date.now() + SESSION_TTL_MS),
+      },
+    });
+
     logger.info(`User logged out: ${userId}`);
   }
 
-  /**
-   * Busca usuário por ID
-   */
   async getUserById(userId: string): Promise<UserResponse> {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
@@ -290,9 +442,6 @@ export class AuthService {
     return this.formatUserResponse(user);
   }
 
-  /**
-   * Formata resposta do usuário (remove senha)
-   */
   private formatUserResponse(user: any): UserResponse {
     return {
       id: user.id,
@@ -301,11 +450,12 @@ export class AuthService {
       avatar: user.avatar,
       status: user.status,
       isActive: user.isActive,
-      roles: user.roles?.map((ur: any) => ({
-        id: ur.role.id,
-        name: ur.role.name,
-        description: ur.role.description,
-      })) || [],
+      roles:
+        user.roles?.map((ur: any) => ({
+          id: ur.role.id,
+          name: ur.role.name,
+          description: ur.role.description,
+        })) || [],
       createdAt: user.createdAt,
       updatedAt: user.updatedAt,
     };

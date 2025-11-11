@@ -7,11 +7,13 @@ import fastifyStatic from '@fastify/static';
 import swagger from '@fastify/swagger';
 import swaggerUi from '@fastify/swagger-ui';
 import compress from '@fastify/compress';
+import cookie from '@fastify/cookie';
 import path from 'path';
 import { config } from './config/env.js';
 import { logger } from './config/logger.js';
 import { errorHandler, notFoundHandler } from './middlewares/error.middleware.js';
 import { sanitizeInputs } from './middlewares/sanitize.middleware.js';
+import { csrfProtection, csrfTokenGenerator } from './middlewares/csrf.middleware.js';
 import { registerRoutes } from './routes/index.js';
 
 export async function buildApp(): Promise<FastifyInstance> {
@@ -87,6 +89,16 @@ export async function buildApp(): Promise<FastifyInstance> {
     optionsSuccessStatus: 204,
   });
 
+  // Cookies
+  await app.register(cookie, {
+    hook: 'onRequest',
+    parseOptions: {
+      httpOnly: true,
+      sameSite: 'strict',
+      secure: config.server.isProduction,
+    },
+  });
+
   // Rate limiting global (mais permissivo que o específico de auth)
   await app.register(rateLimit, {
     max: 1000,
@@ -110,8 +122,9 @@ export async function buildApp(): Promise<FastifyInstance> {
       const allowedOrigin = Array.isArray(config.security.corsOrigin) 
         ? config.security.corsOrigin[0] 
         : config.security.corsOrigin;
-      res.setHeader('Access-Control-Allow-Origin', allowedOrigin)
-      res.setHeader('Access-Control-Allow-Credentials', 'true')
+      res.setHeader('Access-Control-Allow-Origin', allowedOrigin);
+      res.setHeader('Access-Control-Allow-Credentials', 'true');
+      res.setHeader('X-Content-Type-Options', 'nosniff');
       
       // Configurar MIME types corretos
       if (path.endsWith('.pdf')) {
@@ -183,6 +196,7 @@ export async function buildApp(): Promise<FastifyInstance> {
 
   // ✅ Hook global de sanitização de inputs (ANTES das rotas)
   app.addHook('preHandler', sanitizeInputs);
+  app.addHook('preHandler', csrfProtection);
 
   // Registrar rotas
   await registerRoutes(app);

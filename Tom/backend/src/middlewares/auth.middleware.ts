@@ -1,3 +1,4 @@
+import '@fastify/cookie';
 import { FastifyRequest, FastifyReply } from 'fastify';
 import { verifyAccessToken, extractTokenFromHeader } from '../utils/jwt.js';
 import { getPrismaClient } from '../config/database.js';
@@ -24,8 +25,9 @@ export const authenticate = async (
   reply: FastifyReply
 ): Promise<void> => {
   try {
-    // Extrair token do header
-    const token = extractTokenFromHeader(request.headers.authorization);
+    const cookieToken = request.cookies?.accessToken;
+    const headerToken = extractTokenFromHeader(request.headers.authorization);
+    const token = cookieToken || headerToken;
 
     if (!token) {
       return reply.status(401).send({
@@ -96,7 +98,8 @@ export const optionalAuthenticate = async (
   reply: FastifyReply
 ): Promise<void> => {
   try {
-    const token = extractTokenFromHeader(request.headers.authorization);
+    const cookieToken = request.cookies?.accessToken;
+    const token = cookieToken || extractTokenFromHeader(request.headers.authorization);
 
     if (token) {
       const decoded = verifyAccessToken(token);

@@ -34,18 +34,11 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    // Pegar token do localStorage
-    const token = localStorage.getItem('accessToken');
-    if (!token) {
-      console.warn('⚠️ No token found, skipping WebSocket connection');
-      return;
-    }
-
     console.log('🔌 Inicializando WebSocket global...');
     hasInitialized.current = true;
     
     // Conectar ao WebSocket
-    const socket = socketService.connect(token);
+    const socket = socketService.connect();
 
     // Função para sincronizar mensagens e recarregar conversas
     const syncAndReload = async () => {

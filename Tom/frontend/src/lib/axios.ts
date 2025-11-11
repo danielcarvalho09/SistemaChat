@@ -1,71 +1,130 @@
-import axios from 'axios';
+import axios, { AxiosInstance, AxiosRequestConfig } from 'axios';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 
-export const api = axios.create({
+const getCsrfToken = (): string | null => {
+  const match = document.cookie.match(new RegExp('(^| )csrfToken=([^;]+)'));
+  return match ? match[2] : null;
+};
+
+export const api: AxiosInstance = axios.create({
   baseURL: `${API_URL}/api/v1`,
+  withCredentials: true,
   headers: {
     'Content-Type': 'application/json',
   },
+  timeout: 30000,
+  validateStatus: (status) => status < 500,
 });
 
-// Interceptor para adicionar token de autenticação
 api.interceptors.request.use(
   (config) => {
-    const token = localStorage.getItem('accessToken');
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
+    const methodsRequiringCsrf = ['POST', 'PUT', 'PATCH', 'DELETE'];
+    if (methodsRequiringCsrf.includes(config.method?.toUpperCase() || '')) {
+      const csrfToken = getCsrfToken();
+      if (csrfToken) {
+        config.headers['X-CSRF-Token'] = csrfToken;
+      }
     }
+
+    if (config.method?.toUpperCase() === 'GET') {
+      config.params = {
+        ...config.params,
+        _t: Date.now(),
+      };
+    }
+
     return config;
   },
-  (error) => {
-    return Promise.reject(error);
-  }
+  (error) => Promise.reject(error),
 );
 
-// Interceptor para tratar erros de autenticação
 api.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    const newCsrfToken = response.headers['x-csrf-token'];
+    if (newCsrfToken) {
+      document.cookie = `csrfToken=${newCsrfToken}; path=/; SameSite=Strict${import.meta.env.PROD ? '; Secure' : ''}`;
+    }
+    return response;
+  },
   async (error) => {
     const originalRequest = error.config;
 
-    // Se erro 401 e não é uma tentativa de refresh
     if (error.response?.status === 401 && !originalRequest._retry) {
       originalRequest._retry = true;
 
       try {
-        const refreshToken = localStorage.getItem('refreshToken');
-        if (!refreshToken) {
-          throw new Error('No refresh token');
+        const response = await axios.post(
+          `${API_URL}/api/v1/auth/refresh`,
+          {},
+          {
+            withCredentials: true,
+          },
+        );
+
+        if (response.status === 200) {
+          return api(originalRequest);
         }
-
-        // Tentar renovar o token
-        const response = await axios.post(`${API_URL}/api/v1/auth/refresh`, {
-          refreshToken,
-        });
-
-        const { accessToken, refreshToken: newRefreshToken } = response.data.data;
-
-        // Salvar novos tokens
-        localStorage.setItem('accessToken', accessToken);
-        localStorage.setItem('refreshToken', newRefreshToken);
-
-        // Retentar requisição original
-        originalRequest.headers.Authorization = `Bearer ${accessToken}`;
-        return api(originalRequest);
       } catch (refreshError) {
-        // Se falhar, fazer logout completo
-        localStorage.removeItem('accessToken');
-        localStorage.removeItem('refreshToken');
+        sessionStorage.clear();
         localStorage.removeItem('user');
-        localStorage.removeItem('auth-storage'); // Limpar Zustand persist
         window.location.href = '/login';
         return Promise.reject(refreshError);
       }
     }
 
+    if (error.response?.status === 403 && error.response?.data?.message?.includes('CSRF')) {
+      window.location.reload();
+      return Promise.reject(error);
+    }
+
+    if (error.response?.status === 429) {
+      const retryAfter = error.response.headers['retry-after'] || 60;
+      const event = new CustomEvent('rate-limit', { detail: { retryAfter } });
+      window.dispatchEvent(event);
+    }
+
     return Promise.reject(error);
-  }
+  },
 );
+
+export const secureRequest = {
+  get: async <T = unknown>(url: string, config?: AxiosRequestConfig) => {
+    const response = await api.get<T>(url, {
+      ...config,
+      headers: {
+        ...config?.headers,
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        Pragma: 'no-cache',
+        Expires: '0',
+      },
+    });
+    return response.data;
+  },
+  post: async <T = unknown>(url: string, data?: unknown, config?: AxiosRequestConfig) => {
+    const csrfToken = getCsrfToken();
+    if (!csrfToken) {
+      throw new Error('CSRF token not available. Please refresh the page.');
+    }
+    const response = await api.post<T>(url, data, config);
+    return response.data;
+  },
+  put: async <T = unknown>(url: string, data?: unknown, config?: AxiosRequestConfig) => {
+    const csrfToken = getCsrfToken();
+    if (!csrfToken) {
+      throw new Error('CSRF token not available. Please refresh the page.');
+    }
+    const response = await api.put<T>(url, data, config);
+    return response.data;
+  },
+  delete: async <T = unknown>(url: string, config?: AxiosRequestConfig) => {
+    const csrfToken = getCsrfToken();
+    if (!csrfToken) {
+      throw new Error('CSRF token not available. Please refresh the page.');
+    }
+    const response = await api.delete<T>(url, config);
+    return response.data;
+  },
+};
 
 export default api;

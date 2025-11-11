@@ -1,13 +1,11 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { User, AuthTokens } from '../types';
+import { User } from '../types';
 import api from '../lib/axios';
 import socketService from '../lib/socket';
 
 interface AuthState {
   user: User | null;
-  accessToken: string | null;
-  refreshToken: string | null;
   isAuthenticated: boolean;
   isLoading: boolean;
   error: string | null;
@@ -17,7 +15,6 @@ interface AuthState {
   register: (email: string, password: string, name: string) => Promise<void>;
   logout: () => Promise<void>;
   setUser: (user: User) => void;
-  setTokens: (tokens: AuthTokens) => void;
   clearError: () => void;
   fetchMe: () => Promise<void>;
 }
@@ -26,8 +23,6 @@ export const useAuthStore = create<AuthState>()(
   persist(
     (set, get) => ({
       user: null,
-      accessToken: null,
-      refreshToken: null,
       isAuthenticated: false,
       isLoading: false,
       error: null,
@@ -36,22 +31,15 @@ export const useAuthStore = create<AuthState>()(
         set({ isLoading: true, error: null });
         try {
           const response = await api.post('/auth/login', { email, password });
-          const { user, tokens } = response.data.data;
-
-          // Salvar tokens no localStorage
-          localStorage.setItem('accessToken', tokens.accessToken);
-          localStorage.setItem('refreshToken', tokens.refreshToken);
-
+          const { user } = response.data.data;
           set({
             user,
-            accessToken: tokens.accessToken,
-            refreshToken: tokens.refreshToken,
             isAuthenticated: true,
             isLoading: false,
           });
 
           // Conectar WebSocket
-          socketService.connect(tokens.accessToken);
+          socketService.connect();
         } catch (error: any) {
           const errorMessage = error.response?.data?.message || 'Erro ao fazer login';
           set({ error: errorMessage, isLoading: false });
@@ -64,22 +52,15 @@ export const useAuthStore = create<AuthState>()(
         try {
           console.log('Enviando dados de registro:', { email, name, passwordLength: password.length });
           const response = await api.post('/auth/register', { email, password, name });
-          const { user, tokens } = response.data.data;
-
-          // Salvar tokens no localStorage
-          localStorage.setItem('accessToken', tokens.accessToken);
-          localStorage.setItem('refreshToken', tokens.refreshToken);
-
+          const { user } = response.data.data;
           set({
             user,
-            accessToken: tokens.accessToken,
-            refreshToken: tokens.refreshToken,
             isAuthenticated: true,
             isLoading: false,
           });
 
           // Conectar WebSocket
-          socketService.connect(tokens.accessToken);
+          socketService.connect();
         } catch (error: any) {
           console.error('Erro no registro:', error.response?.data);
           
@@ -103,16 +84,11 @@ export const useAuthStore = create<AuthState>()(
 
       logout: async () => {
         try {
-          const { refreshToken } = get();
-          if (refreshToken) {
-            await api.post('/auth/logout', { refreshToken });
-          }
+          await api.post('/auth/logout');
         } catch (error) {
           console.error('Error during logout:', error);
         } finally {
           // Limpar estado e localStorage
-          localStorage.removeItem('accessToken');
-          localStorage.removeItem('refreshToken');
           localStorage.removeItem('user');
 
           // Desconectar WebSocket
@@ -120,8 +96,6 @@ export const useAuthStore = create<AuthState>()(
 
           set({
             user: null,
-            accessToken: null,
-            refreshToken: null,
             isAuthenticated: false,
             error: null,
           });
@@ -130,15 +104,6 @@ export const useAuthStore = create<AuthState>()(
 
       setUser: (user: User) => {
         set({ user });
-      },
-
-      setTokens: (tokens: AuthTokens) => {
-        localStorage.setItem('accessToken', tokens.accessToken);
-        localStorage.setItem('refreshToken', tokens.refreshToken);
-        set({
-          accessToken: tokens.accessToken,
-          refreshToken: tokens.refreshToken,
-        });
       },
 
       clearError: () => {
@@ -163,8 +128,6 @@ export const useAuthStore = create<AuthState>()(
       name: 'auth-storage',
       partialize: (state) => ({
         user: state.user,
-        accessToken: state.accessToken,
-        refreshToken: state.refreshToken,
         isAuthenticated: state.isAuthenticated,
       }),
     }

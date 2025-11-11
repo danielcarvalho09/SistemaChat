@@ -5,6 +5,27 @@ import { logger } from '../config/logger.js';
 import { SocketEvent } from '../models/types.js';
 import { config } from '../config/env.js';
 
+function getCookieToken(cookieHeader?: string): string | null {
+  if (!cookieHeader) {
+    return null;
+  }
+
+  const cookies = cookieHeader.split(';').map((part) => part.trim());
+  for (const entry of cookies) {
+    const [name, value] = entry.split('=');
+    if (name === 'accessToken' && value) {
+      try {
+        return decodeURIComponent(value);
+      } catch (error) {
+        logger.warn('Failed to decode accessToken cookie', { error });
+        return value;
+      }
+    }
+  }
+
+  return null;
+}
+
 interface AuthenticatedSocket extends Socket {
   userId?: string;
   userRoles?: string[];
@@ -65,7 +86,7 @@ export class SocketServer {
   private setupMiddleware(): void {
     this.io.use(async (socket: AuthenticatedSocket, next) => {
       try {
-        const token = socket.handshake.auth.token;
+        const token = socket.handshake.auth.token || getCookieToken(socket.handshake.headers.cookie);
 
         if (!token) {
           logger.warn('Socket connection without token - allowing for public events');

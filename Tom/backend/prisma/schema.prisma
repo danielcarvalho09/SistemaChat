@@ -33,6 +33,7 @@ model User {
   notifications           Notification[]
   auditLogs               AuditLog[]
   refreshTokens           RefreshToken[]
+  sessions                UserSession[]
   notificationPreferences NotificationPreference?
   conversationHistory     ConversationHistory[]
 
@@ -116,6 +117,27 @@ model RefreshToken {
   @@index([token])
   @@index([expiresAt])
   @@map("refresh_tokens")
+}
+
+model UserSession {
+  id           String   @id @default(uuid())
+  userId       String
+  csrfToken    String?
+  fingerprint  String?
+  ipAddress    String?
+  userAgent    String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  expiresAt    DateTime?
+  failedCount  Int      @default(0)
+  lastFailedAt DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@unique([userId])
+  @@index([fingerprint])
+  @@map("user_sessions")
 }
 
 // ==================== ASSISTENTES DE IA ====================

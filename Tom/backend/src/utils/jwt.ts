@@ -1,19 +1,22 @@
 import jwt from 'jsonwebtoken';
 import { config } from '../config/env.js';
-import { JWTPayload, AuthTokens } from '../models/types.js';
+import { JWTPayload, AuthTokens, RefreshTokenPayload } from '../models/types.js';
 import { logger } from '../config/logger.js';
 
 /**
  * Gera access token e refresh token para um usuário
  */
-export const generateTokens = (payload: JWTPayload): AuthTokens => {
+export const generateTokens = (payload: JWTPayload, options: { fingerprint?: string } = {}): AuthTokens => {
   try {
     const accessToken = jwt.sign(payload, config.jwt.secret, {
       expiresIn: config.jwt.expiresIn as any,
     });
 
     const refreshToken = jwt.sign(
-      { userId: payload.userId },
+      {
+        userId: payload.userId,
+        fingerprint: options.fingerprint,
+      },
       config.jwt.refreshSecret,
       {
         expiresIn: config.jwt.refreshExpiresIn as any,
@@ -48,11 +51,9 @@ export const verifyAccessToken = (token: string): JWTPayload => {
 /**
  * Verifica e decodifica um refresh token
  */
-export const verifyRefreshToken = (token: string): { userId: string } => {
+export const verifyRefreshToken = (token: string): RefreshTokenPayload => {
   try {
-    const decoded = jwt.verify(token, config.jwt.refreshSecret) as {
-      userId: string;
-    };
+    const decoded = jwt.verify(token, config.jwt.refreshSecret) as RefreshTokenPayload;
     return decoded;
   } catch (error) {
     if (error instanceof jwt.TokenExpiredError) {

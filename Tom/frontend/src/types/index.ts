@@ -18,11 +18,6 @@ export interface Role {
   description: string | null;
 }
 
-export interface AuthTokens {
-  accessToken: string;
-  refreshToken: string;
-}
-
 export interface LoginCredentials {
   email: string;
   password: string;
