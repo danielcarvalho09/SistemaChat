@@ -2296,13 +2296,31 @@ class BaileysManager {
 
     const resetAt = new Date();
 
+    // ✅ PRESERVAR lastDisconnectAt original para sincronização correta
+    let originalLastDisconnectAt: Date | null = null;
+    try {
+      const connection = await this.prisma.whatsAppConnection.findUnique({
+        where: { id: connectionId },
+        select: { lastDisconnectAt: true },
+      });
+      originalLastDisconnectAt = connection?.lastDisconnectAt ?? null;
+      
+      if (originalLastDisconnectAt) {
+        logger.info(`[Baileys] 📅 Preserving original lastDisconnectAt: ${originalLastDisconnectAt.toISOString()}`);
+        logger.info(`[Baileys] 📅 This will be used as sync reference after QR scan`);
+      }
+    } catch (error) {
+      logger.warn(`[Baileys] ⚠️ Could not read original lastDisconnectAt:`, error);
+    }
+
     const client = this.clients.get(connectionId);
     if (client) {
       client.status = 'disconnected';
       client.hasCredentials = false;
       client.isReconnecting = false;
       client.reconnectAttempts = 0;
-      client.lastDisconnectAt = resetAt;
+      // ✅ Preservar lastDisconnectAt original se existir
+      client.lastDisconnectAt = originalLastDisconnectAt || resetAt;
       client.lastSyncFrom = null;
       client.lastSyncTo = null;
     }
@@ -2321,11 +2339,15 @@ class BaileysManager {
         data: {
           authData: null,
           status: 'disconnected',
-          lastDisconnectAt: resetAt,
+          // ✅ PRESERVAR lastDisconnectAt original para sincronização após reconexão
+          // Não sobrescrever com resetAt, pois perderia referência de quando desconectou
+          lastDisconnectAt: originalLastDisconnectAt || resetAt,
           lastSyncFrom: null,
           lastSyncTo: null,
         },
       });
+      
+      logger.info(`[Baileys] ✅ Credentials cleared, lastDisconnectAt preserved for sync`);
     } catch (error) {
       logger.error(`[Baileys] ❌ Error clearing stored credentials for ${connectionId}:`, error);
     }
