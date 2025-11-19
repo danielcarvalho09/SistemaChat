@@ -605,22 +605,34 @@ class BaileysManager {
           });
           
           // Buscar ou criar conversa
-          await this.prisma.conversation.upsert({
+          let conversation = await this.prisma.conversation.findFirst({
             where: {
-              contactId_connectionId: {
-                contactId: contact.id,
-                connectionId,
-              },
-            },
-            update: {
-              lastMessageAt: chat.conversationTimestamp ? new Date(Number(chat.conversationTimestamp) * 1000) : undefined,
-            },
-            create: {
               contactId: contact.id,
               connectionId,
-              lastMessageAt: chat.conversationTimestamp ? new Date(Number(chat.conversationTimestamp) * 1000) : new Date(),
             },
           });
+
+          if (conversation) {
+            // Atualizar última mensagem se necessário
+            if (chat.conversationTimestamp) {
+              const chatTimestamp = new Date(Number(chat.conversationTimestamp) * 1000);
+              if (chatTimestamp > conversation.lastMessageAt) {
+                await this.prisma.conversation.update({
+                  where: { id: conversation.id },
+                  data: { lastMessageAt: chatTimestamp },
+                });
+              }
+            }
+          } else {
+            // Criar nova conversa
+            conversation = await this.prisma.conversation.create({
+              data: {
+                contactId: contact.id,
+                connectionId,
+                lastMessageAt: chat.conversationTimestamp ? new Date(Number(chat.conversationTimestamp) * 1000) : new Date(),
+              },
+            });
+          }
           
           logger.debug(`[Baileys] ✅ Processed chat: ${jid}`);
         } catch (error) {
