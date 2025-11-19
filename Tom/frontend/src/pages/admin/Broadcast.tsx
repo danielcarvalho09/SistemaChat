@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Send, Image, FileText, Loader2, CheckCircle, XCircle, Clock } from 'lucide-react';
 import { Button } from '../../components/ui/button';
 import { api } from '../../lib/api';
@@ -43,6 +43,7 @@ export function Broadcast() {
   const [mediaUrl, setMediaUrl] = useState('');
   const [mediaType, setMediaType] = useState<'image' | 'video' | 'document' | ''>('');
   const [loading, setLoading] = useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     loadData();
@@ -125,6 +126,27 @@ export function Broadcast() {
     return statusMap[status] || status;
   };
 
+  // Função para inserir variável na posição do cursor
+  const insertVariable = (variable: string) => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const textBefore = message.substring(0, start);
+    const textAfter = message.substring(end);
+    const newText = textBefore + variable + textAfter;
+
+    setMessage(newText);
+
+    // Restaurar foco e posição do cursor após a variável inserida
+    setTimeout(() => {
+      textarea.focus();
+      const newCursorPosition = start + variable.length;
+      textarea.setSelectionRange(newCursorPosition, newCursorPosition);
+    }, 0);
+  };
+
   return (
     <div className="h-full overflow-y-auto bg-gray-50">
       <div className="max-w-7xl mx-auto p-6 space-y-6">
@@ -182,31 +204,66 @@ export function Broadcast() {
               Mensagem *
             </label>
             <textarea
+              ref={textareaRef}
               value={message}
               onChange={(e) => setMessage(e.target.value)}
               rows={6}
-              placeholder="Digite sua mensagem aqui... Use {{name}} para personalizar com o nome do contato."
+              placeholder="Digite sua mensagem aqui... Use os botões abaixo para inserir variáveis."
               className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#008069] focus:border-transparent resize-none"
             />
-            <div className="flex items-start justify-between mt-2">
-              <div className="text-sm text-gray-500">
-                <p className="font-medium mb-1">💡 Variáveis disponíveis:</p>
-                <div className="flex flex-wrap gap-2">
-                  <code className="px-2 py-1 bg-gray-100 rounded text-xs">{'{{name}}'}</code>
-                  <span className="text-xs text-gray-400">ou</span>
-                  <code className="px-2 py-1 bg-gray-100 rounded text-xs">{'{{nome}}'}</code>
-                  <span className="text-xs text-gray-400">-</span>
-                  <code className="px-2 py-1 bg-gray-100 rounded text-xs">{'{{phone}}'}</code>
-                  <span className="text-xs text-gray-400">ou</span>
-                  <code className="px-2 py-1 bg-gray-100 rounded text-xs">{'{{telefone}}'}</code>
+            
+            {/* Botões para inserir variáveis */}
+            <div className="mt-2 space-y-2">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-sm text-gray-600 font-medium">Inserir variável:</span>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => insertVariable('{{name}}')}
+                  className="text-xs"
+                >
+                  {'{{name}}'}
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => insertVariable('{{nome}}')}
+                  className="text-xs"
+                >
+                  {'{{nome}}'}
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => insertVariable('{{phone}}')}
+                  className="text-xs"
+                >
+                  {'{{phone}}'}
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => insertVariable('{{telefone}}')}
+                  className="text-xs"
+                >
+                  {'{{telefone}}'}
+                </Button>
+              </div>
+              
+              <div className="flex items-start justify-between">
+                <div className="text-xs text-gray-500">
+                  <p className="text-gray-400">
+                    💡 Clique nos botões acima para inserir variáveis na posição do cursor. As variáveis serão substituídas automaticamente pelo nome/telefone de cada contato.
+                  </p>
                 </div>
-                <p className="text-xs mt-1 text-gray-400">
-                  As variáveis serão substituídas automaticamente pelo nome/telefone de cada contato
+                <p className="text-sm text-gray-500">
+                  {message.length} caracteres
                 </p>
               </div>
-              <p className="text-sm text-gray-500">
-                {message.length} caracteres
-              </p>
             </div>
           </div>
 
