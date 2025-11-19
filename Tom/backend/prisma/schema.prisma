@@ -294,6 +294,7 @@ model Message {
   mediaUrl       String?
   status         String   @default("sent") // sent, delivered, read, failed
   isFromContact  Boolean  @default(false) // true se mensagem veio do contato, false se do atendente
+  senderName     String? // Nome do remetente (usado em grupos para identificar quem enviou)
   timestamp      DateTime @default(now())
   metadata       Json? // Dados adicionais (ex: localização, duração de áudio)
   externalId     String? // ID da mensagem no WhatsApp (para evitar duplicatas)

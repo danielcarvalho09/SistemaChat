@@ -469,6 +469,7 @@ export class MessageService {
     isFromMe: boolean = false,
     externalId?: string,
     pushName?: string | null,
+    senderName?: string | null, // ✅ Nome do remetente (para grupos)
     quotedContext?: {
       stanzaId?: string;
       participant?: string;
@@ -677,6 +678,7 @@ export class MessageService {
           content: messageText,
           messageType,
           isFromContact: !isFromMe, // true se veio do contato, false se foi enviado pelo sistema
+          senderName: senderName || null, // ✅ Nome do remetente (importante para grupos)
           status: 'delivered',
           mediaUrl,
           externalId: externalId || `generated-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,

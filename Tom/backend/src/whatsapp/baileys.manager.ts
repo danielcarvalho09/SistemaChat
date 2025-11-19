@@ -71,6 +71,7 @@ type IncomingRetryItem = {
   isFromMe: boolean;
   externalId: string;
   pushName: string | null;
+  senderName: string | null; // ✅ Nome do remetente (para grupos)
   quotedContext?: {
     stanzaId?: string;
     participant?: string;
@@ -863,8 +864,72 @@ class BaileysManager {
         const isFromMe = msg.key.fromMe || false;
         const externalId = msg.key.id;
         const pushName = msg.pushName || null;
+        
+        // ✅ Capturar participante em grupos (quem enviou a mensagem dentro do grupo)
+        const isGroup = from?.endsWith('@g.us') || false;
+        const participant = msg.key.participant || null; // JID do participante que enviou (em grupos)
+        let senderName: string | null = null;
+        
+        // Se for grupo e não for mensagem nossa, buscar nome do participante
+        if (isGroup && !isFromMe && participant) {
+          try {
+            // Tentar buscar nome do participante do cache de contatos ou do WhatsApp
+            const client = this.clients.get(connectionId);
+            if (client?.socket) {
+              try {
+                // Buscar informações do participante
+                const [result] = await client.socket.onWhatsApp(participant);
+                if (result?.exists) {
+                  // Buscar nome do perfil
+                  const contact = await client.socket.fetchStatus(participant).catch(() => null);
+                  if (contact) {
+                    senderName = contact.status || null;
+                  }
+                  
+                  // Se não encontrou status, tentar buscar do grupo
+                  if (!senderName) {
+                    try {
+                      const groupMetadata = await client.socket.groupMetadata(from);
+                      const participantInfo = groupMetadata.participants.find(p => p.id === participant);
+                      if (participantInfo) {
+                        senderName = participantInfo.name || participantInfo.notify || null;
+                      }
+                    } catch (groupError) {
+                      logger.debug(`[Baileys] Could not fetch participant name from group:`, groupError);
+                    }
+                  }
+                  
+                  // Se ainda não encontrou, usar pushName da mensagem
+                  if (!senderName && pushName) {
+                    senderName = pushName;
+                  }
+                }
+              } catch (error) {
+                logger.debug(`[Baileys] Could not fetch participant info:`, error);
+                // Fallback: usar pushName se disponível
+                if (pushName) {
+                  senderName = pushName;
+                }
+              }
+            } else {
+              // Fallback: usar pushName se disponível
+              if (pushName) {
+                senderName = pushName;
+              }
+            }
+          } catch (error) {
+            logger.debug(`[Baileys] Error fetching sender name for group message:`, error);
+            // Fallback: usar pushName se disponível
+            if (pushName) {
+              senderName = pushName;
+            }
+          }
+        } else if (!isFromMe && pushName) {
+          // Para mensagens individuais, usar pushName
+          senderName = pushName;
+        }
 
-        logger.info(`[Baileys] 📱 Processing message ${processedIndex}/${totalMessages} from ${from}, isFromMe: ${isFromMe}, pushName: ${pushName}`);
+        logger.info(`[Baileys] 📱 Processing message ${processedIndex}/${totalMessages} from ${from}, isFromMe: ${isFromMe}, pushName: ${pushName}, senderName: ${senderName || 'N/A'}, isGroup: ${isGroup}`);
 
         let messageTimestamp: Date | null = null;
         if (msg.messageTimestamp) {
@@ -1184,6 +1249,7 @@ class BaileysManager {
           isFromMe,
           externalId,
           pushName,
+          senderName, // ✅ Passar nome do remetente (importante para grupos)
           quotedContext,
           processedIndex,
           totalMessages
@@ -1223,6 +1289,7 @@ class BaileysManager {
     isFromMe: boolean,
     externalId: string,
     pushName: string | null,
+    senderName: string | null, // ✅ Nome do remetente (para grupos)
     quotedContext: {
       stanzaId?: string;
       participant?: string;
@@ -1249,6 +1316,7 @@ class BaileysManager {
             isFromMe,
             externalId,
             pushName,
+            senderName, // ✅ Passar nome do remetente
             quotedContext || undefined
           );
         })();
@@ -1291,6 +1359,7 @@ class BaileysManager {
             isFromMe,
             externalId,
             pushName,
+            senderName, // ✅ Incluir nome do remetente
             quotedContext: quotedContext || undefined,
             retries: existingRetry ? existingRetry.retries + 1 : attempt,
             lastAttempt: new Date(),
@@ -1343,6 +1412,7 @@ class BaileysManager {
         retryItem.isFromMe,
         retryItem.externalId,
         retryItem.pushName,
+        retryItem.senderName, // ✅ Passar nome do remetente
         retryItem.quotedContext
       );
       this.syncRetryQueue.delete(retryKey);

@@ -97,6 +97,7 @@ export interface Message {
   mediaUrl: string | null;
   status: MessageStatus;
   isFromContact: boolean;
+  senderName: string | null; // Nome do remetente (usado em grupos)
   timestamp: string;
   createdAt: string;
   quotedMessageId: string | null;

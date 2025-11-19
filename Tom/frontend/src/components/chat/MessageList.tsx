@@ -245,6 +245,9 @@ export function MessageList({ messages, onReply }: MessageListProps) {
         // isFromContact = false -> mensagem do agente (direita, verde)
         const isFromMe = !message.isFromContact;
         
+        // Verificar se é grupo e mostrar nome do remetente
+        const isGroup = message.senderName && message.isFromContact;
+        
         return (
           <div
             key={message.id}
@@ -254,6 +257,12 @@ export function MessageList({ messages, onReply }: MessageListProps) {
             )}
           >
             <div className="relative group" style={{ maxWidth: '70%' }}>
+              {/* Nome do remetente em grupos */}
+              {isGroup && (
+                <div className="text-xs text-gray-400 mb-1 px-1">
+                  {message.senderName}
+                </div>
+              )}
               <div
                 className={cn(
                   'rounded-lg shadow-sm relative',
