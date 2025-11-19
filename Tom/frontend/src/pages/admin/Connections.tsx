@@ -746,7 +746,7 @@ export function Connections() {
       )}
 
       {/* QR Code Modal */}
-      {showQRModal && selectedConnection?.qrCode && (
+      {showQRModal && selectedConnection && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
           <div className="bg-white rounded-lg shadow-xl p-6 max-w-md mx-4">
             <div className="flex items-center justify-between mb-4">
@@ -761,24 +761,56 @@ export function Connections() {
             </div>
             
             <div className="bg-white p-4 rounded-lg border-2 border-gray-200 mb-4 flex items-center justify-center">
-              {selectedConnection.qrCode ? (
-                <img
-                  src={selectedConnection.qrCode}
-                  alt="QR Code"
-                  className="w-64 h-64"
-                  onError={() => {
-                    console.error('❌ Erro ao carregar imagem do QR Code');
-                    console.log('QR Code URL:', selectedConnection.qrCode);
-                  }}
-                />
-              ) : (
-                <div className="w-64 h-64 flex items-center justify-center text-gray-400">
-                  <div className="text-center">
-                    <div className="text-4xl mb-2">⏳</div>
-                    <p>Gerando QR Code...</p>
+              {/* ✅ Verificar se conexão ainda está em status que precisa de QR */}
+              {(() => {
+                const connection = connections.find(c => c.id === selectedConnection.id);
+                // Se conexão não existe mais ou não está mais em status 'qr'/'connecting', fechar modal
+                if (!connection || (connection.status !== 'qr' && connection.status !== 'connecting')) {
+                  setTimeout(() => setShowQRModal(false), 100);
+                  return (
+                    <div className="w-64 h-64 flex items-center justify-center text-gray-400">
+                      <div className="text-center">
+                        <div className="text-4xl mb-2">✅</div>
+                        <p>Conexão já estabelecida</p>
+                      </div>
+                    </div>
+                  );
+                }
+                
+                // Se tem QR code, mostrar
+                if (selectedConnection.qrCode) {
+                  // ✅ Verificar se é data URL (base64) ou URL de API
+                  const isDataUrl = selectedConnection.qrCode.startsWith('data:image');
+                  return (
+                    <img
+                      src={selectedConnection.qrCode}
+                      alt="QR Code"
+                      className="w-64 h-64"
+                      onError={(e) => {
+                        console.error('❌ Erro ao carregar imagem do QR Code');
+                        // ✅ Prevenir recarregamento automático - esconder imagem e não tentar novamente
+                        e.currentTarget.style.display = 'none';
+                        // Se não é data URL e falhou, pode ser que a URL não existe mais
+                        if (!isDataUrl) {
+                          console.log('⚠️ QR Code URL não encontrada, aguardando novo QR code via WebSocket...');
+                        }
+                      }}
+                      loading="eager"
+                      decoding="async"
+                    />
+                  );
+                }
+                
+                // Se não tem QR code ainda, mostrar loading
+                return (
+                  <div className="w-64 h-64 flex items-center justify-center text-gray-400">
+                    <div className="text-center">
+                      <div className="text-4xl mb-2">⏳</div>
+                      <p>Gerando QR Code...</p>
+                    </div>
                   </div>
-                </div>
-              )}
+                );
+              })()}
             </div>
             
             <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
