@@ -191,6 +191,11 @@ export class WhatsAppService {
         logger.error(`[WhatsApp] Error connecting ${connectionId}:`, error);
         throw error;
       }
+    } catch (error) {
+      // Tratar erros gerais (ex: NotFoundError)
+      logger.error(`[WhatsApp] Error in connectConnection for ${connectionId}:`, error);
+      throw error;
+    }
   }
 
   async manualReconnectConnection(connectionId: string) {

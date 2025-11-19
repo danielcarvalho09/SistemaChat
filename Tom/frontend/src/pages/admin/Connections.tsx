@@ -597,10 +597,11 @@ export function Connections() {
                       variant="outline"
                       size="sm"
                       onClick={() => handleConnect(connection.id)}
+                      disabled={connectingConnections.current.has(connection.id) || connection.status === 'connecting'}
                       className="flex-1"
                     >
                       <QrCode className="w-4 h-4 mr-2" />
-                      Conectar
+                      {(connectingConnections.current.has(connection.id) || connection.status === 'connecting') ? 'Conectando...' : 'Conectar'}
                     </Button>
                   ) : connection.status === 'connecting' ? (
                     <Button
