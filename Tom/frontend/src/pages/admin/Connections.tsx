@@ -47,6 +47,7 @@ export function Connections() {
   const socketRef = useRef<any>(null);
   const hasSetupListeners = useRef(false);
   const connectionTimeouts = useRef<Map<string, NodeJS.Timeout>>(new Map()); // ✅ Timeouts por conexão
+  const connectingConnections = useRef<Set<string>>(new Set()); // ✅ Rastrear conexões em andamento
 
   useEffect(() => {
     fetchConnections();
@@ -71,6 +72,9 @@ export function Connections() {
     // Evento: QR Code gerado
     socket.on('whatsapp_qr_code', (data: { connectionId: string; qrCode: string }) => {
       console.log('✅ QR Code recebido para:', data.connectionId);
+
+      // ✅ Limpar do set de conexões em andamento (conexão iniciada com sucesso)
+      connectingConnections.current.delete(data.connectionId);
 
       // Atualizar conexões
       setConnections((prev) =>
@@ -112,6 +116,9 @@ export function Connections() {
     socket.on('whatsapp_connected', (data: { connectionId: string }) => {
       console.log('✅ WhatsApp conectado:', data.connectionId);
       
+      // ✅ Limpar do set de conexões em andamento
+      connectingConnections.current.delete(data.connectionId);
+      
       // ✅ Limpar timeout ao conectar com sucesso
       const timeoutId = connectionTimeouts.current.get(data.connectionId);
       if (timeoutId) {
@@ -140,6 +147,9 @@ export function Connections() {
     socket.on('whatsapp_disconnected', (data: { connectionId: string }) => {
       console.log('❌ WhatsApp desconectado:', data.connectionId);
       
+      // ✅ Limpar do set de conexões em andamento
+      connectingConnections.current.delete(data.connectionId);
+      
       // ✅ Limpar timeout ao desconectar
       const timeoutId = connectionTimeouts.current.get(data.connectionId);
       if (timeoutId) {
@@ -166,6 +176,9 @@ export function Connections() {
     // ✅ Evento: WhatsApp falhou ao conectar (novo)
     socket.on('whatsapp_connection_failed', (data: { connectionId: string; error?: string }) => {
       console.error('❌ WhatsApp falhou ao conectar:', data.connectionId, data.error);
+      
+      // ✅ Limpar do set de conexões em andamento
+      connectingConnections.current.delete(data.connectionId);
       
       // ✅ Limpar timeout ao falhar
       const timeoutId = connectionTimeouts.current.get(data.connectionId);
@@ -317,6 +330,21 @@ export function Connections() {
   };
 
   const handleConnect = async (connectionId: string) => {
+    // ✅ PROTEÇÃO: Evitar múltiplas chamadas simultâneas
+    if (connectingConnections.current.has(connectionId)) {
+      console.warn(`⚠️ Conexão ${connectionId} já está em processo de conexão, ignorando...`);
+      return;
+    }
+
+    const connection = connections.find(c => c.id === connectionId);
+    if (connection?.status === 'connecting') {
+      console.warn(`⚠️ Conexão ${connectionId} já está em processo de conexão (status), ignorando...`);
+      return;
+    }
+
+    // Marcar como em processo de conexão
+    connectingConnections.current.add(connectionId);
+
     try {
       // ✅ Limpar timeout anterior se existir
       const existingTimeout = connectionTimeouts.current.get(connectionId);
@@ -332,6 +360,8 @@ export function Connections() {
         )
       );
 
+      console.log(`🔄 Iniciando conexão: ${connectionId}`);
+
       // ✅ Timeout de 30 segundos para conexão
       const timeoutPromise = new Promise((_, reject) => {
         setTimeout(() => reject(new Error('Timeout: Conexão demorou mais de 30 segundos')), 30000);
@@ -342,6 +372,8 @@ export function Connections() {
         api.post(`/connections/${connectionId}/connect`),
         timeoutPromise,
       ]) as Promise<any>;
+      
+      console.log(`✅ Requisição de conexão enviada`);
       
       // ✅ Timeout automático: se após 60s ainda estiver "connecting", voltar para "disconnected"
       const timeoutId = setTimeout(() => {
@@ -380,6 +412,9 @@ export function Connections() {
           conn.id === connectionId ? { ...conn, status: 'disconnected' } : conn
         )
       );
+    } finally {
+      // ✅ SEMPRE remover do set de conexões em andamento
+      connectingConnections.current.delete(connectionId);
     }
   };
 
