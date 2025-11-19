@@ -36,8 +36,13 @@ export default defineConfig(({ mode }) => {
     build: {
       outDir: 'dist',
       sourcemap: false,
+      // ✅ Garantir que arquivos JS tenham hash no nome (Vite já faz isso por padrão)
       rollupOptions: {
         output: {
+          // ✅ Adicionar hash baseado no conteúdo (garante cache busting)
+          entryFileNames: 'assets/[name]-[hash].js',
+          chunkFileNames: 'assets/[name]-[hash].js',
+          assetFileNames: 'assets/[name]-[hash].[ext]',
           manualChunks: {
             'react-vendor': ['react', 'react-dom', 'react-router-dom'],
             'ui-vendor': ['@radix-ui/react-avatar', '@radix-ui/react-dialog', '@radix-ui/react-dropdown-menu'],
