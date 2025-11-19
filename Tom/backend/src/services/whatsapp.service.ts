@@ -154,7 +154,7 @@ export class WhatsAppService {
         throw new NotFoundError('Connection not found');
       }
 
-      // Verificar se já está conectado
+      // Verificar se já está conectado ANTES de tentar criar
       const existingClient = baileysManager.getClient(connectionId);
       if (existingClient && existingClient.status === 'connected') {
         logger.info(`[WhatsApp] Connection ${connectionId} already connected`);
@@ -167,26 +167,30 @@ export class WhatsAppService {
 
       // Criar cliente Baileys (QR Code será emitido via Socket.IO)
       logger.info(`[WhatsApp] Connecting ${connectionId}...`);
-      await baileysManager.createClient(connectionId);
       
-      return {
-        connectionId,
-        status: 'connecting',
-        message: 'Connection initiated. QR Code will be sent via WebSocket.',
-      };
-    } catch (error) {
-      if (error instanceof ClientCreationInProgressError) {
-        logger.warn(`[WhatsApp] Connect request for ${connectionId} ignored - client creation already in progress.`);
+      try {
+        await baileysManager.createClient(connectionId);
+        
         return {
           connectionId,
           status: 'connecting',
-          message: 'Client creation already in progress. Aguarde alguns segundos.',
+          message: 'Connection initiated. QR Code will be sent via WebSocket.',
         };
+      } catch (error) {
+        // Se for erro de criação em progresso, retornar status apropriado (não é um erro crítico)
+        if (error instanceof ClientCreationInProgressError) {
+          logger.info(`[WhatsApp] Connection ${connectionId} creation already in progress - returning status`);
+          return {
+            connectionId,
+            status: 'connecting',
+            message: 'Conexão já está em andamento. Aguarde alguns segundos...',
+          };
+        }
+        
+        // Outros erros devem ser propagados
+        logger.error(`[WhatsApp] Error connecting ${connectionId}:`, error);
+        throw error;
       }
-      
-      logger.error(`[WhatsApp] Error connecting ${connectionId}:`, error);
-      throw error;
-    }
   }
 
   async manualReconnectConnection(connectionId: string) {

@@ -87,10 +87,11 @@ type IncomingRetryItem = {
 class BaileysManager {
   private clients: Map<string, BaileysClient> = new Map();
   private prisma = getPrismaClient();
-  private reconnectionLocks: Map<string, boolean> = new Map(); // Previne reconexões simultâneas
+  private reconnectionLocks: Map<string, { locked: boolean; lockedAt: Date }> = new Map(); // Previne reconexões simultâneas com timestamp
   private syncRetryQueue: Map<string, IncomingRetryItem> = new Map(); // Fila de retry para sincronização
   private readonly MAX_RECONNECT_ATTEMPTS = 15; // Aumentado de 10 para 15
   private readonly QR_RESET_DELAY_MS = 2000;
+  private readonly LOCK_TIMEOUT_MS = 120000; // 2 minutos - timeout para locks presos
   private circuitBreaker: Map<string, { failures: number; lastFailure: Date; state: 'closed' | 'open' | 'half-open' }> = new Map();
   private readonly CIRCUIT_BREAKER_THRESHOLD = 5; // Abrir circuit após 5 falhas consecutivas
   private readonly CIRCUIT_BREAKER_TIMEOUT = 60000; // 1 minuto antes de tentar novamente
@@ -104,18 +105,36 @@ class BaileysManager {
       logger.info(`[Baileys] Creating client for connection: ${connectionId}`);
 
       // Verificar se já está em processo de criação/reconexão
-      if (this.reconnectionLocks.get(connectionId)) {
-        logger.warn(`[Baileys] Client ${connectionId} is already being created/reconnected, skipping...`);
-        throw new ClientCreationInProgressError(connectionId);
+      const existingLock = this.reconnectionLocks.get(connectionId);
+      if (existingLock && existingLock.locked) {
+        // Verificar se o lock expirou (timeout de segurança)
+        const lockAge = Date.now() - existingLock.lockedAt.getTime();
+        if (lockAge > this.LOCK_TIMEOUT_MS) {
+          logger.warn(`[Baileys] ⚠️ Lock expired for ${connectionId} (${Math.round(lockAge / 1000)}s old) - releasing and retrying`);
+          this.reconnectionLocks.delete(connectionId);
+        } else {
+          logger.warn(`[Baileys] Client ${connectionId} is already being created/reconnected (lock age: ${Math.round(lockAge / 1000)}s), skipping...`);
+          throw new ClientCreationInProgressError(connectionId);
+        }
       }
 
-      // Marcar como em processo de criação
-      this.reconnectionLocks.set(connectionId, true);
-
-      // Remover cliente existente se houver
+      // Verificar se cliente já existe e está conectado
       const existingClient = this.clients.get(connectionId);
-      if (existingClient) {
-        logger.warn(`[Baileys] Client ${connectionId} already exists, removing...`);
+      if (existingClient && existingClient.status === 'connected') {
+        logger.info(`[Baileys] Client ${connectionId} already exists and is connected - returning existing client`);
+        return existingClient;
+      }
+
+      // Marcar como em processo de criação (com timestamp)
+      this.reconnectionLocks.set(connectionId, {
+        locked: true,
+        lockedAt: new Date(),
+      });
+
+      // Remover cliente existente se houver (se não estiver conectado)
+      // Usar a mesma variável existingClient já declarada acima
+      if (existingClient && existingClient.status !== 'connected') {
+        logger.warn(`[Baileys] Client ${connectionId} already exists but not connected, removing...`);
         await this.removeClient(connectionId, false); // false = não fazer logout
       }
 
@@ -133,7 +152,7 @@ class BaileysManager {
         // Configurações otimizadas para melhorar estabilidade da conexão
         connectTimeoutMs: 60000, // Timeout de 60s para conectar
         defaultQueryTimeoutMs: 60000, // Timeout para queries
-        keepAliveIntervalMs: 20000, // Pings a cada 20s (equilíbrio entre bateria e estabilidade)
+        keepAliveIntervalMs: 30000, // Pings a cada 30s (mais estável, menos agressivo)
         retryRequestDelayMs: 250, // Delay mínimo entre tentativas
         emitOwnEvents: true, // Emitir eventos de mensagens enviadas por nós
         fireInitQueries: true, // Executar queries iniciais ao conectar
@@ -240,8 +259,13 @@ class BaileysManager {
     } catch (error) {
       logger.error(`[Baileys] Error creating client ${connectionId}:`, error);
       
-      // ✅ LIBERAR LOCK EM CASO DE ERRO
+      // ✅ LIBERAR LOCK EM CASO DE ERRO (sempre garantir liberação)
       this.reconnectionLocks.delete(connectionId);
+      
+      // Se for ClientCreationInProgressError, não fazer mais nada
+      if (error instanceof ClientCreationInProgressError) {
+        throw error; // Re-throw para que o chamador saiba que é um erro esperado
+      }
       
       // ✅ Emitir evento de falha de conexão
       try {
@@ -467,7 +491,8 @@ class BaileysManager {
         setTimeout(async () => {
           try {
             // Verificar se não está já reconectando
-            if (!this.reconnectionLocks.get(connectionId)) {
+            const lock = this.reconnectionLocks.get(connectionId);
+            if (!lock || !lock.locked) {
               await this.createClient(connectionId);
             } else {
               logger.info(`[Baileys] Skipping restart for ${connectionId} - already reconnecting`);
@@ -1514,9 +1539,16 @@ class BaileysManager {
    */
   private async attemptReconnection(connectionId: string): Promise<void> {
     // ✅ VERIFICAÇÃO CRÍTICA: Verificar ANTES de qualquer coisa se já está reconectando
-    if (this.reconnectionLocks.get(connectionId)) {
-      logger.info(`[Baileys] ⏭️ Skipping reconnection for ${connectionId}: Already reconnecting (lock active)`);
-      return;
+    const existingLock = this.reconnectionLocks.get(connectionId);
+    if (existingLock && existingLock.locked) {
+      const lockAge = Date.now() - existingLock.lockedAt.getTime();
+      if (lockAge > this.LOCK_TIMEOUT_MS) {
+        logger.warn(`[Baileys] ⚠️ Lock expired for ${connectionId} - releasing`);
+        this.reconnectionLocks.delete(connectionId);
+      } else {
+        logger.info(`[Baileys] ⏭️ Skipping reconnection for ${connectionId}: Already reconnecting (lock age: ${Math.round(lockAge / 1000)}s)`);
+        return;
+      }
     }
 
     const client = this.clients.get(connectionId);
@@ -1532,8 +1564,11 @@ class BaileysManager {
       return;
     }
 
-    // ✅ MARCAR LOCK ANTES DE QUALQUER OPERAÇÃO
-    this.reconnectionLocks.set(connectionId, true);
+    // ✅ MARCAR LOCK ANTES DE QUALQUER OPERAÇÃO (com timestamp)
+    this.reconnectionLocks.set(connectionId, {
+      locked: true,
+      lockedAt: new Date(),
+    });
     
     // Marcar como reconectando
     client.isReconnecting = true;
@@ -2367,7 +2402,7 @@ class BaileysManager {
     const client = this.clients.get(connectionId);
     if (!client) return;
 
-    // Verificar conexão a cada 10 segundos (mais agressivo)
+    // Verificar conexão a cada 30 segundos (menos agressivo, mais estável)
     client.keepAliveInterval = setInterval(() => {
       const currentClient = this.clients.get(connectionId);
       if (!currentClient) {
@@ -2387,25 +2422,37 @@ class BaileysManager {
           logger.debug(`[Baileys] 💓 Keepalive ${connectionId} - No messages received yet`);
         }
         
-        // Verificar se heartbeat está funcionando
+        // Verificar se heartbeat está funcionando (aumentar tolerância para 90s)
         if (lastHeartbeat) {
           const secondsSinceHeartbeat = (now.getTime() - lastHeartbeat.getTime()) / 1000;
-          if (secondsSinceHeartbeat > 30) {
+          if (secondsSinceHeartbeat > 90) {
             logger.warn(`[Baileys] ⚠️ No heartbeat response in ${secondsSinceHeartbeat.toFixed(0)}s - connection may be dead`);
           }
         }
       } else {
-        logger.warn(`[Baileys] ⚠️ Connection ${connectionId} is ${currentClient.status}, not connected!`);
+        // Não logar warning para status 'connecting' ou 'qr' - são estados normais
+        if (currentClient.status !== 'connecting' && currentClient.status !== 'qr') {
+          logger.warn(`[Baileys] ⚠️ Connection ${connectionId} is ${currentClient.status}, not connected!`);
+        }
         
         // Se está desconectado mas tem credenciais, tentar reconectar
-        if (currentClient.hasCredentials && !currentClient.isReconnecting) {
+        // Mas apenas se não estiver já reconectando e não estiver em processo de conexão
+        const lock = this.reconnectionLocks.get(connectionId);
+        const isLocked = lock && lock.locked;
+        
+        if (
+          currentClient.hasCredentials && 
+          !currentClient.isReconnecting && 
+          currentClient.status === 'disconnected' &&
+          !isLocked
+        ) {
           logger.info(`[Baileys] 🔄 Detected disconnection, triggering reconnection...`);
           this.attemptReconnection(connectionId).catch((err) => {
             logger.error(`[Baileys] Failed to trigger reconnection:`, err);
           });
         }
       }
-    }, 10000); // 10 segundos (mais rápido que antes)
+    }, 30000); // 30 segundos (menos agressivo, mais estável)
 
     logger.info(`[Baileys] 🔍 Connection monitoring started for ${connectionId}`);
   }
@@ -2421,7 +2468,7 @@ class BaileysManager {
     const client = this.clients.get(connectionId);
     if (!client) return;
 
-    // Heartbeat robusto a cada 30 segundos
+    // Heartbeat robusto a cada 60 segundos (menos frequente, mais estável)
     client.heartbeatInterval = setInterval(async () => {
       const currentClient = this.clients.get(connectionId);
       if (!currentClient) {
@@ -2492,11 +2539,11 @@ class BaileysManager {
         } catch (error) {
           logger.warn(`[Baileys] 💔 Heartbeat failed for ${connectionId}:`, error);
           
-          // Se heartbeat falhar, a conexão pode estar morta
-          logger.info(`[Baileys] 🔄 Heartbeat failure detected, connection may be dead`);
+          // Não desconectar imediatamente - apenas logar o erro
+          // O monitoramento de conexão vai detectar se realmente desconectou
         }
       }
-    }, 30000); // 30 segundos (intervalo otimizado)
+    }, 60000); // 60 segundos (menos frequente, mais estável)
 
     logger.info(`[Baileys] 💚 Active heartbeat started for ${connectionId}`);
   }
@@ -2782,6 +2829,22 @@ class BaileysManager {
             status: 'awaiting_qr',
             message: 'Aguardando QR code...',
           };
+    }
+
+    // Verificar se já está em processo de criação/reconexão
+    const existingLock = this.reconnectionLocks.get(connectionId);
+    if (existingLock && existingLock.locked) {
+      const lockAge = Date.now() - existingLock.lockedAt.getTime();
+      if (lockAge > this.LOCK_TIMEOUT_MS) {
+        logger.warn(`[Baileys] ⚠️ Lock expired for ${connectionId} - releasing`);
+        this.reconnectionLocks.delete(connectionId);
+      } else {
+        logger.info(`[Baileys] 🔁 Manual reconnect for ${connectionId} ignored - reconnection already in progress (lock age: ${Math.round(lockAge / 1000)}s).`);
+        return {
+          status: 'already_reconnecting',
+          message: 'Já existe um processo de reconexão em andamento.',
+        };
+      }
     }
 
     // Se o cliente existe e está reconectando, informar
