@@ -25,6 +25,10 @@ app.use(express.static(path.join(__dirname, 'dist'), {
 
 // Handle React Router - send all requests to index.html
 app.use((req, res) => {
+  // ✅ IMPORTANTE: Headers para evitar cache do HTML
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
   res.sendFile(path.join(__dirname, 'dist', 'index.html'));
 });
 
