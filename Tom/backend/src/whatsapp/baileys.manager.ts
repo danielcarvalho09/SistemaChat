@@ -873,43 +873,23 @@ class BaileysManager {
         // Se for grupo e não for mensagem nossa, buscar nome do participante
         if (isGroup && !isFromMe && participant) {
           try {
-            // Tentar buscar nome do participante do cache de contatos ou do WhatsApp
+            // Tentar buscar nome do participante do grupo
             const client = this.clients.get(connectionId);
             if (client?.socket) {
               try {
-                // Buscar informações do participante
-                const [result] = await client.socket.onWhatsApp(participant);
-                if (result?.exists) {
-                  // Buscar nome do perfil
-                  const contact = await client.socket.fetchStatus(participant).catch(() => null);
-                  if (contact) {
-                    senderName = contact.status || null;
-                  }
-                  
-                  // Se não encontrou status, tentar buscar do grupo
-                  if (!senderName) {
-                    try {
-                      const groupMetadata = await client.socket.groupMetadata(from);
-                      const participantInfo = groupMetadata.participants.find(p => p.id === participant);
-                      if (participantInfo) {
-                        senderName = participantInfo.name || participantInfo.notify || null;
-                      }
-                    } catch (groupError) {
-                      logger.debug(`[Baileys] Could not fetch participant name from group:`, groupError);
-                    }
-                  }
-                  
-                  // Se ainda não encontrou, usar pushName da mensagem
-                  if (!senderName && pushName) {
-                    senderName = pushName;
-                  }
+                // Buscar informações do grupo (forma mais confiável)
+                const groupMetadata = await client.socket.groupMetadata(from);
+                const participantInfo = groupMetadata.participants.find(p => p.id === participant);
+                if (participantInfo) {
+                  senderName = participantInfo.name || participantInfo.notify || null;
                 }
-              } catch (error) {
-                logger.debug(`[Baileys] Could not fetch participant info:`, error);
-                // Fallback: usar pushName se disponível
-                if (pushName) {
-                  senderName = pushName;
-                }
+              } catch (groupError) {
+                logger.debug(`[Baileys] Could not fetch participant name from group:`, groupError);
+              }
+              
+              // Se não encontrou do grupo, usar pushName da mensagem
+              if (!senderName && pushName) {
+                senderName = pushName;
               }
             } else {
               // Fallback: usar pushName se disponível
