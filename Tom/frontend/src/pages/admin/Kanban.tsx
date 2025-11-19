@@ -216,7 +216,7 @@ export function Kanban() {
                       key={conversation.id}
                       id={conversation.id}
                       draggable
-                      className="bg-white border border-gray-200 rounded-lg p-4 cursor-move hover:shadow-md transition-shadow"
+                      className="bg-white border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow"
                     >
                       {/* Contact Info */}
                       <div className="flex items-start justify-between mb-3">

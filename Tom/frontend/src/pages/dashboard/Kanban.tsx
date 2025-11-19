@@ -361,7 +361,7 @@ export function Kanban() {
                   <div className="flex-1 overflow-y-auto p-3 space-y-3 min-h-[200px] max-h-[calc(100vh-260px)]">
                     {column.conversations.map((conversation) => (
                       <DraggableCard key={conversation.id} id={conversation.id}>
-                        <div className="bg-gray-50 border border-gray-200 p-4 cursor-move hover:shadow-md transition-shadow">
+                        <div className="bg-gray-50 border border-gray-200 p-4 hover:shadow-md transition-shadow">
                           {/* Contact Info */}
                           <div className="flex items-start justify-between mb-2">
                             <div className="flex-1">
