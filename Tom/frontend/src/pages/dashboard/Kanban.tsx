@@ -15,6 +15,7 @@ import { api } from '../../lib/api';
 import { toast } from 'sonner';
 import { GlassButton } from '../../components/ui/glass-button';
 import { formatPhoneNumber } from '../../utils/formatPhone';
+import { MessageModal } from '../../components/kanban/MessageModal';
 
 interface KanbanStage {
   id: string;
@@ -93,6 +94,7 @@ export function Kanban() {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [newStageName, setNewStageName] = useState('');
   const [newStageColor, setNewStageColor] = useState('#3B82F6');
+  const [selectedConversation, setSelectedConversation] = useState<KanbanConversation | null>(null);
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -361,7 +363,14 @@ export function Kanban() {
                   <div className="flex-1 overflow-y-auto p-3 space-y-3 min-h-[200px] max-h-[calc(100vh-260px)]">
                     {column.conversations.map((conversation) => (
                       <DraggableCard key={conversation.id} id={conversation.id}>
-                        <div className="bg-gray-50 border border-gray-200 p-4 hover:shadow-md transition-shadow">
+                        <div 
+                          className="relative bg-gray-50 border border-gray-200 p-4 hover:shadow-md transition-shadow cursor-pointer"
+                          onClick={(e) => {
+                            // Prevenir que o drag seja acionado ao clicar
+                            e.stopPropagation();
+                            setSelectedConversation(conversation);
+                          }}
+                        >
                           {/* Contact Info */}
                           <div className="flex items-start justify-between mb-2">
                             <div className="flex-1">
@@ -468,6 +477,18 @@ export function Kanban() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Modal de Mensagem */}
+      {selectedConversation && (
+        <MessageModal
+          conversation={selectedConversation}
+          onClose={() => setSelectedConversation(null)}
+          onMessageSent={() => {
+            setSelectedConversation(null);
+            loadBoard(); // Recarregar o board após enviar mensagem
+          }}
+        />
       )}
     </div>
   );
