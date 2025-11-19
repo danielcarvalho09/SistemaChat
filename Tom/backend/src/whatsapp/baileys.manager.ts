@@ -17,7 +17,7 @@ import path from 'path';
 import { logger } from '../config/logger.js';
 import { getSocketServer } from '../websocket/socket.server.js';
 import { getPrismaClient } from '../config/database.js';
-import { encrypt, decrypt, isEncrypted } from '../utils/encryption.js';
+// Criptografia removida - estava impedindo reconexão
 
 export class ClientCreationInProgressError extends Error {
   constructor(connectionId: string) {
@@ -185,12 +185,27 @@ class BaileysManager {
       });
 
       // Event: Sincronização de histórico (mensagens antigas)
-      socket.ev.on('messaging-history.set', async (history) => {
-        logger.info(`[Baileys] 📚 History sync received for ${connectionId}: ${history.messages?.length || 0} messages`);
-        if (history.messages && history.messages.length > 0) {
-          // Processar mensagens do histórico
+      // Baseado em: https://baileys.wiki/docs/socket/history-sync
+      socket.ev.on('messaging-history.set', async ({ chats, contacts, messages, syncType }) => {
+        logger.info(`[Baileys] 📚 History sync received for ${connectionId}:`);
+        logger.info(`  - Messages: ${messages?.length || 0}`);
+        logger.info(`  - Chats: ${chats?.length || 0}`);
+        logger.info(`  - Contacts: ${contacts?.length || 0}`);
+        logger.info(`  - Sync Type: ${syncType || 'unknown'}`);
+        
+        // Armazenar chats e contacts conforme documentação
+        if (chats && chats.length > 0) {
+          await this.handleHistoryChats(connectionId, chats);
+        }
+        
+        if (contacts && contacts.length > 0) {
+          await this.handleHistoryContacts(connectionId, contacts);
+        }
+        
+        // Processar mensagens do histórico
+        if (messages && messages.length > 0) {
           await this.handleIncomingMessages(connectionId, {
-            messages: history.messages,
+            messages,
             type: 'history',
           });
         }
@@ -251,6 +266,9 @@ class BaileysManager {
   /**
    * Implementa auth state persistente no PostgreSQL
    * Baseado em: https://baileys.wiki/docs/socket/configuration#auth
+   * 
+   * ⚠️ CRIPTOGRAFIA REMOVIDA: Estava impedindo reconexão automática
+   * As credenciais agora são salvas sem criptografia para garantir reconexão
    */
   private async usePostgreSQLAuthState(connectionId: string) {
     // Buscar credenciais salvas do banco
@@ -264,23 +282,31 @@ class BaileysManager {
     if (connection?.authData) {
       // Carregar credenciais existentes
       try {
-        let authDataString = connection.authData as string;
+        const authDataString = connection.authData as string;
         
-        // 🔐 DESCRIPTOGRAFAR authData se estiver criptografado
-        if (isEncrypted(authDataString)) {
-          logger.debug(`[Baileys] 🔓 Decrypting auth data for ${connectionId}`);
-          authDataString = decrypt(authDataString);
-        } else {
-          // ⚠️ MIGRAÇÃO: Se não estiver criptografado, é dado legado
-          logger.warn(`[Baileys] ⚠️ Auth data for ${connectionId} is not encrypted (legacy data)`);
+        // Tentar parse direto (sem criptografia)
+        try {
+          const authData = JSON.parse(authDataString, BufferJSON.reviver);
+          creds = authData.creds;
+          keys = authData.keys || {};
+          logger.info(`[Baileys] ✅ Loaded existing auth for ${connectionId} (has credentials)`);
+        } catch (parseError) {
+          // Se falhar, pode ser dado legado criptografado - tentar descriptografar uma vez
+          logger.warn(`[Baileys] ⚠️ Failed to parse auth data, trying legacy decrypt...`);
+          try {
+            const { decrypt } = await import('../utils/encryption.js');
+            const decrypted = decrypt(authDataString);
+            const authData = JSON.parse(decrypted, BufferJSON.reviver);
+            creds = authData.creds;
+            keys = authData.keys || {};
+            logger.info(`[Baileys] ✅ Loaded legacy encrypted auth for ${connectionId} (will save unencrypted)`);
+          } catch (legacyError) {
+            logger.warn(`[Baileys] ⚠️ Failed to parse auth data, creating new credentials:`, parseError);
+            creds = initAuthCreds();
+          }
         }
-        
-        const authData = JSON.parse(authDataString, BufferJSON.reviver);
-        creds = authData.creds;
-        keys = authData.keys || {};
-        logger.info(`[Baileys] ✅ Loaded existing auth for ${connectionId} (has credentials)`);
       } catch (error) {
-        logger.warn(`[Baileys] ⚠️ Failed to parse auth data, creating new credentials:`, error);
+        logger.warn(`[Baileys] ⚠️ Failed to load auth data, creating new credentials:`, error);
         creds = initAuthCreds();
       }
     } else {
@@ -289,7 +315,7 @@ class BaileysManager {
       logger.info(`[Baileys] 🆕 Created NEW auth for ${connectionId} (will generate QR Code)`);
     }
 
-    // Função para salvar credenciais
+    // Função para salvar credenciais (SEM CRIPTOGRAFIA)
     const saveCreds = async () => {
       try {
         // Usar BufferJSON para serializar corretamente os Buffers
@@ -301,16 +327,15 @@ class BaileysManager {
           BufferJSON.replacer
         );
 
-        // 🔐 CRIPTOGRAFAR authData antes de salvar no banco
-        logger.debug(`[Baileys] 🔒 Encrypting auth data for ${connectionId}`);
-        const encryptedAuthData = encrypt(authDataString);
+        // ✅ SALVAR SEM CRIPTOGRAFIA para garantir reconexão
+        logger.debug(`[Baileys] 💾 Saving auth data for ${connectionId} (unencrypted)`);
 
         await this.prisma.whatsAppConnection.update({
           where: { id: connectionId },
-          data: { authData: encryptedAuthData },
+          data: { authData: authDataString },
         });
 
-        logger.debug(`[Baileys] ✅ Saved encrypted auth for ${connectionId}`);
+        logger.debug(`[Baileys] ✅ Saved auth for ${connectionId}`);
       } catch (error) {
         logger.error(`[Baileys] ❌ Error saving auth for ${connectionId}:`, error);
       }
@@ -548,7 +573,114 @@ class BaileysManager {
   }
 
   /**
+   * Manipula chats recebidos do histórico
+   * Baseado em: https://baileys.wiki/docs/socket/history-sync
+   */
+  private async handleHistoryChats(connectionId: string, chats: any[]): Promise<void> {
+    try {
+      logger.info(`[Baileys] 📚 Processing ${chats.length} chats from history sync`);
+      
+      // Armazenar informações de chats para referência futura
+      // Os chats contêm metadados importantes como nome, última mensagem, etc.
+      for (const chat of chats) {
+        try {
+          const jid = chat.id;
+          if (!jid) continue;
+          
+          // Extrair número de telefone do JID (remover @s.whatsapp.net)
+          const phoneNumber = jid.split('@')[0];
+          
+          // Buscar ou criar contato
+          const contact = await this.prisma.contact.upsert({
+            where: { phoneNumber },
+            update: {
+              name: chat.name || undefined,
+              pushName: chat.name || undefined,
+            },
+            create: {
+              phoneNumber,
+              name: chat.name || undefined,
+              pushName: chat.name || undefined,
+            },
+          });
+          
+          // Buscar ou criar conversa
+          await this.prisma.conversation.upsert({
+            where: {
+              contactId_connectionId: {
+                contactId: contact.id,
+                connectionId,
+              },
+            },
+            update: {
+              lastMessageAt: chat.conversationTimestamp ? new Date(Number(chat.conversationTimestamp) * 1000) : undefined,
+            },
+            create: {
+              contactId: contact.id,
+              connectionId,
+              lastMessageAt: chat.conversationTimestamp ? new Date(Number(chat.conversationTimestamp) * 1000) : new Date(),
+            },
+          });
+          
+          logger.debug(`[Baileys] ✅ Processed chat: ${jid}`);
+        } catch (error) {
+          logger.error(`[Baileys] ❌ Error processing chat:`, error);
+        }
+      }
+      
+      logger.info(`[Baileys] ✅ Finished processing ${chats.length} chats`);
+    } catch (error) {
+      logger.error(`[Baileys] ❌ Error handling history chats:`, error);
+    }
+  }
+
+  /**
+   * Manipula contacts recebidos do histórico
+   * Baseado em: https://baileys.wiki/docs/socket/history-sync
+   */
+  private async handleHistoryContacts(connectionId: string, contacts: any[]): Promise<void> {
+    try {
+      logger.info(`[Baileys] 📚 Processing ${contacts.length} contacts from history sync`);
+      
+      // Armazenar informações de contatos para referência futura
+      for (const contact of contacts) {
+        try {
+          const jid = contact.id;
+          if (!jid) continue;
+          
+          // Extrair número de telefone do JID
+          const phoneNumber = jid.split('@')[0];
+          
+          // Atualizar ou criar contato
+          await this.prisma.contact.upsert({
+            where: { phoneNumber },
+            update: {
+              name: contact.name || contact.notify || undefined,
+              pushName: contact.notify || contact.name || undefined,
+            },
+            create: {
+              phoneNumber,
+              name: contact.name || contact.notify || undefined,
+              pushName: contact.notify || contact.name || undefined,
+            },
+          });
+          
+          logger.debug(`[Baileys] ✅ Processed contact: ${jid}`);
+        } catch (error) {
+          logger.error(`[Baileys] ❌ Error processing contact:`, error);
+        }
+      }
+      
+      logger.info(`[Baileys] ✅ Finished processing ${contacts.length} contacts`);
+    } catch (error) {
+      logger.error(`[Baileys] ❌ Error handling history contacts:`, error);
+    }
+  }
+
+  /**
    * Manipula mensagens recebidas
+   * Baseado em: https://baileys.wiki/docs/socket/handling-messages
+   * Mensagens vêm no formato proto.IWebMessageInfo conforme documentação
    */
   private async handleIncomingMessages(connectionId: string, messageUpdate: any) {
     try {
@@ -754,32 +886,67 @@ class BaileysManager {
           continue;
         }
 
-        // Extrair conteúdo da mensagem
+        // Extrair conteúdo da mensagem conforme documentação oficial
+        // Baseado em: https://baileys.wiki/docs/socket/handling-messages
+        // Mensagens vêm no formato proto.IMessage
         let messageText = '';
         let messageType = 'text';
         let audioMediaUrl: string | null = null;
         let imageMediaUrl: string | null = null;
+        let videoMediaUrl: string | null = null;
+        let documentMediaUrl: string | null = null;
 
-        if (msg.message?.conversation) {
-          messageText = msg.message.conversation;
-        } else if (msg.message?.extendedTextMessage?.text) {
-          messageText = msg.message.extendedTextMessage.text;
-        } else if (msg.message?.imageMessage) {
-          messageText = msg.message.imageMessage.caption || '[Imagem]';
+        const message = msg.message;
+        const client = this.clients.get(connectionId);
+
+        // Text Messages: proto.IMessage.conversation ou proto.IMessage.extendedTextMessage
+        // extendedTextMessage contém: reply data, link preview, group invite, status updates
+        if (message?.conversation) {
+          // Mensagem de texto simples
+          messageText = message.conversation;
+          messageType = 'text';
+        } else if (message?.extendedTextMessage) {
+          // Mensagem de texto estendida (pode ter reply, link preview, etc.)
+          messageText = message.extendedTextMessage.text || '';
+          messageType = 'text';
+          
+          // Log de metadados se presentes
+          if (message.extendedTextMessage.contextInfo?.quotedMessage) {
+            logger.debug(`[Baileys] 📎 Extended text message has quoted context`);
+          }
+          if (message.extendedTextMessage.contextInfo?.linkPreview) {
+            logger.debug(`[Baileys] 🔗 Extended text message has link preview`);
+          }
+        } 
+        // Media Messages conforme documentação
+        else if (message?.imageMessage) {
+          // proto.IMessage.imageMessage
+          messageText = message.imageMessage.caption || '[Imagem]';
           messageType = 'image';
           
-          // Baixar imagem com timeout
+          // Baixar imagem usando downloadMediaMessage conforme documentação
+          // Para mídia faltando, usar sock.updateMediaMessage
           try {
-            const client = this.clients.get(connectionId);
             if (client?.socket) {
               const imageBuffer = await Promise.race([
-                downloadMediaMessage(msg, 'buffer', {}, { logger: pino({ level: 'silent' }), reuploadRequest: client.socket.updateMediaMessage }),
+                downloadMediaMessage(
+                  msg, 
+                  'buffer', 
+                  {}, 
+                  { 
+                    logger: pino({ level: 'silent' }), 
+                    reuploadRequest: client.socket.updateMediaMessage 
+                  }
+                ),
                 new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Image download timeout')), 15000))
               ]) as Buffer;
               
               if (imageBuffer && Buffer.isBuffer(imageBuffer)) {
-                const imageMimetype = msg.message.imageMessage?.mimetype || 'image/jpeg';
-                const imageExt = imageMimetype.includes('png') ? '.png' : imageMimetype.includes('gif') ? '.gif' : imageMimetype.includes('webp') ? '.webp' : '.jpg';
+                const imageMimetype = message.imageMessage?.mimetype || 'image/jpeg';
+                const imageExt = imageMimetype.includes('png') ? '.png' 
+                  : imageMimetype.includes('gif') ? '.gif' 
+                  : imageMimetype.includes('webp') ? '.webp' 
+                  : '.jpg';
                 const filename = `image-${Date.now()}-${Math.random().toString(36).substring(7)}${imageExt}`;
                 const uploadsDir = path.join(process.cwd(), 'uploads');
                 if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
@@ -790,23 +957,43 @@ class BaileysManager {
             }
           } catch (imageError) {
             logger.error(`[Baileys] ❌ Error downloading image:`, imageError);
+            // Tentar atualizar mídia se faltando conforme documentação
+            if (client?.socket && imageError instanceof Error && imageError.message.includes('missing')) {
+              try {
+                await client.socket.updateMediaMessage(msg);
+                logger.info(`[Baileys] 🔄 Requested media update for missing image`);
+              } catch (updateError) {
+                logger.error(`[Baileys] ❌ Error updating media:`, updateError);
+              }
+            }
           }
-        } else if (msg.message?.audioMessage) {
+        } else if (message?.audioMessage) {
+          // proto.IMessage.audioMessage
           messageText = '[Áudio]';
           messageType = 'audio';
           
-          // Baixar áudio com timeout
+          // Baixar áudio conforme documentação
           try {
-            const client = this.clients.get(connectionId);
             if (client?.socket) {
               const audioBuffer = await Promise.race([
-                downloadMediaMessage(msg, 'buffer', {}, { logger: pino({ level: 'silent' }), reuploadRequest: client.socket.updateMediaMessage }),
+                downloadMediaMessage(
+                  msg, 
+                  'buffer', 
+                  {}, 
+                  { 
+                    logger: pino({ level: 'silent' }), 
+                    reuploadRequest: client.socket.updateMediaMessage 
+                  }
+                ),
                 new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Audio download timeout')), 20000))
               ]) as Buffer;
               
               if (audioBuffer && Buffer.isBuffer(audioBuffer)) {
-                const audioMimetype = msg.message.audioMessage?.mimetype || 'audio/ogg; codecs=opus';
-                const audioExt = audioMimetype.includes('mp3') ? '.mp3' : audioMimetype.includes('wav') ? '.wav' : audioMimetype.includes('m4a') ? '.m4a' : '.ogg';
+                const audioMimetype = message.audioMessage?.mimetype || 'audio/ogg; codecs=opus';
+                const audioExt = audioMimetype.includes('mp3') ? '.mp3' 
+                  : audioMimetype.includes('wav') ? '.wav' 
+                  : audioMimetype.includes('m4a') ? '.m4a' 
+                  : '.ogg';
                 const filename = `audio-${Date.now()}-${Math.random().toString(36).substring(7)}${audioExt}`;
                 const uploadsDir = path.join(process.cwd(), 'uploads');
                 if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
@@ -817,13 +1004,110 @@ class BaileysManager {
             }
           } catch (audioError) {
             logger.error(`[Baileys] ❌ Error downloading audio:`, audioError);
+            // Tentar atualizar mídia se faltando conforme documentação
+            if (client?.socket && audioError instanceof Error && audioError.message.includes('missing')) {
+              try {
+                await client.socket.updateMediaMessage(msg);
+                logger.info(`[Baileys] 🔄 Requested media update for missing audio`);
+              } catch (updateError) {
+                logger.error(`[Baileys] ❌ Error updating media:`, updateError);
+              }
+            }
           }
-        } else if (msg.message?.videoMessage) {
-          messageText = msg.message.videoMessage.caption || '[Vídeo]';
+        } else if (message?.videoMessage) {
+          // proto.IMessage.videoMessage
+          messageText = message.videoMessage.caption || '[Vídeo]';
           messageType = 'video';
-        } else if (msg.message?.documentMessage) {
-          messageText = msg.message.documentMessage.fileName || '[Documento]';
+          
+          // Baixar vídeo conforme documentação
+          try {
+            if (client?.socket) {
+              const videoBuffer = await Promise.race([
+                downloadMediaMessage(
+                  msg, 
+                  'buffer', 
+                  {}, 
+                  { 
+                    logger: pino({ level: 'silent' }), 
+                    reuploadRequest: client.socket.updateMediaMessage 
+                  }
+                ),
+                new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Video download timeout')), 30000))
+              ]) as Buffer;
+              
+              if (videoBuffer && Buffer.isBuffer(videoBuffer)) {
+                const videoMimetype = message.videoMessage?.mimetype || 'video/mp4';
+                const videoExt = videoMimetype.includes('mp4') ? '.mp4' 
+                  : videoMimetype.includes('webm') ? '.webm' 
+                  : '.mp4';
+                const filename = `video-${Date.now()}-${Math.random().toString(36).substring(7)}${videoExt}`;
+                const uploadsDir = path.join(process.cwd(), 'uploads');
+                if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
+                fs.writeFileSync(path.join(uploadsDir, filename), videoBuffer);
+                videoMediaUrl = `/uploads/${filename}`;
+                logger.info(`[Baileys] ✅ Video saved: ${filename}`);
+              }
+            }
+          } catch (videoError) {
+            logger.error(`[Baileys] ❌ Error downloading video:`, videoError);
+            // Tentar atualizar mídia se faltando conforme documentação
+            if (client?.socket && videoError instanceof Error && videoError.message.includes('missing')) {
+              try {
+                await client.socket.updateMediaMessage(msg);
+                logger.info(`[Baileys] 🔄 Requested media update for missing video`);
+              } catch (updateError) {
+                logger.error(`[Baileys] ❌ Error updating media:`, updateError);
+              }
+            }
+          }
+        } else if (message?.documentMessage) {
+          // proto.IMessage.documentMessage
+          messageText = message.documentMessage.fileName || '[Documento]';
           messageType = 'document';
+          
+          // Baixar documento conforme documentação
+          try {
+            if (client?.socket) {
+              const docBuffer = await Promise.race([
+                downloadMediaMessage(
+                  msg, 
+                  'buffer', 
+                  {}, 
+                  { 
+                    logger: pino({ level: 'silent' }), 
+                    reuploadRequest: client.socket.updateMediaMessage 
+                  }
+                ),
+                new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Document download timeout')), 30000))
+              ]) as Buffer;
+              
+              if (docBuffer && Buffer.isBuffer(docBuffer)) {
+                const docMimetype = message.documentMessage?.mimetype || 'application/octet-stream';
+                const docFileName = message.documentMessage?.fileName || 'document';
+                const filename = `doc-${Date.now()}-${docFileName}`;
+                const uploadsDir = path.join(process.cwd(), 'uploads');
+                if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
+                fs.writeFileSync(path.join(uploadsDir, filename), docBuffer);
+                documentMediaUrl = `/uploads/${filename}`;
+                logger.info(`[Baileys] ✅ Document saved: ${filename}`);
+              }
+            }
+          } catch (docError) {
+            logger.error(`[Baileys] ❌ Error downloading document:`, docError);
+            // Tentar atualizar mídia se faltando conforme documentação
+            if (client?.socket && docError instanceof Error && docError.message.includes('missing')) {
+              try {
+                await client.socket.updateMediaMessage(msg);
+                logger.info(`[Baileys] 🔄 Requested media update for missing document`);
+              } catch (updateError) {
+                logger.error(`[Baileys] ❌ Error updating media:`, updateError);
+              }
+            }
+          }
+        } else if (message?.stickerMessage) {
+          // Stickers
+          messageText = '[Sticker]';
+          messageType = 'image'; // Tratar como imagem
         }
 
         if (!messageText) {
@@ -841,13 +1125,25 @@ class BaileysManager {
           );
         }
 
+        // Determinar mediaUrl baseado no tipo de mensagem
+        let mediaUrl: string | null = null;
+        if (messageType === 'audio') {
+          mediaUrl = audioMediaUrl;
+        } else if (messageType === 'image') {
+          mediaUrl = imageMediaUrl;
+        } else if (messageType === 'video') {
+          mediaUrl = videoMediaUrl;
+        } else if (messageType === 'document') {
+          mediaUrl = documentMediaUrl;
+        }
+
         // Processar mensagem com timeout e retry robusto
         const messageProcessed = await this.processMessageWithRetry(
           connectionId,
           from,
           messageText,
           messageType,
-          messageType === 'audio' ? audioMediaUrl : messageType === 'image' ? imageMediaUrl : null,
+          mediaUrl,
           isFromMe,
           externalId,
           pushName,
