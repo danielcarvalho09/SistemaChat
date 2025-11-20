@@ -478,6 +478,8 @@ export class MessageService {
   ): Promise<void> {
     try {
       // 🔒 DEDUPLICAÇÃO: Verificar se mensagem já foi processada
+      // ✅ IMPORTANTE: Isso garante que mensagens já sincronizadas sejam puladas durante reconexão
+      // Permite sincronizar desde firstConnectedAt sem duplicar mensagens existentes
       if (externalId) {
         const existingMessage = await this.prisma.message.findFirst({
           where: {
@@ -487,7 +489,7 @@ export class MessageService {
         });
 
         if (existingMessage) {
-          logger.info(`[MessageService] ⏭️ Message ${externalId} already exists, skipping duplicate`);
+          logger.debug(`[MessageService] ⏭️ Message ${externalId} already exists (deduplication), skipping`);
           return; // Não processar duplicata
         }
       } else {
@@ -629,14 +631,15 @@ export class MessageService {
         logger.info(`New conversation created: ${conversation.id} in department: ${departmentId || 'None'} (status: waiting)`);
       }
 
-      // Se já recebemos esta mensagem (externalId), evitar duplicidade
+      // 🔒 DEDUPLICAÇÃO FINAL: Verificar novamente por conversa específica
+      // (pode ter mudado de conversa ou ter sido criada nova conversa)
       if (externalId) {
         const exists = await this.prisma.message.findFirst({
           where: { conversationId: conversation.id, externalId },
           select: { id: true },
         });
         if (exists) {
-          logger.info(`Skipping duplicate message ${externalId} for conversation ${conversation.id}`);
+          logger.debug(`[MessageService] ⏭️ Message ${externalId} already exists in conversation ${conversation.id} (deduplication), skipping`);
           return;
         }
       }

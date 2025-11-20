@@ -726,7 +726,7 @@ class BaileysManager {
 
       logger.info(`[Baileys] 📨 Message update received - Type: ${type}, Count: ${messages?.length || 0}`);
 
-      // Buscar firstConnectedAt para filtrar mensagens antigas
+      // Buscar firstConnectedAt para sincronização inteligente
       const connection = await this.prisma.whatsAppConnection.findUnique({
         where: { id: connectionId },
         select: { firstConnectedAt: true },
@@ -742,8 +742,9 @@ class BaileysManager {
         return;
       }
       
-      // IMPORTANTE: Mensagens em tempo real (notify) sempre processar, mesmo sem firstConnectedAt
+      // IMPORTANTE: Mensagens em tempo real (notify/append) sempre processar, mesmo sem firstConnectedAt
       // Elas são novas e devem ser capturadas imediatamente
+      // Para mensagens history: processar desde firstConnectedAt, deduplicação vai pular as já existentes
 
       // Atualizar timestamp de última mensagem recebida
       const client = this.clients.get(connectionId);
@@ -930,19 +931,24 @@ class BaileysManager {
 
         // ===== FILTROS =====
         
-        // 0. Filtrar mensagens antigas (anteriores à primeira conexão)
+        // 0. Filtrar mensagens MUITO antigas (anteriores à primeira conexão - margem de segurança)
+        // ✅ CORRIGIDO: Processar TODAS mensagens desde firstConnectedAt
+        // A deduplicação (por externalId) vai pular mensagens já sincronizadas automaticamente
+        // Isso garante que mensagens perdidas durante desconexão sejam recuperadas
         if (firstConnectedAt && type === 'history') {
           if (!messageTimestamp) {
-            logger.debug(`[Baileys] ✅ Processing message without timestamp (likely recent)`);
+            // Mensagem sem timestamp - processar (pode ser recente)
+            logger.debug(`[Baileys] ✅ Processing message without timestamp (will deduplicate if exists)`);
           } else {
-            const safeWindowStart = new Date(firstConnectedAt.getTime() - 6 * 60 * 60 * 1000);
-            
-            if (messageTimestamp < safeWindowStart) {
-              logger.debug(`[Baileys] ⏭️ Skipping old history message from ${messageTimestamp.toISOString()}`);
+            // ✅ CORRIGIDO: Usar firstConnectedAt como limite mínimo (sem margem negativa)
+            // Processar todas mensagens desde a primeira conexão
+            // Deduplicação vai pular as que já existem
+            if (messageTimestamp < firstConnectedAt) {
+              logger.debug(`[Baileys] ⏭️ Skipping message from ${messageTimestamp.toISOString()} (before first connection at ${firstConnectedAt.toISOString()})`);
               syncStats.skipped++;
               continue;
             } else {
-              logger.debug(`[Baileys] ✅ Processing message from ${messageTimestamp.toISOString()} (within safe margin or recent)`);
+              logger.debug(`[Baileys] ✅ Processing message from ${messageTimestamp.toISOString()} (since first connection, will deduplicate if exists)`);
             }
           }
         }
