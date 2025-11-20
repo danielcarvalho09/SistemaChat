@@ -136,10 +136,18 @@ export async function buildApp(): Promise<FastifyInstance> {
         res.setHeader('Content-Disposition', 'inline; filename="' + path.split('/').pop() + '"')
       } else if (path.endsWith('.txt')) {
         res.setHeader('Content-Type', 'text/plain; charset=utf-8')
-      } else if (path.match(/\.(jpg|jpeg|png|gif)$/i)) {
+      } else if (path.match(/\.(jpg|jpeg|png|gif|webp)$/i)) {
         res.setHeader('Content-Type', `image/${path.split('.').pop()}`)
       } else if (path.endsWith('.mp4')) {
         res.setHeader('Content-Type', 'video/mp4')
+      } else if (path.match(/\.(ogg|oga)$/i)) {
+        res.setHeader('Content-Type', 'audio/ogg; codecs=opus')
+      } else if (path.match(/\.(mp3|mpeg)$/i)) {
+        res.setHeader('Content-Type', 'audio/mpeg')
+      } else if (path.match(/\.(wav)$/i)) {
+        res.setHeader('Content-Type', 'audio/wav')
+      } else if (path.match(/\.(m4a)$/i)) {
+        res.setHeader('Content-Type', 'audio/mp4')
       } else if (path.match(/\.(docx?|xlsx?|pptx?)$/i)) {
         const ext = path.split('.').pop()?.toLowerCase()
         const mimeTypes: Record<string, string> = {
@@ -158,6 +166,56 @@ export async function buildApp(): Promise<FastifyInstance> {
     // Permitir listagem de diretório para testes
     list: config.server.isDevelopment,
     // Permitir links simbólicos
+    dotfiles: 'allow'
+  });
+
+  // Servir também de /uploads/ para compatibilidade com URLs antigas
+  await app.register(fastifyStatic, {
+    root: path.join(process.cwd(), 'secure-uploads'),
+    prefix: '/uploads/',
+    setHeaders: (res, path) => {
+      // Configurar CORS para arquivos estáticos
+      const allowedOrigin = Array.isArray(config.security.corsOrigin) 
+        ? config.security.corsOrigin[0] 
+        : config.security.corsOrigin;
+      res.setHeader('Access-Control-Allow-Origin', allowedOrigin);
+      res.setHeader('Access-Control-Allow-Credentials', 'true');
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+      
+      // Configurar MIME types corretos (mesmos do acima)
+      if (path.endsWith('.pdf')) {
+        res.setHeader('Content-Type', 'application/pdf')
+        res.setHeader('Content-Disposition', 'inline; filename="' + path.split('/').pop() + '"')
+      } else if (path.endsWith('.txt')) {
+        res.setHeader('Content-Type', 'text/plain; charset=utf-8')
+      } else if (path.match(/\.(jpg|jpeg|png|gif|webp)$/i)) {
+        res.setHeader('Content-Type', `image/${path.split('.').pop()}`)
+      } else if (path.endsWith('.mp4')) {
+        res.setHeader('Content-Type', 'video/mp4')
+      } else if (path.match(/\.(ogg|oga)$/i)) {
+        res.setHeader('Content-Type', 'audio/ogg; codecs=opus')
+      } else if (path.match(/\.(mp3|mpeg)$/i)) {
+        res.setHeader('Content-Type', 'audio/mpeg')
+      } else if (path.match(/\.(wav)$/i)) {
+        res.setHeader('Content-Type', 'audio/wav')
+      } else if (path.match(/\.(m4a)$/i)) {
+        res.setHeader('Content-Type', 'audio/mp4')
+      } else if (path.match(/\.(docx?|xlsx?|pptx?)$/i)) {
+        const ext = path.split('.').pop()?.toLowerCase()
+        const mimeTypes: Record<string, string> = {
+          'doc': 'application/msword',
+          'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+          'xls': 'application/vnd.ms-excel',
+          'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          'ppt': 'application/vnd.ms-powerpoint',
+          'pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation'
+        }
+        if (ext && mimeTypes[ext]) {
+          res.setHeader('Content-Type', mimeTypes[ext])
+        }
+      }
+    },
+    list: config.server.isDevelopment,
     dotfiles: 'allow'
   });
 

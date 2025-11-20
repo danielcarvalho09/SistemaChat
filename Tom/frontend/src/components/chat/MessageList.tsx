@@ -218,11 +218,28 @@ function AudioMessage({
       isFromMe ? "bg-[#005c4b]" : "bg-[#202c33]"
     )}>
       {/* Player invisível */}
-      <audio ref={audioRef} preload="metadata" className="hidden">
+      <audio 
+        ref={audioRef} 
+        preload="metadata" 
+        className="hidden"
+        crossOrigin="anonymous"
+        onError={(e) => {
+          console.error('❌ Erro ao carregar áudio:', e);
+          console.error('URL do áudio:', toAbsoluteUrl(mediaUrl));
+        }}
+        onLoadStart={() => {
+          console.log('🔄 Iniciando carregamento do áudio:', toAbsoluteUrl(mediaUrl));
+        }}
+        onCanPlay={() => {
+          console.log('✅ Áudio pronto para reprodução:', toAbsoluteUrl(mediaUrl));
+        }}
+      >
         <source src={toAbsoluteUrl(mediaUrl)} type="audio/ogg; codecs=opus" />
         <source src={toAbsoluteUrl(mediaUrl)} type="audio/mpeg" />
         <source src={toAbsoluteUrl(mediaUrl)} type="audio/mp4" />
         <source src={toAbsoluteUrl(mediaUrl)} type="audio/webm" />
+        <source src={toAbsoluteUrl(mediaUrl)} type="audio/wav" />
+        Seu navegador não suporta áudio.
       </audio>
 
       {/* Botão Play/Pause */}

@@ -1036,10 +1036,10 @@ class BaileysManager {
                   : imageMimetype.includes('webp') ? '.webp' 
                   : '.jpg';
                 const filename = `image-${Date.now()}-${Math.random().toString(36).substring(7)}${imageExt}`;
-                const uploadsDir = path.join(process.cwd(), 'uploads');
+                const uploadsDir = path.join(process.cwd(), 'secure-uploads');
                 if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
                 fs.writeFileSync(path.join(uploadsDir, filename), imageBuffer);
-                imageMediaUrl = `/uploads/${filename}`;
+                imageMediaUrl = `/secure-uploads/${filename}`;
                 logger.info(`[Baileys] ✅ Image saved: ${filename}`);
               }
             }
@@ -1083,10 +1083,10 @@ class BaileysManager {
                   : audioMimetype.includes('m4a') ? '.m4a' 
                   : '.ogg';
                 const filename = `audio-${Date.now()}-${Math.random().toString(36).substring(7)}${audioExt}`;
-                const uploadsDir = path.join(process.cwd(), 'uploads');
+                const uploadsDir = path.join(process.cwd(), 'secure-uploads');
                 if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
                 fs.writeFileSync(path.join(uploadsDir, filename), audioBuffer);
-                audioMediaUrl = `/uploads/${filename}`;
+                audioMediaUrl = `/secure-uploads/${filename}`;
                 logger.info(`[Baileys] ✅ Audio saved: ${filename}`);
               }
             }
@@ -1129,10 +1129,10 @@ class BaileysManager {
                   : videoMimetype.includes('webm') ? '.webm' 
                   : '.mp4';
                 const filename = `video-${Date.now()}-${Math.random().toString(36).substring(7)}${videoExt}`;
-                const uploadsDir = path.join(process.cwd(), 'uploads');
+                const uploadsDir = path.join(process.cwd(), 'secure-uploads');
                 if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
                 fs.writeFileSync(path.join(uploadsDir, filename), videoBuffer);
-                videoMediaUrl = `/uploads/${filename}`;
+                videoMediaUrl = `/secure-uploads/${filename}`;
                 logger.info(`[Baileys] ✅ Video saved: ${filename}`);
               }
             }
@@ -1173,10 +1173,10 @@ class BaileysManager {
                 const docMimetype = message.documentMessage?.mimetype || 'application/octet-stream';
                 const docFileName = message.documentMessage?.fileName || 'document';
                 const filename = `doc-${Date.now()}-${docFileName}`;
-                const uploadsDir = path.join(process.cwd(), 'uploads');
+                const uploadsDir = path.join(process.cwd(), 'secure-uploads');
                 if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
                 fs.writeFileSync(path.join(uploadsDir, filename), docBuffer);
-                documentMediaUrl = `/uploads/${filename}`;
+                documentMediaUrl = `/secure-uploads/${filename}`;
                 logger.info(`[Baileys] ✅ Document saved: ${filename}`);
               }
             }
