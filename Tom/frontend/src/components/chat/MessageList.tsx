@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { format } from 'date-fns';
-import { Check, CheckCheck, FileText, Download, ExternalLink, Image as ImageIcon, Loader2, CornerDownLeft } from 'lucide-react';
+import { Check, CheckCheck, FileText, Download, ExternalLink, Image as ImageIcon, Loader2, CornerDownLeft, Play, Pause, Volume2 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import type { Message as ChatMessage, QuotedMessage } from '../../types';
 
@@ -130,6 +130,165 @@ function ImageMessage({ mediaUrl, toAbsoluteUrl, messageId }: { mediaUrl: string
       >
         <Download className="w-4 h-4" />
       </button>
+    </div>
+  );
+}
+
+// Componente de áudio customizado estilo WhatsApp
+function AudioMessage({ 
+  mediaUrl, 
+  toAbsoluteUrl, 
+  isFromMe 
+}: { 
+  mediaUrl: string; 
+  toAbsoluteUrl: (url: string) => string;
+  isFromMe: boolean;
+}) {
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [isLoading, setIsLoading] = useState(false);
+  const audioRef = useRef<HTMLAudioElement>(null);
+
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    const updateTime = () => setCurrentTime(audio.currentTime);
+    const updateDuration = () => setDuration(audio.duration);
+    const handleEnded = () => {
+      setIsPlaying(false);
+      setCurrentTime(0);
+    };
+    const handleLoadStart = () => setIsLoading(true);
+    const handleCanPlay = () => setIsLoading(false);
+
+    audio.addEventListener('timeupdate', updateTime);
+    audio.addEventListener('loadedmetadata', updateDuration);
+    audio.addEventListener('ended', handleEnded);
+    audio.addEventListener('loadstart', handleLoadStart);
+    audio.addEventListener('canplay', handleCanPlay);
+
+    return () => {
+      audio.removeEventListener('timeupdate', updateTime);
+      audio.removeEventListener('loadedmetadata', updateDuration);
+      audio.removeEventListener('ended', handleEnded);
+      audio.removeEventListener('loadstart', handleLoadStart);
+      audio.removeEventListener('canplay', handleCanPlay);
+    };
+  }, []);
+
+  const togglePlayPause = () => {
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    if (isPlaying) {
+      audio.pause();
+    } else {
+      audio.play();
+    }
+    setIsPlaying(!isPlaying);
+  };
+
+  const handleProgressClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    const audio = audioRef.current;
+    if (!audio || !duration) return;
+
+    const rect = e.currentTarget.getBoundingClientRect();
+    const clickX = e.clientX - rect.left;
+    const percentage = clickX / rect.width;
+    const newTime = percentage * duration;
+    
+    audio.currentTime = newTime;
+    setCurrentTime(newTime);
+  };
+
+  const formatTime = (seconds: number) => {
+    if (isNaN(seconds) || !isFinite(seconds)) return '0:00';
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  const progressPercentage = duration > 0 ? (currentTime / duration) * 100 : 0;
+
+  return (
+    <div className={cn(
+      "flex items-center gap-3 px-4 py-3",
+      isFromMe ? "bg-[#005c4b]" : "bg-[#202c33]"
+    )}>
+      {/* Player invisível */}
+      <audio ref={audioRef} preload="metadata" className="hidden">
+        <source src={toAbsoluteUrl(mediaUrl)} type="audio/ogg; codecs=opus" />
+        <source src={toAbsoluteUrl(mediaUrl)} type="audio/mpeg" />
+        <source src={toAbsoluteUrl(mediaUrl)} type="audio/mp4" />
+        <source src={toAbsoluteUrl(mediaUrl)} type="audio/webm" />
+      </audio>
+
+      {/* Botão Play/Pause */}
+      <button
+        onClick={togglePlayPause}
+        disabled={isLoading}
+        className={cn(
+          "flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center transition-all hover:scale-110 disabled:opacity-50",
+          isFromMe 
+            ? "bg-white/20 hover:bg-white/30 text-white" 
+            : "bg-white/10 hover:bg-white/20 text-white"
+        )}
+        title={isPlaying ? 'Pausar' : 'Reproduzir'}
+      >
+        {isLoading ? (
+          <Loader2 className="w-5 h-5 animate-spin" />
+        ) : isPlaying ? (
+          <Pause className="w-5 h-5 fill-current" />
+        ) : (
+          <Play className="w-5 h-5 fill-current ml-0.5" />
+        )}
+      </button>
+
+      {/* Barra de progresso e tempo */}
+      <div className="flex-1 min-w-0">
+        {/* Barra de progresso */}
+        <div
+          onClick={handleProgressClick}
+          className={cn(
+            "h-1 rounded-full cursor-pointer mb-1.5 relative",
+            isFromMe ? "bg-white/30" : "bg-white/20"
+          )}
+        >
+          <div
+            className={cn(
+              "h-full rounded-full transition-all duration-100",
+              isFromMe ? "bg-white" : "bg-[#00a884]"
+            )}
+            style={{ width: `${progressPercentage}%` }}
+          />
+        </div>
+
+        {/* Tempo */}
+        <div className="flex items-center justify-between text-xs">
+          <span className={cn(
+            "font-medium",
+            isFromMe ? "text-white/70" : "text-gray-300"
+          )}>
+            {formatTime(currentTime)}
+          </span>
+          <span className={cn(
+            "font-medium",
+            isFromMe ? "text-white/50" : "text-gray-400"
+          )}>
+            {formatTime(duration)}
+          </span>
+        </div>
+      </div>
+
+      {/* Ícone de áudio */}
+      <div className={cn(
+        "flex-shrink-0 w-8 h-8 flex items-center justify-center",
+        isFromMe ? "text-white/70" : "text-gray-300"
+      )}>
+        <Volume2 className="w-5 h-5" />
+      </div>
     </div>
   );
 }
@@ -287,19 +446,12 @@ export function MessageList({ messages, onReply }: MessageListProps) {
                 )}
 
                 {message.messageType === 'audio' && message.mediaUrl && (
-                  <div className={cn("px-3 pb-2", message.quotedMessage ? 'pt-2' : 'pt-3')}>
-                    <audio 
-                      controls 
-                      className="w-full" 
-                      preload="metadata"
-                      controlsList="nodownload"
-                    >
-                      <source src={toAbsoluteUrl(message.mediaUrl)} type="audio/ogg; codecs=opus" />
-                      <source src={toAbsoluteUrl(message.mediaUrl)} type="audio/mpeg" />
-                      <source src={toAbsoluteUrl(message.mediaUrl)} type="audio/mp4" />
-                      <source src={toAbsoluteUrl(message.mediaUrl)} type="audio/webm" />
-                      Seu navegador não suporta áudio.
-                    </audio>
+                  <div className={cn(message.quotedMessage ? 'pt-2' : 'pt-1')}>
+                    <AudioMessage 
+                      mediaUrl={message.mediaUrl} 
+                      toAbsoluteUrl={toAbsoluteUrl}
+                      isFromMe={isFromMe}
+                    />
                   </div>
                 )}
 
