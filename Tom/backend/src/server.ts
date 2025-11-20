@@ -13,12 +13,36 @@ import { syncQueueService } from './services/sync-queue.service.js';
 async function start() {
   try {
     logger.info('🚀 Starting WhatsApp System Backend...');
+    logger.info(`📦 Node version: ${process.version}`);
+    logger.info(`🌍 Environment: ${config.server.env}`);
+    logger.info(`📁 Working directory: ${process.cwd()}`);
+
+    // Verificar se Prisma Client foi gerado
+    try {
+      const { PrismaClient } = await import('@prisma/client');
+      logger.info('✅ Prisma Client imported successfully');
+    } catch (error) {
+      logger.error('❌ Failed to import Prisma Client - run "npx prisma generate"');
+      logger.error('Error:', error);
+      process.exit(1);
+    }
 
     // Conectar ao banco de dados
-    await connectDatabase();
+    try {
+      await connectDatabase();
+    } catch (error) {
+      logger.error('❌ Failed to connect to database:', error);
+      process.exit(1);
+    }
 
     // Conectar ao Redis
-    await connectRedis();
+    try {
+      await connectRedis();
+    } catch (error) {
+      logger.error('❌ Failed to connect to Redis:', error);
+      // Redis não é crítico, continuar sem ele
+      logger.warn('⚠️ Continuing without Redis (some features may be limited)');
+    }
 
     // Seed inicial do banco de dados (roles e permissões)
     // DESABILITADO - Já foi executado na primeira vez
@@ -121,9 +145,29 @@ async function start() {
     });
   } catch (error) {
     logger.error('❌ Failed to start server:', error);
+    logger.error('Error details:', error instanceof Error ? error.message : String(error));
+    logger.error('Stack trace:', error instanceof Error ? error.stack : 'No stack trace');
+    console.error('Fatal startup error:', error);
     process.exit(1);
   }
 }
 
 // Iniciar servidor
-start();
+start().catch((error) => {
+  logger.error('❌ Fatal error starting server:', error);
+  logger.error('Stack trace:', error instanceof Error ? error.stack : 'No stack trace');
+  console.error('Fatal error:', error);
+  process.exit(1);
+});
+
+// Capturar erros não tratados (backup)
+process.on('unhandledRejection', (reason, promise) => {
+  logger.error('❌ Unhandled Rejection at:', promise, 'reason:', reason);
+  console.error('Unhandled Rejection:', reason);
+});
+
+process.on('uncaughtException', (error) => {
+  logger.error('❌ Uncaught Exception:', error);
+  console.error('Uncaught Exception:', error);
+  process.exit(1);
+});
