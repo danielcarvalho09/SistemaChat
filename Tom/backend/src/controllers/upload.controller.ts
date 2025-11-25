@@ -6,25 +6,10 @@ import { fileTypeFromBuffer } from 'file-type';
 import { logger } from '../config/logger.js';
 import { baileysManager } from '../whatsapp/baileys.manager.js';
 import { getPrismaClient } from '../config/database.js';
+import { getAllowedMimeTypes } from '../utils/file-validation.js';
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
-const ALLOWED_MIME_TYPES = new Set([
-  'image/jpeg',
-  'image/png',
-  'image/gif',
-  'image/webp',
-  'video/mp4',
-  'video/mpeg',
-  'audio/mpeg',
-  'audio/wav',
-  'audio/ogg',
-  'application/pdf',
-  'application/msword',
-  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-  'application/vnd.ms-excel',
-  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-  'text/plain',
-]);
+const ALLOWED_MIME_TYPES = new Set(getAllowedMimeTypes());
 const BLOCKED_EXTENSIONS = new Set([
   '.exe',
   '.dll',

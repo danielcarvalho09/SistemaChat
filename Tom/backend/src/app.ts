@@ -171,30 +171,6 @@ export async function buildApp(): Promise<FastifyInstance> {
     dotfiles: 'allow'
   });
 
-  // Servir também de /uploads/ para compatibilidade com URLs antigas
-  // Usar rota manual ao invés de segundo fastifyStatic para evitar conflito de decorators
-  app.get('/uploads/*', async (request, reply) => {
-    try {
-      const filePath = request.url.replace('/uploads/', '');
-      const fullPath = path.join(process.cwd(), 'secure-uploads', filePath);
-      
-      // Verificar se arquivo existe
-      if (!fs.existsSync(fullPath) || !fs.statSync(fullPath).isFile()) {
-        return reply.status(404).send({ error: 'File not found' });
-      }
-      
-      // Configurar headers
-      setStaticHeaders(reply.raw, fullPath);
-      
-      // Enviar arquivo usando stream
-      const fileStream = fs.createReadStream(fullPath);
-      return reply.send(fileStream);
-    } catch (error) {
-      logger.error('Error serving file from /uploads/:', error);
-      return reply.status(500).send({ error: 'Internal server error' });
-    }
-  });
-
   // Swagger/OpenAPI Documentation
   if (config.server.isDevelopment) {
     await app.register(swagger, {
@@ -231,6 +207,42 @@ export async function buildApp(): Promise<FastifyInstance> {
       staticCSP: true,
     });
   }
+
+  // Servir também de /uploads/ para compatibilidade com URLs antigas
+  // IMPORTANTE: Registrar ANTES das outras rotas para ter prioridade
+  // Usar rota manual ao invés de segundo fastifyStatic para evitar conflito de decorators
+  app.get('/uploads/*', async (request: any, reply) => {
+    try {
+      // Extrair filename da URL (remover /uploads/ do início)
+      const urlPath = request.url.replace(/^\/uploads\//, '');
+      const fullPath = path.join(process.cwd(), 'secure-uploads', urlPath);
+      
+      logger.debug(`[Static] Serving file from /uploads/: ${urlPath}`);
+      logger.debug(`[Static] Full path: ${fullPath}`);
+      
+      // Verificar se arquivo existe
+      if (!fs.existsSync(fullPath)) {
+        logger.warn(`[Static] File not found: ${fullPath}`);
+        return reply.status(404).send({ error: 'File not found', path: fullPath });
+      }
+      
+      const stats = fs.statSync(fullPath);
+      if (!stats.isFile()) {
+        logger.warn(`[Static] Path is not a file: ${fullPath}`);
+        return reply.status(404).send({ error: 'Not a file' });
+      }
+      
+      // Configurar headers
+      setStaticHeaders(reply.raw, fullPath);
+      
+      // Enviar arquivo usando stream
+      const fileStream = fs.createReadStream(fullPath);
+      return reply.send(fileStream);
+    } catch (error) {
+      logger.error('Error serving file from /uploads/:', error);
+      return reply.status(500).send({ error: 'Internal server error' });
+    }
+  });
 
   // ✅ Hook global de sanitização de inputs (ANTES das rotas)
   app.addHook('preHandler', sanitizeInputs);

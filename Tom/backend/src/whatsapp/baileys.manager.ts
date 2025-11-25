@@ -436,14 +436,16 @@ class BaileysManager {
       this.resetCircuitBreaker(connectionId);
 
       let lastDisconnectAt: Date | null = null;
+      let firstConnectedAt: Date | null = null;
       try {
         const connectionRecord = await this.prisma.whatsAppConnection.findUnique({
           where: { id: connectionId },
-          select: { lastDisconnectAt: true },
+          select: { lastDisconnectAt: true, firstConnectedAt: true },
         });
         lastDisconnectAt = connectionRecord?.lastDisconnectAt ?? null;
+        firstConnectedAt = connectionRecord?.firstConnectedAt ?? null;
       } catch (fetchError) {
-        logger.warn(`[Baileys] ⚠️ Could not read lastDisconnectAt for ${connectionId}:`, fetchError);
+        logger.warn(`[Baileys] ⚠️ Could not read connection data for ${connectionId}:`, fetchError);
       }
 
       client.lastDisconnectAt = lastDisconnectAt;
@@ -453,6 +455,57 @@ class BaileysManager {
       // Salvar firstConnectedAt se for a primeira conexão
       // E forçar sincronização de mensagens desde a primeira conexão ao reconectar
       await this.saveFirstConnectedAt(connectionId);
+
+      // ✅ IMPORTANTE: Se já tem firstConnectedAt (não é primeira conexão), iniciar sincronização
+      // Isso garante que ao escanear QR code de conexão já conectada antes, sincronize desde firstConnectedAt
+      if (firstConnectedAt) {
+        logger.info(`[Baileys] 🔄 Conexão estabelecida após QR code - já tinha firstConnectedAt`);
+        logger.info(`[Baileys] ⏰ Primeira conexão foi em: ${firstConnectedAt.toISOString()}`);
+        logger.info(`[Baileys] 🔍 Iniciando sincronização de TODAS conversas desde firstConnectedAt...`);
+        
+        // Aguardar alguns segundos para conexão estabilizar completamente
+        setTimeout(async () => {
+          try {
+            // Verificar se ainda está conectado antes de sincronizar
+            const currentClient = this.clients.get(connectionId);
+            if (!currentClient || currentClient.status !== 'connected') {
+              logger.warn(`[Baileys] ⚠️ Conexão não está mais conectada, cancelando sincronização`);
+              return;
+            }
+
+            // Forçar sincronização de TODAS as conversas ativas desde firstConnectedAt
+            const syncedCount = await this.syncAllActiveConversations(connectionId, 100);
+            
+            logger.info(`[Baileys] ✅ Sincronização pós-QR code completa: ${syncedCount} conversas sincronizadas`);
+            
+            // Também detectar e recuperar gaps
+            const { gapsFound, recovered } = await this.detectAndRecoverGaps(connectionId);
+            logger.info(`[Baileys] ✅ Detecção de gaps: ${gapsFound} encontrados, ${recovered} em recuperação`);
+
+            // Processar fila de mensagens que falharam anteriormente
+            const retried = await this.processRetryQueue(connectionId);
+            if (retried > 0) {
+              logger.info(`[Baileys] ✅ Retry queue drained: ${retried} mensagens reprocesadas`);
+            }
+
+            const syncEnd = new Date();
+            if (currentClient) {
+              currentClient.lastSyncTo = syncEnd;
+            }
+
+            await this.prisma.whatsAppConnection.update({
+              where: { id: connectionId },
+              data: {
+                lastSyncTo: syncEnd,
+              },
+            }).catch((updateError) => {
+              logger.warn(`[Baileys] ⚠️ Could not update lastSyncTo for ${connectionId}:`, updateError);
+            });
+          } catch (syncError) {
+            logger.error(`[Baileys] ❌ Erro na sincronização pós-QR code:`, syncError);
+          }
+        }, 5000); // 5 segundos de espera para conexão estabilizar
+      }
 
       await this.updateConnectionStatus(connectionId, 'connected', {
         lastSyncFrom: lastDisconnectAt,
@@ -1039,7 +1092,8 @@ class BaileysManager {
                 const uploadsDir = path.join(process.cwd(), 'secure-uploads');
                 if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
                 fs.writeFileSync(path.join(uploadsDir, filename), imageBuffer);
-                imageMediaUrl = `/secure-uploads/${filename}`;
+                // Usar /uploads/ para compatibilidade (a rota redireciona para secure-uploads)
+                imageMediaUrl = `/uploads/${filename}`;
                 logger.info(`[Baileys] ✅ Image saved: ${filename}`);
               }
             }
@@ -1086,7 +1140,8 @@ class BaileysManager {
                 const uploadsDir = path.join(process.cwd(), 'secure-uploads');
                 if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
                 fs.writeFileSync(path.join(uploadsDir, filename), audioBuffer);
-                audioMediaUrl = `/secure-uploads/${filename}`;
+                // Usar /uploads/ para compatibilidade (a rota redireciona para secure-uploads)
+                audioMediaUrl = `/uploads/${filename}`;
                 logger.info(`[Baileys] ✅ Audio saved: ${filename}`);
               }
             }
@@ -1132,7 +1187,8 @@ class BaileysManager {
                 const uploadsDir = path.join(process.cwd(), 'secure-uploads');
                 if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
                 fs.writeFileSync(path.join(uploadsDir, filename), videoBuffer);
-                videoMediaUrl = `/secure-uploads/${filename}`;
+                // Usar /uploads/ para compatibilidade (a rota redireciona para secure-uploads)
+                videoMediaUrl = `/uploads/${filename}`;
                 logger.info(`[Baileys] ✅ Video saved: ${filename}`);
               }
             }
@@ -1176,7 +1232,8 @@ class BaileysManager {
                 const uploadsDir = path.join(process.cwd(), 'secure-uploads');
                 if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
                 fs.writeFileSync(path.join(uploadsDir, filename), docBuffer);
-                documentMediaUrl = `/secure-uploads/${filename}`;
+                // Usar /uploads/ para compatibilidade (a rota redireciona para secure-uploads)
+                documentMediaUrl = `/uploads/${filename}`;
                 logger.info(`[Baileys] ✅ Document saved: ${filename}`);
               }
             }

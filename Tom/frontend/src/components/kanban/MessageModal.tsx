@@ -59,30 +59,21 @@ export function MessageModal({ conversation, onClose, onMessageSent }: MessageMo
 
     try {
       if (selectedFile) {
-        // Upload do arquivo primeiro
+        // Upload do arquivo primeiro usando Axios (headers de usuário já aplicados pelo authStore)
         const formData = new FormData();
         formData.append('file', selectedFile);
 
-        const token = localStorage.getItem('accessToken');
-        if (!token) {
-          throw new Error('Token não encontrado. Faça login novamente.');
-        }
-
-        const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
-        const uploadResponse = await fetch(`${API_URL}/api/v1/upload`, {
-          method: 'POST',
+        const uploadResponse = await api.post('/upload', formData, {
           headers: {
-            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'multipart/form-data',
           },
-          body: formData,
         });
 
-        if (!uploadResponse.ok) {
-          throw new Error('Erro ao fazer upload do arquivo');
+        if (!uploadResponse.data?.success) {
+          throw new Error(uploadResponse.data?.message || 'Erro ao fazer upload do arquivo');
         }
 
-        const uploadData = await uploadResponse.json();
-        const mediaUrl = `${API_URL}${uploadData.data.url}`;
+        const mediaUrl = uploadResponse.data.data?.url as string;
 
         // Determinar tipo de mensagem
         let messageType = 'document';
