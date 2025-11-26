@@ -42,6 +42,7 @@ export class ConversationService {
 
     // Construir filtros
     const where: any = {};
+    const andConditions: any[] = [];
 
     // Admins veem todas as conversas de todas as conexões
     // Users veem apenas:
@@ -58,19 +59,25 @@ export class ConversationService {
 
       const departmentIds = userDepartments.map((ud) => ud.departmentId);
 
-      where.OR = [
+      // ✅ Construir condições de permissão
+      const permissionConditions: any[] = [
         // Conversas atribuídas ao usuário (qualquer status)
         { assignedUserId: userId },
+      ];
+
+      // ✅ Adicionar condições de setores apenas se o usuário tiver setores
+      if (departmentIds.length > 0) {
         // Conversas AGUARDANDO (não atribuídas) dos setores do usuário
-        {
+        permissionConditions.push({
           AND: [
             { status: 'waiting' },
             { assignedUserId: null }, // Ainda não atribuída
             { departmentId: { in: departmentIds } },
           ],
-        },
+        });
+
         // Conversas TRANSFERIDAS para o usuário ou seus setores
-        {
+        permissionConditions.push({
           AND: [
             { status: 'transferred' },
             {
@@ -80,17 +87,31 @@ export class ConversationService {
               ],
             },
           ],
-        },
-      ];
+        });
+      } else {
+        // Se usuário não tem setores, só pode ver conversas atribuídas a ele
+        logger.warn(`[ConversationService] User ${userId} has no departments - will only see assigned conversations`);
+      }
+
+      // Adicionar restrições de permissão como condição AND
+      andConditions.push({
+        OR: permissionConditions,
+      });
     }
 
-    if (status) where.status = status;
-    if (departmentId) where.departmentId = departmentId;
+    // ✅ BUG FIX: Adicionar filtros diretos como condições AND também
+    // Isso evita conflitos quando há múltiplas condições
+    if (status) {
+      andConditions.push({ status });
+    }
+    if (departmentId) {
+      andConditions.push({ departmentId });
+    }
     
     // Apenas usuários comuns são filtrados por conexão
     // Admins veem TODAS as conversas de TODAS as conexões
     if (connectionId && !isAdmin) {
-      where.connectionId = connectionId;
+      andConditions.push({ connectionId });
     }
     // Se admin passar connectionId, ainda pode filtrar se quiser
     // Mas por padrão vê todas
@@ -98,27 +119,31 @@ export class ConversationService {
     // ✅ BUG FIX: Combinar busca com restrições de permissão usando AND
     // Se search for fornecido, precisa combinar com as restrições existentes
     if (search) {
-      const searchCondition = {
+      andConditions.push({
         OR: [
           { contact: { name: { contains: search, mode: 'insensitive' } } },
           { contact: { phoneNumber: { contains: search } } },
         ],
-      };
-
-      // Se já existe where.OR (restrições de permissão), combinar com AND
-      if (where.OR) {
-        where.AND = [
-          { OR: where.OR }, // Manter restrições de permissão
-          searchCondition, // Adicionar busca
-        ];
-        delete where.OR; // Remover OR antigo
-      } else {
-        // Se não há restrições de permissão (admin), usar busca diretamente
-        where.OR = searchCondition.OR;
-      }
+      });
     }
 
+    // ✅ Construir where clause final
+    // Se há condições AND, adicionar ao where
+    if (andConditions.length === 1) {
+      // Se há apenas uma condição, mesclar diretamente no where
+      Object.assign(where, andConditions[0]);
+    } else if (andConditions.length > 1) {
+      // Se há múltiplas condições, usar AND
+      where.AND = andConditions;
+    }
+    // Se andConditions.length === 0 (admin sem filtros), where fica vazio {} = retorna todas as conversas
+
     try {
+      // ✅ Log do where clause para debug (apenas em desenvolvimento)
+      if (process.env.NODE_ENV !== 'production') {
+        logger.debug(`[ConversationService] Where clause:`, JSON.stringify(where, null, 2));
+      }
+
       const [conversations, total] = await Promise.all([
         this.prisma.conversation.findMany({
           where,
@@ -205,8 +230,12 @@ export class ConversationService {
         },
       };
     } catch (error: any) {
-      logger.error(`[ConversationService] Error in listConversations:`, error);
-      logger.error(`[ConversationService] Where clause:`, JSON.stringify(where, null, 2));
+      logger.error(`[ConversationService] ❌ Error in listConversations:`, error);
+      logger.error(`[ConversationService] 📋 Where clause:`, JSON.stringify(where, null, 2));
+      logger.error(`[ConversationService] 📋 User ID: ${userId}`);
+      logger.error(`[ConversationService] 📋 Is Admin: ${isAdmin}`);
+      logger.error(`[ConversationService] 📋 Params:`, JSON.stringify(params, null, 2));
+      logger.error(`[ConversationService] 📋 Error stack:`, error instanceof Error ? error.stack : 'No stack');
       throw error;
     }
   }
@@ -534,97 +563,110 @@ export class ConversationService {
    * Formata resposta da conversa
    */
   private formatConversationResponse(conversation: any): ConversationResponse {
-    const lastMessage = conversation.messages?.[0] || null;
-    const quoted = lastMessage?.quotedMessage || null;
+    try {
+      const lastMessage = conversation.messages?.[0] || null;
+      const quoted = lastMessage?.quotedMessage || null;
 
-    return {
-      id: conversation.id,
-      contact: {
-        id: conversation.contact.id,
-        phoneNumber: conversation.contact.phoneNumber,
-        name: conversation.contact.name,
-        pushName: conversation.contact.pushName,
-        avatar: conversation.contact.avatar,
-        email: conversation.contact.email,
-        tags: conversation.contact.tags,
-      },
-      connection: {
-        id: conversation.connection.id,
-        name: conversation.connection.name,
-        phoneNumber: conversation.connection.phoneNumber,
-        status: conversation.connection.status,
-        avatar: conversation.connection.avatar,
-        lastConnected: conversation.connection.lastConnected?.toISOString() || null,
-        isActive: conversation.connection.isActive,
-        createdAt: conversation.connection.createdAt.toISOString(),
-        updatedAt: conversation.connection.updatedAt.toISOString(),
-      },
-      department: conversation.department
-        ? {
-            id: conversation.department.id,
-            name: conversation.department.name,
-            description: conversation.department.description,
-            color: conversation.department.color,
-            icon: conversation.department.icon,
-            isActive: conversation.department.isActive,
-            createdAt: conversation.department.createdAt.toISOString(),
-            updatedAt: conversation.department.updatedAt.toISOString(),
-          }
-        : null,
-      assignedUser: conversation.assignedUser
-        ? {
-            id: conversation.assignedUser.id,
-            email: conversation.assignedUser.email,
-            name: conversation.assignedUser.name,
-            avatar: conversation.assignedUser.avatar,
-            status: conversation.assignedUser.status,
-            isActive: conversation.assignedUser.isActive,
-            roles: conversation.assignedUser.roles.map((ur: any) => ({
-              id: ur.role.id,
-              name: ur.role.name,
-              description: ur.role.description,
-            })),
-            createdAt: conversation.assignedUser.createdAt.toISOString(),
-            updatedAt: conversation.assignedUser.updatedAt.toISOString(),
-          }
-        : null,
-      status: conversation.status,
-      lastMessageAt: conversation.lastMessageAt.toISOString(),
-      firstResponseAt: conversation.firstResponseAt?.toISOString() || null,
-      resolvedAt: conversation.resolvedAt?.toISOString() || null,
-      unreadCount: conversation.unreadCount,
-      lastMessage: lastMessage
-        ? {
-            id: lastMessage.id,
-            conversationId: lastMessage.conversationId,
-            sender: null,
-            content: lastMessage.content,
-            messageType: lastMessage.messageType,
-            mediaUrl: lastMessage.mediaUrl,
-            status: lastMessage.status,
-            isFromContact: lastMessage.isFromContact,
-            timestamp: lastMessage.timestamp.toISOString(),
-            createdAt: lastMessage.createdAt.toISOString(),
-            quotedMessageId: lastMessage.quotedMessageId || null,
-            quotedMessage: quoted
-              ? {
-                  id: quoted.id,
-                  content: quoted.content,
-                  messageType: quoted.messageType,
-                  mediaUrl: quoted.mediaUrl,
-                  isFromContact: quoted.isFromContact,
-                  senderName: quoted.sender ? quoted.sender.name : null,
-                  senderAvatar: quoted.sender ? quoted.sender.avatar : null,
-                  senderId: quoted.senderId || null,
-                  timestamp: quoted.timestamp ? quoted.timestamp.toISOString() : null,
-                  status: quoted.status ? (quoted.status as MessageStatus) : null,
-                }
-              : null,
-          }
-        : null,
-      internalNotes: conversation.internalNotes,
-      createdAt: conversation.createdAt.toISOString(),
-      updatedAt: conversation.updatedAt.toISOString(),
-    };
+      // ✅ Validações de segurança para evitar erros
+      if (!conversation.contact) {
+        throw new Error('Contact is missing');
+      }
+      if (!conversation.connection) {
+        throw new Error('Connection is missing');
+      }
+
+      return {
+        id: conversation.id,
+        contact: {
+          id: conversation.contact.id,
+          phoneNumber: conversation.contact.phoneNumber,
+          name: conversation.contact.name || null,
+          pushName: conversation.contact.pushName || null,
+          avatar: conversation.contact.avatar || null,
+          email: conversation.contact.email || null,
+          tags: conversation.contact.tags || [],
+        },
+        connection: {
+          id: conversation.connection.id,
+          name: conversation.connection.name,
+          phoneNumber: conversation.connection.phoneNumber,
+          status: conversation.connection.status,
+          avatar: conversation.connection.avatar || null,
+          lastConnected: conversation.connection.lastConnected?.toISOString() || null,
+          isActive: conversation.connection.isActive ?? true,
+          createdAt: conversation.connection.createdAt?.toISOString() || new Date().toISOString(),
+          updatedAt: conversation.connection.updatedAt?.toISOString() || new Date().toISOString(),
+        },
+        department: conversation.department
+          ? {
+              id: conversation.department.id,
+              name: conversation.department.name,
+              description: conversation.department.description || null,
+              color: conversation.department.color || '#3B82F6',
+              icon: conversation.department.icon || 'folder',
+              isActive: conversation.department.isActive ?? true,
+              createdAt: conversation.department.createdAt?.toISOString() || new Date().toISOString(),
+              updatedAt: conversation.department.updatedAt?.toISOString() || new Date().toISOString(),
+            }
+          : null,
+        assignedUser: conversation.assignedUser
+          ? {
+              id: conversation.assignedUser.id,
+              email: conversation.assignedUser.email,
+              name: conversation.assignedUser.name,
+              avatar: conversation.assignedUser.avatar || null,
+              status: conversation.assignedUser.status || 'offline',
+              isActive: conversation.assignedUser.isActive ?? true,
+              roles: (conversation.assignedUser.roles || []).map((ur: any) => ({
+                id: ur.role?.id || ur.roleId,
+                name: ur.role?.name || 'user',
+                description: ur.role?.description || null,
+              })),
+              createdAt: conversation.assignedUser.createdAt?.toISOString() || new Date().toISOString(),
+              updatedAt: conversation.assignedUser.updatedAt?.toISOString() || new Date().toISOString(),
+            }
+          : null,
+        status: conversation.status,
+        lastMessageAt: conversation.lastMessageAt?.toISOString() || new Date().toISOString(),
+        firstResponseAt: conversation.firstResponseAt?.toISOString() || null,
+        resolvedAt: conversation.resolvedAt?.toISOString() || null,
+        unreadCount: conversation.unreadCount || 0,
+        lastMessage: lastMessage
+          ? {
+              id: lastMessage.id,
+              conversationId: lastMessage.conversationId,
+              sender: null,
+              content: lastMessage.content || '',
+              messageType: lastMessage.messageType || 'text',
+              mediaUrl: lastMessage.mediaUrl || null,
+              status: lastMessage.status || 'sent',
+              isFromContact: lastMessage.isFromContact ?? false,
+              timestamp: lastMessage.timestamp?.toISOString() || new Date().toISOString(),
+              createdAt: lastMessage.createdAt?.toISOString() || new Date().toISOString(),
+              quotedMessageId: lastMessage.quotedMessageId || null,
+              quotedMessage: quoted
+                ? {
+                    id: quoted.id,
+                    content: quoted.content || '',
+                    messageType: quoted.messageType || 'text',
+                    mediaUrl: quoted.mediaUrl || null,
+                    isFromContact: quoted.isFromContact ?? false,
+                    senderName: quoted.sender?.name || null,
+                    senderAvatar: quoted.sender?.avatar || null,
+                    senderId: quoted.senderId || null,
+                    timestamp: quoted.timestamp ? quoted.timestamp.toISOString() : null,
+                    status: quoted.status ? (quoted.status as MessageStatus) : null,
+                  }
+                : null,
+            }
+          : null,
+        internalNotes: conversation.internalNotes || null,
+        createdAt: conversation.createdAt?.toISOString() || new Date().toISOString(),
+        updatedAt: conversation.updatedAt?.toISOString() || new Date().toISOString(),
+      };
+    } catch (error) {
+      logger.error(`[ConversationService] Error in formatConversationResponse for conversation ${conversation?.id}:`, error);
+      throw error;
+    }
   }
 }
