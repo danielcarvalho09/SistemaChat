@@ -156,6 +156,7 @@ model WhatsAppConnection {
   lastConnected DateTime?
   firstConnectedAt DateTime? // Timestamp da primeira conexão bem-sucedida
   lastDisconnectAt DateTime?
+  lastDisconnectReason String? // Motivo da última desconexão (logged_out, bad_session, timed_out, etc)
   lastSyncFrom DateTime?
   lastSyncTo DateTime?
   isActive      Boolean  @default(true)
