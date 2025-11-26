@@ -90,9 +90,9 @@ class BaileysManager {
   private prisma = getPrismaClient();
   private reconnectionLocks: Map<string, { locked: boolean; lockedAt: Date }> = new Map(); // Previne reconexões simultâneas com timestamp
   private syncRetryQueue: Map<string, IncomingRetryItem> = new Map(); // Fila de retry para sincronização
-  private readonly MAX_RECONNECT_ATTEMPTS = 15; // Aumentado de 10 para 15
+  private readonly MAX_RECONNECT_ATTEMPTS = 20; // Aumentado para 20 tentativas (mais persistente)
   private readonly QR_RESET_DELAY_MS = 2000;
-  private readonly LOCK_TIMEOUT_MS = 120000; // 2 minutos - timeout para locks presos
+  private readonly LOCK_TIMEOUT_MS = 180000; // 3 minutos (aumentado para conexões mais lentas) - timeout para locks presos
   private circuitBreaker: Map<string, { failures: number; lastFailure: Date; state: 'closed' | 'open' | 'half-open' }> = new Map();
   private readonly CIRCUIT_BREAKER_THRESHOLD = 5; // Abrir circuit após 5 falhas consecutivas
   private readonly CIRCUIT_BREAKER_TIMEOUT = 60000; // 1 minuto antes de tentar novamente
@@ -151,10 +151,10 @@ class BaileysManager {
         syncFullHistory: false, // Desabilitado: só sincronizar mensagens a partir da primeira conexão
         markOnlineOnConnect: true, // Marcar como online ao conectar (IMPORTANTE para manter conexão)
         // Configurações otimizadas para melhorar estabilidade da conexão
-        connectTimeoutMs: 60000, // Timeout de 60s para conectar
-        defaultQueryTimeoutMs: 60000, // Timeout para queries
-        keepAliveIntervalMs: 30000, // Pings a cada 30s (mais estável, menos agressivo)
-        retryRequestDelayMs: 250, // Delay mínimo entre tentativas
+        connectTimeoutMs: 120000, // Timeout de 120s para conectar (aumentado para mais estabilidade)
+        defaultQueryTimeoutMs: 120000, // Timeout para queries (aumentado)
+        keepAliveIntervalMs: 20000, // Pings a cada 20s (mais frequente para manter conexão viva)
+        retryRequestDelayMs: 500, // Delay mínimo entre tentativas (aumentado para evitar sobrecarga)
         emitOwnEvents: true, // Emitir eventos de mensagens enviadas por nós
         fireInitQueries: true, // Executar queries iniciais ao conectar
         getMessage: async (key) => {
@@ -304,30 +304,54 @@ class BaileysManager {
     let creds: AuthenticationState['creds'];
     let keys: Record<string, any> = {};
 
-    if (connection?.authData) {
+    // ✅ VERIFICAÇÃO ROBUSTA: Verificar se authData existe E não está vazio
+    if (connection?.authData && connection.authData !== null && connection.authData !== '') {
       // Carregar credenciais existentes
       try {
         const authDataString = connection.authData as string;
         
-        // Tentar parse direto (sem criptografia)
-        try {
-          const authData = JSON.parse(authDataString, BufferJSON.reviver);
-          creds = authData.creds;
-          keys = authData.keys || {};
-          logger.info(`[Baileys] ✅ Loaded existing auth for ${connectionId} (has credentials)`);
-        } catch (parseError) {
-          // Se falhar, pode ser dado legado criptografado - tentar descriptografar uma vez
-          logger.warn(`[Baileys] ⚠️ Failed to parse auth data, trying legacy decrypt...`);
+        // Verificar se não está vazio após trim
+        if (authDataString.trim() === '') {
+          logger.warn(`[Baileys] ⚠️ Auth data is empty string for ${connectionId}, creating new credentials`);
+          creds = initAuthCreds();
+        } else {
+          // Tentar parse direto (sem criptografia)
           try {
-            const { decrypt } = await import('../utils/encryption.js');
-            const decrypted = decrypt(authDataString);
-            const authData = JSON.parse(decrypted, BufferJSON.reviver);
-            creds = authData.creds;
-            keys = authData.keys || {};
-            logger.info(`[Baileys] ✅ Loaded legacy encrypted auth for ${connectionId} (will save unencrypted)`);
-          } catch (legacyError) {
-            logger.warn(`[Baileys] ⚠️ Failed to parse auth data, creating new credentials:`, parseError);
-            creds = initAuthCreds();
+            const authData = JSON.parse(authDataString, BufferJSON.reviver);
+            
+            // ✅ VERIFICAÇÃO ADICIONAL: Verificar se creds existe e tem dados válidos
+            if (!authData.creds || !authData.creds.me || !authData.creds.me.id) {
+              logger.warn(`[Baileys] ⚠️ Auth data exists but is invalid for ${connectionId}, creating new credentials`);
+              creds = initAuthCreds();
+            } else {
+              creds = authData.creds;
+              keys = authData.keys || {};
+              logger.info(`[Baileys] ✅ Loaded existing auth for ${connectionId} (has valid credentials)`);
+              logger.debug(`[Baileys] 📋 Credentials loaded - me.id: ${creds.me.id}`);
+            }
+          } catch (parseError) {
+            // Se falhar, pode ser dado legado criptografado - tentar descriptografar uma vez
+            logger.warn(`[Baileys] ⚠️ Failed to parse auth data, trying legacy decrypt...`);
+            try {
+              const { decrypt } = await import('../utils/encryption.js');
+              const decrypted = decrypt(authDataString);
+              const authData = JSON.parse(decrypted, BufferJSON.reviver);
+              
+              // ✅ VERIFICAÇÃO ADICIONAL: Verificar se creds existe e tem dados válidos
+              if (!authData.creds || !authData.creds.me || !authData.creds.me.id) {
+                logger.warn(`[Baileys] ⚠️ Legacy auth data exists but is invalid for ${connectionId}, creating new credentials`);
+                creds = initAuthCreds();
+              } else {
+                creds = authData.creds;
+                keys = authData.keys || {};
+                logger.info(`[Baileys] ✅ Loaded legacy encrypted auth for ${connectionId} (will save unencrypted)`);
+                logger.debug(`[Baileys] 📋 Legacy credentials loaded - me.id: ${creds.me.id}`);
+              }
+            } catch (legacyError) {
+              logger.warn(`[Baileys] ⚠️ Failed to parse/decrypt auth data, creating new credentials:`, parseError);
+              logger.warn(`[Baileys] ⚠️ Legacy decrypt also failed:`, legacyError);
+              creds = initAuthCreds();
+            }
           }
         }
       } catch (error) {
@@ -336,8 +360,8 @@ class BaileysManager {
       }
     } else {
       // Criar novas credenciais
+      logger.info(`[Baileys] 🆕 No auth data found for ${connectionId} - creating NEW credentials (will generate QR Code)`);
       creds = initAuthCreds();
-      logger.info(`[Baileys] 🆕 Created NEW auth for ${connectionId} (will generate QR Code)`);
     }
 
     // Função para salvar credenciais (SEM CRIPTOGRAFIA)
@@ -1689,8 +1713,8 @@ class BaileysManager {
 
     // ✅ RETRY EXPONENCIAL COM JITTER para evitar thundering herd
     // Fórmula: min(maxDelay, baseDelay * 2^attempt) + random jitter
-    const baseDelay = 2000; // 2 segundos base
-    const maxDelay = 60000; // Máximo 60 segundos
+    const baseDelay = 3000; // 3 segundos base (aumentado para mais estabilidade)
+    const maxDelay = 90000; // Máximo 90 segundos (aumentado para aguardar mais tempo)
     const exponentialDelay = Math.min(maxDelay, baseDelay * Math.pow(2, client.reconnectAttempts - 1));
     
     // Adicionar jitter aleatório de ±20% para evitar reconexões simultâneas
@@ -2515,7 +2539,7 @@ class BaileysManager {
     const client = this.clients.get(connectionId);
     if (!client) return;
 
-    // Verificar conexão a cada 30 segundos (menos agressivo, mais estável)
+    // Verificar conexão a cada 20 segundos (mais frequente para detectar problemas rapidamente)
     client.keepAliveInterval = setInterval(() => {
       const currentClient = this.clients.get(connectionId);
       if (!currentClient) {
@@ -2535,11 +2559,15 @@ class BaileysManager {
           logger.debug(`[Baileys] 💓 Keepalive ${connectionId} - No messages received yet`);
         }
         
-        // Verificar se heartbeat está funcionando (aumentar tolerância para 90s)
+        // Verificar se heartbeat está funcionando (aumentar tolerância para 180s - 3 minutos)
+        // Isso evita desconexões prematuras por falhas temporárias de rede
         if (lastHeartbeat) {
           const secondsSinceHeartbeat = (now.getTime() - lastHeartbeat.getTime()) / 1000;
-          if (secondsSinceHeartbeat > 90) {
+          if (secondsSinceHeartbeat > 180) {
             logger.warn(`[Baileys] ⚠️ No heartbeat response in ${secondsSinceHeartbeat.toFixed(0)}s - connection may be dead`);
+            // Não desconectar imediatamente - aguardar mais tempo antes de considerar morto
+          } else if (secondsSinceHeartbeat > 120) {
+            logger.debug(`[Baileys] ⚠️ Heartbeat delay: ${secondsSinceHeartbeat.toFixed(0)}s (monitoring...)`);
           }
         }
       } else {
@@ -2550,22 +2578,35 @@ class BaileysManager {
         
         // Se está desconectado mas tem credenciais, tentar reconectar
         // Mas apenas se não estiver já reconectando e não estiver em processo de conexão
+        // ADICIONAR VERIFICAÇÃO DE TEMPO: Não reconectar imediatamente após desconexão
+        // Aguardar pelo menos 5 segundos para evitar reconexões prematuras
         const lock = this.reconnectionLocks.get(connectionId);
         const isLocked = lock && lock.locked;
         
+        // Verificar quando foi a última desconexão
+        const lastDisconnectAt = currentClient.lastDisconnectAt;
+        const timeSinceDisconnect = lastDisconnectAt 
+          ? (now.getTime() - lastDisconnectAt.getTime()) / 1000 
+          : Infinity;
+        
+        // Só tentar reconectar se passou pelo menos 5 segundos desde a desconexão
+        // Isso evita reconexões prematuras em caso de desconexões temporárias
         if (
           currentClient.hasCredentials && 
           !currentClient.isReconnecting && 
           currentClient.status === 'disconnected' &&
-          !isLocked
+          !isLocked &&
+          timeSinceDisconnect >= 5 // Aguardar pelo menos 5 segundos
         ) {
-          logger.info(`[Baileys] 🔄 Detected disconnection, triggering reconnection...`);
+          logger.info(`[Baileys] 🔄 Detected disconnection (${timeSinceDisconnect.toFixed(1)}s ago), triggering reconnection...`);
           this.attemptReconnection(connectionId).catch((err) => {
             logger.error(`[Baileys] Failed to trigger reconnection:`, err);
           });
+        } else if (currentClient.status === 'disconnected' && timeSinceDisconnect < 5) {
+          logger.debug(`[Baileys] ⏳ Waiting before reconnection (${timeSinceDisconnect.toFixed(1)}s since disconnect, need 5s)`);
         }
       }
-    }, 30000); // 30 segundos (menos agressivo, mais estável)
+    }, 20000); // 20 segundos (mais frequente para detectar problemas rapidamente)
 
     logger.info(`[Baileys] 🔍 Connection monitoring started for ${connectionId}`);
   }
@@ -2581,7 +2622,7 @@ class BaileysManager {
     const client = this.clients.get(connectionId);
     if (!client) return;
 
-    // Heartbeat robusto a cada 60 segundos (menos frequente, mais estável)
+    // Heartbeat robusto a cada 45 segundos (mais frequente para manter conexão viva)
     client.heartbeatInterval = setInterval(async () => {
       const currentClient = this.clients.get(connectionId);
       if (!currentClient) {
@@ -2654,9 +2695,18 @@ class BaileysManager {
           
           // Não desconectar imediatamente - apenas logar o erro
           // O monitoramento de conexão vai detectar se realmente desconectou
+          // Tentar verificar se socket ainda está vivo antes de considerar morto
+          try {
+            const user = await currentClient.socket.user;
+            if (user) {
+              logger.debug(`[Baileys] ✅ Socket still alive despite heartbeat error`);
+            }
+          } catch (verifyError) {
+            logger.warn(`[Baileys] ⚠️ Socket verification failed - may need reconnection`);
+          }
         }
       }
-    }, 60000); // 60 segundos (menos frequente, mais estável)
+    }, 45000); // 45 segundos (mais frequente para manter conexão viva)
 
     logger.info(`[Baileys] 💚 Active heartbeat started for ${connectionId}`);
   }
@@ -2895,22 +2945,39 @@ class BaileysManager {
       };
     }
 
-    // Verificar se há lock de reconexão ativo
-    if (this.reconnectionLocks.get(connectionId)) {
-      logger.info(`[Baileys] 🔁 Manual reconnect for ${connectionId} ignored - reconnection already in progress.`);
-      return {
-        status: 'already_reconnecting',
-        message: 'Já existe um processo de reconexão em andamento.',
-      };
-    }
-
-    // Verificar se há credenciais no banco de dados
+    // ✅ CRÍTICO: Verificar credenciais ANTES de qualquer operação
+    // Isso garante que sabemos se devemos usar credenciais existentes ou gerar QR code
     const connection = await this.prisma.whatsAppConnection.findUnique({
       where: { id: connectionId },
-      select: { authData: true },
+      select: { authData: true, status: true },
     });
 
-    const hasCredentialsInDB = connection && connection.authData !== null;
+    const hasCredentialsInDB = connection && connection.authData !== null && connection.authData !== '';
+    
+    logger.info(`[Baileys] 🔁 Manual reconnect requested for ${connectionId}`);
+    logger.info(`[Baileys] 📋 Credentials in DB: ${hasCredentialsInDB ? 'YES ✅' : 'NO ❌'}`);
+    
+    if (!hasCredentialsInDB) {
+      logger.warn(`[Baileys] ⚠️ No credentials found in DB for ${connectionId} - will generate new QR code`);
+    } else {
+      logger.info(`[Baileys] ✅ Credentials found in DB for ${connectionId} - will reconnect with existing credentials`);
+    }
+
+    // Verificar se há lock de reconexão ativo
+    const existingLock = this.reconnectionLocks.get(connectionId);
+    if (existingLock && existingLock.locked) {
+      const lockAge = Date.now() - existingLock.lockedAt.getTime();
+      if (lockAge > this.LOCK_TIMEOUT_MS) {
+        logger.warn(`[Baileys] ⚠️ Lock expired for ${connectionId} - releasing`);
+        this.reconnectionLocks.delete(connectionId);
+      } else {
+        logger.info(`[Baileys] 🔁 Manual reconnect for ${connectionId} ignored - reconnection already in progress (lock age: ${Math.round(lockAge / 1000)}s).`);
+        return {
+          status: 'already_reconnecting',
+          message: 'Já existe um processo de reconexão em andamento.',
+        };
+      }
+    }
 
     // Se não há cliente, criar novo
     if (!client) {
@@ -2919,7 +2986,8 @@ class BaileysManager {
       // Limpar locks
       this.reconnectionLocks.delete(connectionId);
       
-      // Criar novo cliente (vai usar credenciais do banco se existirem)
+      // ✅ IMPORTANTE: Criar novo cliente (vai usar credenciais do banco se existirem)
+      // O usePostgreSQLAuthState vai carregar as credenciais automaticamente
       try {
         await this.createClient(connectionId);
       } catch (error) {
@@ -2944,22 +3012,6 @@ class BaileysManager {
           };
     }
 
-    // Verificar se já está em processo de criação/reconexão
-    const existingLock = this.reconnectionLocks.get(connectionId);
-    if (existingLock && existingLock.locked) {
-      const lockAge = Date.now() - existingLock.lockedAt.getTime();
-      if (lockAge > this.LOCK_TIMEOUT_MS) {
-        logger.warn(`[Baileys] ⚠️ Lock expired for ${connectionId} - releasing`);
-        this.reconnectionLocks.delete(connectionId);
-      } else {
-        logger.info(`[Baileys] 🔁 Manual reconnect for ${connectionId} ignored - reconnection already in progress (lock age: ${Math.round(lockAge / 1000)}s).`);
-        return {
-          status: 'already_reconnecting',
-          message: 'Já existe um processo de reconexão em andamento.',
-        };
-      }
-    }
-
     // Se o cliente existe e está reconectando, informar
     if (client.isReconnecting) {
       logger.info(`[Baileys] 🔁 Manual reconnect for ${connectionId} ignored - reconnection already in progress.`);
@@ -2975,10 +3027,16 @@ class BaileysManager {
     this.reconnectionLocks.delete(connectionId);
 
     logger.info(`[Baileys] 🔁 Manual reconnect initiated for ${connectionId}`);
+    logger.info(`[Baileys] 📋 Will ${hasCredentialsInDB ? 'reconnect with existing credentials' : 'generate new QR code'}`);
     
-    // Remover cliente atual e criar novo (vai usar credenciais do banco)
-    await this.removeClient(connectionId, false);
+    // ✅ IMPORTANTE: Remover cliente atual SEM fazer logout
+    // Isso preserva as credenciais no banco de dados
+    // O createClient vai carregar as credenciais automaticamente via usePostgreSQLAuthState
+    await this.removeClient(connectionId, false); // false = NÃO fazer logout (preserva credenciais)
+    
     try {
+      // ✅ Criar novo cliente - vai usar credenciais do banco se existirem
+      // O usePostgreSQLAuthState verifica o banco e carrega as credenciais
       await this.createClient(connectionId);
     } catch (error) {
       if (error instanceof ClientCreationInProgressError) {
@@ -2991,10 +3049,15 @@ class BaileysManager {
       throw error;
     }
 
-    return {
-      status: 'reconnecting',
-      message: 'Tentativa de reconexão iniciada.',
-    };
+    return hasCredentialsInDB
+      ? {
+          status: 'reconnecting',
+          message: 'Reconectando com credenciais existentes...',
+        }
+      : {
+          status: 'awaiting_qr',
+          message: 'Aguardando QR code...',
+        };
   }
 
   /**

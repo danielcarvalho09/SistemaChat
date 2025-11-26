@@ -120,24 +120,24 @@ export async function buildApp(): Promise<FastifyInstance> {
 
   // Função auxiliar para configurar headers de arquivos estáticos
   const setStaticHeaders = (res: any, filePath: string) => {
-    // Configurar CORS para arquivos estáticos
-    const allowedOrigin = Array.isArray(config.security.corsOrigin) 
-      ? config.security.corsOrigin[0] 
-      : config.security.corsOrigin;
-    res.setHeader('Access-Control-Allow-Origin', allowedOrigin);
-    res.setHeader('Access-Control-Allow-Credentials', 'true');
-    res.setHeader('X-Content-Type-Options', 'nosniff');
-    
-    // Configurar MIME types corretos
+      // Configurar CORS para arquivos estáticos
+      const allowedOrigin = Array.isArray(config.security.corsOrigin) 
+        ? config.security.corsOrigin[0] 
+        : config.security.corsOrigin;
+      res.setHeader('Access-Control-Allow-Origin', allowedOrigin);
+      res.setHeader('Access-Control-Allow-Credentials', 'true');
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+      
+      // Configurar MIME types corretos
     if (filePath.endsWith('.pdf')) {
-      res.setHeader('Content-Type', 'application/pdf')
+        res.setHeader('Content-Type', 'application/pdf')
       res.setHeader('Content-Disposition', 'inline; filename="' + filePath.split('/').pop() + '"')
     } else if (filePath.endsWith('.txt')) {
-      res.setHeader('Content-Type', 'text/plain; charset=utf-8')
+        res.setHeader('Content-Type', 'text/plain; charset=utf-8')
     } else if (filePath.match(/\.(jpg|jpeg|png|gif|webp)$/i)) {
       res.setHeader('Content-Type', `image/${filePath.split('.').pop()}`)
     } else if (filePath.endsWith('.mp4')) {
-      res.setHeader('Content-Type', 'video/mp4')
+        res.setHeader('Content-Type', 'video/mp4')
     } else if (filePath.match(/\.(ogg|oga)$/i)) {
       res.setHeader('Content-Type', 'audio/ogg; codecs=opus')
     } else if (filePath.match(/\.(mp3|mpeg)$/i)) {
@@ -148,18 +148,18 @@ export async function buildApp(): Promise<FastifyInstance> {
       res.setHeader('Content-Type', 'audio/mp4')
     } else if (filePath.match(/\.(docx?|xlsx?|pptx?)$/i)) {
       const ext = filePath.split('.').pop()?.toLowerCase()
-      const mimeTypes: Record<string, string> = {
-        'doc': 'application/msword',
-        'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-        'xls': 'application/vnd.ms-excel',
-        'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        'ppt': 'application/vnd.ms-powerpoint',
-        'pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation'
+        const mimeTypes: Record<string, string> = {
+          'doc': 'application/msword',
+          'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+          'xls': 'application/vnd.ms-excel',
+          'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          'ppt': 'application/vnd.ms-powerpoint',
+          'pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation'
+        }
+        if (ext && mimeTypes[ext]) {
+          res.setHeader('Content-Type', mimeTypes[ext])
+        }
       }
-      if (ext && mimeTypes[ext]) {
-        res.setHeader('Content-Type', mimeTypes[ext])
-      }
-    }
   };
 
   // Servir arquivos estáticos (secure-uploads)
