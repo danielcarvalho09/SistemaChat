@@ -8,6 +8,7 @@ interface SendBroadcastBody {
   message: string;
   mediaUrl?: string;
   mediaType?: 'image' | 'video' | 'document';
+  privacyPolicyUrl?: string;
 }
 
 export class BroadcastController {
@@ -15,7 +16,7 @@ export class BroadcastController {
 
   // Enviar mensagem em massa
   sendBroadcast = async (request: FastifyRequest<{ Body: SendBroadcastBody }>, reply: FastifyReply) => {
-    const { connectionId, listId, message, mediaUrl, mediaType } = request.body;
+    const { connectionId, listId, message, mediaUrl, mediaType, privacyPolicyUrl } = request.body;
     const userId = request.user?.userId;
 
     if (!userId) {
@@ -39,6 +40,7 @@ export class BroadcastController {
       message,
       mediaUrl,
       mediaType,
+      privacyPolicyUrl,
     });
 
     logger.info(`Broadcast iniciado: ${result.id}`);

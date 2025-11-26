@@ -42,6 +42,7 @@ export function Broadcast() {
   const [message, setMessage] = useState('');
   const [mediaUrl, setMediaUrl] = useState('');
   const [mediaType, setMediaType] = useState<'image' | 'video' | 'document' | ''>('');
+  const [privacyPolicyUrl, setPrivacyPolicyUrl] = useState('');
   const [loading, setLoading] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -85,12 +86,14 @@ export function Broadcast() {
         message,
         mediaUrl: mediaUrl || undefined,
         mediaType: mediaType || undefined,
+        privacyPolicyUrl: privacyPolicyUrl.trim() || undefined,
       });
 
       toast.success('Disparo iniciado com sucesso!');
       setMessage('');
       setMediaUrl('');
       setMediaType('');
+      setPrivacyPolicyUrl('');
       setSelectedList('');
       loadData();
     } catch (error: any) {
@@ -265,6 +268,23 @@ export function Broadcast() {
                 </p>
               </div>
             </div>
+          </div>
+
+          {/* Link de Política de Privacidade (Opcional) */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Link de Política de Privacidade (Opcional)
+            </label>
+            <input
+              type="url"
+              value={privacyPolicyUrl}
+              onChange={(e) => setPrivacyPolicyUrl(e.target.value)}
+              placeholder="https://exemplo.com/politica-privacidade"
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#008069] focus:border-transparent"
+            />
+            <p className="text-xs text-gray-500 mt-1">
+              Este link será adicionado automaticamente ao final de todas as mensagens enviadas neste disparo.
+            </p>
           </div>
 
           {/* Mídia (Opcional) */}

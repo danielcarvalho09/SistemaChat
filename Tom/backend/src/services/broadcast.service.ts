@@ -9,6 +9,7 @@ interface BroadcastData {
   message: string;
   mediaUrl?: string;
   mediaType?: 'image' | 'video' | 'document';
+  privacyPolicyUrl?: string;
 }
 
 interface IntervalConfig {
@@ -32,7 +33,7 @@ export class BroadcastService {
 
   // Envia broadcast
   async sendBroadcast(data: BroadcastData) {
-    const { userId, connectionId, listId, message, mediaUrl, mediaType } = data;
+    const { userId, connectionId, listId, message, mediaUrl, mediaType, privacyPolicyUrl } = data;
 
     // Verificar se a lista existe e pertence ao usuário
     const list = await this.prisma.contactList.findFirst({
@@ -66,6 +67,7 @@ export class BroadcastService {
         message,
         mediaUrl,
         mediaType,
+        privacyPolicyUrl: privacyPolicyUrl || null,
         totalContacts: list.contacts.length,
         status: 'pending'
       }
@@ -78,7 +80,7 @@ export class BroadcastService {
     const config = await this.getIntervalConfig(userId);
 
     // Iniciar envio assíncrono
-    this.processBroadcast(broadcast.id, connectionId, list.contacts, message, mediaUrl, mediaType, config);
+    this.processBroadcast(broadcast.id, connectionId, list.contacts, message, mediaUrl, mediaType, privacyPolicyUrl, config);
 
     return {
       id: broadcast.id,
@@ -96,6 +98,7 @@ export class BroadcastService {
     message: string,
     mediaUrl: string | undefined,
     mediaType: string | undefined,
+    privacyPolicyUrl: string | undefined,
     config: IntervalConfig
   ) {
     try {
@@ -137,7 +140,12 @@ export class BroadcastService {
 
           // Adicionar ID único ao final da mensagem com emoji
           const uniqueId = this.generateUniqueId();
-          const messageWithId = `${personalizedMessage}\n\n🆔 _${uniqueId}_`;
+          let messageWithId = `${personalizedMessage}\n\n🆔 _${uniqueId}_`;
+          
+          // ✅ Adicionar link de política de privacidade se fornecido (FIXO ao final)
+          if (privacyPolicyUrl && privacyPolicyUrl.trim()) {
+            messageWithId = `${messageWithId}\n\n🔒 Política de Privacidade: ${privacyPolicyUrl.trim()}`;
+          }
 
           // Enviar mensagem
           if (mediaUrl && mediaType && (mediaType === 'image' || mediaType === 'video' || mediaType === 'document')) {

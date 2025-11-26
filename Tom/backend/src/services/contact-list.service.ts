@@ -97,6 +97,38 @@ export class ContactListService {
     });
   }
 
+  // Validar número de telefone
+  private validatePhoneNumber(phone: string): { isValid: boolean; reason?: string } {
+    if (!phone || !phone.trim()) {
+      return { isValid: false, reason: 'Número vazio' };
+    }
+
+    // Remover caracteres não numéricos para validação
+    const cleanPhone = phone.replace(/\D/g, '');
+
+    // Verificar se tem pelo menos 10 dígitos (formato mínimo)
+    if (cleanPhone.length < 10) {
+      return { isValid: false, reason: 'Muito curto (mínimo 10 dígitos)' };
+    }
+
+    // Verificar se tem mais de 15 dígitos (formato máximo internacional)
+    if (cleanPhone.length > 15) {
+      return { isValid: false, reason: 'Muito longo (máximo 15 dígitos)' };
+    }
+
+    // Verificar se começa com 0 (formato inválido)
+    if (cleanPhone.startsWith('0')) {
+      return { isValid: false, reason: 'Não pode começar com 0' };
+    }
+
+    // Verificar se tem apenas números após limpeza
+    if (!/^\d+$/.test(cleanPhone)) {
+      return { isValid: false, reason: 'Contém caracteres inválidos' };
+    }
+
+    return { isValid: true };
+  }
+
   // Adicionar contatos à lista
   async addContacts(listId: string, userId: string, contacts: ContactData[]) {
     const list = await this.prisma.contactList.findFirst({
@@ -108,13 +140,31 @@ export class ContactListService {
     }
 
     // Validar telefones
-    const validContacts = contacts.filter(c => c.phone && c.phone.trim().length > 0);
+    const validContacts: ContactData[] = [];
+    const invalidContacts: Array<ContactData & { reason: string }> = [];
 
-    if (validContacts.length === 0) {
-      throw new AppError('Nenhum contato válido fornecido', 400);
+    for (const contact of contacts) {
+      if (!contact.phone || !contact.phone.trim()) {
+        invalidContacts.push({ ...contact, reason: 'Número vazio' });
+        continue;
+      }
+
+      const validation = this.validatePhoneNumber(contact.phone);
+      if (validation.isValid) {
+        validContacts.push(contact);
+      } else {
+        invalidContacts.push({ ...contact, reason: validation.reason || 'Inválido' });
+      }
     }
 
-    // Criar contatos
+    if (validContacts.length === 0) {
+      throw new AppError(
+        `Nenhum contato válido fornecido. ${invalidContacts.length} número(s) mal formatado(s).`,
+        400
+      );
+    }
+
+    // Criar contatos válidos
     const created = await this.prisma.listContact.createMany({
       data: validContacts.map(c => ({
         listId,
@@ -125,8 +175,14 @@ export class ContactListService {
     });
 
     return {
-      message: `${created.count} contatos adicionados com sucesso`,
+      message: `${created.count} contatos adicionados com sucesso${invalidContacts.length > 0 ? `. ${invalidContacts.length} número(s) mal formatado(s) foram ignorados.` : ''}`,
       count: created.count,
+      invalidCount: invalidContacts.length,
+      invalidContacts: invalidContacts.length > 0 ? invalidContacts.map(ic => ({
+        phone: ic.phone,
+        name: ic.name,
+        reason: ic.reason,
+      })) : undefined,
     };
   }
 

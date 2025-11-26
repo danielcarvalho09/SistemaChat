@@ -21,12 +21,20 @@ interface ContactList {
   };
 }
 
+interface InvalidContact {
+  phone: string;
+  name?: string;
+  reason: string;
+}
+
 export function ContactLists() {
   const [lists, setLists] = useState<ContactList[]>([]);
   const [selectedList, setSelectedList] = useState<ContactList | null>(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showAddContactModal, setShowAddContactModal] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
+  const [showInvalidContactsModal, setShowInvalidContactsModal] = useState(false);
+  const [invalidContacts, setInvalidContacts] = useState<InvalidContact[]>([]);
   const [formData, setFormData] = useState({ name: '', description: '' });
   const [contactForm, setContactForm] = useState({ name: '', phone: '' });
   const [importFile, setImportFile] = useState<File | null>(null);
@@ -78,9 +86,48 @@ export function ContactLists() {
     }
   };
 
+  // Função para validar número de telefone
+  const validatePhoneNumber = (phone: string): { isValid: boolean; reason?: string } => {
+    if (!phone || !phone.trim()) {
+      return { isValid: false, reason: 'Número vazio' };
+    }
+
+    // Remover caracteres não numéricos para validação
+    const cleanPhone = phone.replace(/\D/g, '');
+
+    // Verificar se tem pelo menos 10 dígitos (formato mínimo)
+    if (cleanPhone.length < 10) {
+      return { isValid: false, reason: 'Muito curto (mínimo 10 dígitos)' };
+    }
+
+    // Verificar se tem mais de 15 dígitos (formato máximo internacional)
+    if (cleanPhone.length > 15) {
+      return { isValid: false, reason: 'Muito longo (máximo 15 dígitos)' };
+    }
+
+    // Verificar se começa com 0 (formato inválido)
+    if (cleanPhone.startsWith('0')) {
+      return { isValid: false, reason: 'Não pode começar com 0' };
+    }
+
+    // Verificar se tem apenas números após limpeza
+    if (!/^\d+$/.test(cleanPhone)) {
+      return { isValid: false, reason: 'Contém caracteres inválidos' };
+    }
+
+    return { isValid: true };
+  };
+
   const handleAddContact = async () => {
     if (!selectedList || !contactForm.phone.trim()) {
       toast.error('Telefone é obrigatório');
+      return;
+    }
+
+    // Validar número antes de enviar
+    const validation = validatePhoneNumber(contactForm.phone);
+    if (!validation.isValid) {
+      toast.error(`Número inválido: ${validation.reason}`);
       return;
     }
 
@@ -117,6 +164,72 @@ export function ContactLists() {
       return;
     }
 
+    // Validar arquivo antes de enviar
+    const fileText = await importFile.text();
+    const lines = fileText.split('\n').filter(line => line.trim().length > 0);
+    const invalid: InvalidContact[] = [];
+    const validContacts: { name?: string; phone: string }[] = [];
+
+    // Processar linhas
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+      
+      // Pular cabeçalho
+      if (i === 0 && (line.toLowerCase().includes('nome') || line.toLowerCase().includes('name'))) {
+        continue;
+      }
+
+      const parts = line.split(',').map(p => p.trim());
+      let name: string | undefined;
+      let phone: string;
+
+      if (parts.length >= 2) {
+        name = parts[0] || undefined;
+        phone = parts[1];
+      } else if (parts.length === 1) {
+        phone = parts[0];
+      } else {
+        continue;
+      }
+
+      // Validar número
+      const validation = validatePhoneNumber(phone);
+      if (!validation.isValid) {
+        invalid.push({
+          phone,
+          name,
+          reason: validation.reason || 'Inválido',
+        });
+      } else {
+        validContacts.push({ name, phone });
+      }
+    }
+
+    // Se houver números inválidos, mostrar modal
+    if (invalid.length > 0) {
+      setInvalidContacts(invalid);
+      setShowInvalidContactsModal(true);
+      
+      // Perguntar se deseja continuar mesmo assim
+      const shouldContinue = confirm(
+        `Foram encontrados ${invalid.length} número(s) mal formatado(s). Deseja continuar importando apenas os ${validContacts.length} número(s) válido(s)?`
+      );
+
+      if (!shouldContinue) {
+        setShowImportModal(false);
+        setImportFile(null);
+        return;
+      }
+    }
+
+    // Se não houver contatos válidos, não importar
+    if (validContacts.length === 0) {
+      toast.error('Nenhum contato válido encontrado no arquivo');
+      setShowImportModal(false);
+      setImportFile(null);
+      return;
+    }
+
     const formData = new FormData();
     formData.append('file', importFile);
 
@@ -124,9 +237,17 @@ export function ContactLists() {
       const response = await api.post(`/contact-lists/${selectedList.id}/import`, formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
-      toast.success(response.data.message);
+      
+      if (invalid.length > 0) {
+        toast.success(`${response.data.message}. ${invalid.length} número(s) inválido(s) foram ignorados.`);
+      } else {
+        toast.success(response.data.message);
+      }
+      
       setShowImportModal(false);
+      setShowInvalidContactsModal(false);
       setImportFile(null);
+      setInvalidContacts([]);
       loadListDetails(selectedList.id);
     } catch (error: any) {
       console.error('Erro ao importar contatos:', error);
@@ -369,9 +490,21 @@ export function ContactLists() {
                   type="tel"
                   value={contactForm.phone}
                   onChange={(e) => setContactForm({ ...contactForm, phone: e.target.value })}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#008069] focus:border-transparent"
+                  className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-[#008069] focus:border-transparent ${
+                    contactForm.phone && !validatePhoneNumber(contactForm.phone).isValid
+                      ? 'border-red-500'
+                      : 'border-gray-300'
+                  }`}
                   placeholder="5516999999999"
                 />
+                {contactForm.phone && !validatePhoneNumber(contactForm.phone).isValid && (
+                  <p className="text-xs text-red-500 mt-1">
+                    ⚠️ {validatePhoneNumber(contactForm.phone).reason}
+                  </p>
+                )}
+                <p className="text-xs text-gray-500 mt-1">
+                  Formato: apenas números, mínimo 10 dígitos, máximo 15 dígitos
+                </p>
               </div>
 
               <div className="flex gap-2">
@@ -422,6 +555,56 @@ export function ContactLists() {
                   Cancelar
                 </Button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Números Mal Formatados */}
+      {showInvalidContactsModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 w-full max-w-2xl max-h-[80vh] overflow-hidden flex flex-col">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-xl font-bold text-red-600">
+                ⚠️ Números Mal Formatados ({invalidContacts.length})
+              </h3>
+              <button onClick={() => setShowInvalidContactsModal(false)}>
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto mb-4">
+              <div className="space-y-2">
+                {invalidContacts.map((contact, index) => (
+                  <div
+                    key={index}
+                    className="p-3 bg-red-50 border border-red-200 rounded-lg"
+                  >
+                    <div className="flex items-start justify-between">
+                      <div className="flex-1">
+                        {contact.name && (
+                          <p className="font-medium text-gray-900">{contact.name}</p>
+                        )}
+                        <p className="text-sm text-gray-700 font-mono">{contact.phone}</p>
+                        <p className="text-xs text-red-600 mt-1">❌ {contact.reason}</p>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setShowInvalidContactsModal(false);
+                  setInvalidContacts([]);
+                }}
+                className="flex-1"
+              >
+                Fechar
+              </Button>
             </div>
           </div>
         </div>
