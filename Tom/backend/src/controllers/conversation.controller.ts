@@ -23,20 +23,28 @@ export class ConversationController {
    * Lista conversas com filtros
    */
   listConversations = async (request: FastifyRequest, reply: FastifyReply) => {
-    const params = validate(conversationFilterSchema, request.query);
-    const userId = request.user!.userId;
-    const userRoles = request.user!.roles;
+    try {
+      const params = validate(conversationFilterSchema, request.query);
+      const userId = request.user!.userId;
+      const userRoles = request.user!.roles;
 
-    const conversations = await this.conversationService.listConversations(userId, userRoles, {
-      ...params,
-      status: params.status as ConversationStatus | undefined,
-    });
+      const conversations = await this.conversationService.listConversations(userId, userRoles, {
+        ...params,
+        status: params.status as ConversationStatus | undefined,
+      });
 
-    return reply.status(200).send({
-      success: true,
-      data: conversations.data,
-      pagination: conversations.pagination,
-    });
+      return reply.status(200).send({
+        success: true,
+        data: conversations.data,
+        pagination: conversations.pagination,
+      });
+    } catch (error: any) {
+      logger.error('[ConversationController] Error in listConversations:', error);
+      return reply.status(500).send({
+        success: false,
+        message: error.message || 'Error listing conversations',
+      });
+    }
   };
 
   /**

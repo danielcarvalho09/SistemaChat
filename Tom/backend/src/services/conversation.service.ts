@@ -95,57 +95,120 @@ export class ConversationService {
     // Se admin passar connectionId, ainda pode filtrar se quiser
     // Mas por padrão vê todas
 
+    // ✅ BUG FIX: Combinar busca com restrições de permissão usando AND
+    // Se search for fornecido, precisa combinar com as restrições existentes
     if (search) {
-      where.OR = [
-        { contact: { name: { contains: search, mode: 'insensitive' } } },
-        { contact: { phoneNumber: { contains: search } } },
-      ];
+      const searchCondition = {
+        OR: [
+          { contact: { name: { contains: search, mode: 'insensitive' } } },
+          { contact: { phoneNumber: { contains: search } } },
+        ],
+      };
+
+      // Se já existe where.OR (restrições de permissão), combinar com AND
+      if (where.OR) {
+        where.AND = [
+          { OR: where.OR }, // Manter restrições de permissão
+          searchCondition, // Adicionar busca
+        ];
+        delete where.OR; // Remover OR antigo
+      } else {
+        // Se não há restrições de permissão (admin), usar busca diretamente
+        where.OR = searchCondition.OR;
+      }
     }
 
-    const [conversations, total] = await Promise.all([
-      this.prisma.conversation.findMany({
-        where,
-        skip,
-        take: limit,
-        orderBy: { [sortBy]: sortOrder },
-        include: {
-          contact: true,
-          connection: true,
-          department: true,
-          assignedUser: {
-            include: {
-              roles: {
-                include: { role: true },
+    try {
+      const [conversations, total] = await Promise.all([
+        this.prisma.conversation.findMany({
+          where,
+          skip,
+          take: limit,
+          orderBy: { [sortBy]: sortOrder },
+          include: {
+            contact: true,
+            connection: true,
+            department: true,
+            assignedUser: {
+              include: {
+                roles: {
+                  include: { role: true },
+                },
               },
             },
-          },
-          messages: {
-            orderBy: { timestamp: 'desc' },
-            take: 1,
-            include: {
-              quotedMessage: {
-                include: {
-                  sender: true,
+            messages: {
+              orderBy: { timestamp: 'desc' },
+              take: 1,
+              include: {
+                quotedMessage: {
+                  include: {
+                    sender: true,
+                  },
                 },
               },
             },
           },
-        },
-      }),
-      this.prisma.conversation.count({ where }),
-    ]);
+        }),
+        this.prisma.conversation.count({ where }),
+      ]);
 
-    return {
-      data: conversations.map(this.formatConversationResponse),
-      pagination: {
-        page,
-        limit,
-        total,
-        totalPages: Math.ceil(total / limit),
-        hasNext: page * limit < total,
-        hasPrev: page > 1,
-      },
-    };
+      return {
+        data: conversations.map((conv) => {
+          try {
+            return this.formatConversationResponse(conv);
+          } catch (error) {
+            logger.error(`[ConversationService] Error formatting conversation ${conv.id}:`, error);
+            // Retornar conversa básica em caso de erro
+            return {
+              id: conv.id,
+              contact: {
+                id: conv.contact.id,
+                phoneNumber: conv.contact.phoneNumber,
+                name: conv.contact.name || null,
+                pushName: conv.contact.pushName || null,
+                avatar: conv.contact.avatar || null,
+                email: conv.contact.email || null,
+                tags: conv.contact.tags || [],
+              },
+              connection: {
+                id: conv.connection.id,
+                name: conv.connection.name,
+                phoneNumber: conv.connection.phoneNumber,
+                status: conv.connection.status,
+                avatar: conv.connection.avatar || null,
+                lastConnected: conv.connection.lastConnected?.toISOString() || null,
+                isActive: conv.connection.isActive,
+                createdAt: conv.connection.createdAt.toISOString(),
+                updatedAt: conv.connection.updatedAt.toISOString(),
+              },
+              department: null,
+              assignedUser: null,
+              status: conv.status,
+              lastMessageAt: conv.lastMessageAt.toISOString(),
+              firstResponseAt: conv.firstResponseAt?.toISOString() || null,
+              resolvedAt: conv.resolvedAt?.toISOString() || null,
+              unreadCount: conv.unreadCount,
+              lastMessage: null,
+              internalNotes: conv.internalNotes,
+              createdAt: conv.createdAt.toISOString(),
+              updatedAt: conv.updatedAt.toISOString(),
+            } as any;
+          }
+        }),
+        pagination: {
+          page,
+          limit,
+          total,
+          totalPages: Math.ceil(total / limit),
+          hasNext: page * limit < total,
+          hasPrev: page > 1,
+        },
+      };
+    } catch (error: any) {
+      logger.error(`[ConversationService] Error in listConversations:`, error);
+      logger.error(`[ConversationService] Where clause:`, JSON.stringify(where, null, 2));
+      throw error;
+    }
   }
 
   /**

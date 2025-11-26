@@ -88,18 +88,19 @@ export async function syncRoutes(fastify: FastifyInstance) {
    * POST /api/v1/sync/all
    */
   fastify.post('/all', { preHandler: [authenticate] }, async (request: FastifyRequest, reply: FastifyReply) => {
+    let prisma: any = null;
     try {
       const { PrismaClient } = await import('@prisma/client');
-      const prisma = new PrismaClient();
+      prisma = new PrismaClient();
       
       // Buscar todas as conexões ativas
       const connections = await prisma.whatsAppConnection.findMany({
         where: { status: 'connected' },
+        select: { id: true, name: true, phoneNumber: true },
       });
 
-      await prisma.$disconnect();
-
       if (connections.length === 0) {
+        await prisma.$disconnect();
         return reply.send({
           success: true,
           message: 'No active connections to sync',
@@ -110,20 +111,44 @@ export async function syncRoutes(fastify: FastifyInstance) {
       // Sincronizar cada conexão
       const { baileysManager } = await import('../whatsapp/baileys.manager.js');
       let totalSynced = 0;
+      const errors: Array<{ connectionId: string; error: string }> = [];
 
       for (const connection of connections) {
-        const synced = await baileysManager.syncAllActiveConversations(connection.id);
-        totalSynced += synced;
+        try {
+          logger.info(`[Sync] Syncing connection ${connection.id} (${connection.name || connection.phoneNumber})...`);
+          const synced = await baileysManager.syncAllActiveConversations(connection.id);
+          totalSynced += synced;
+          logger.info(`[Sync] Connection ${connection.id} synced ${synced} conversations`);
+        } catch (connectionError: any) {
+          logger.error(`[Sync] Error syncing connection ${connection.id}:`, connectionError);
+          errors.push({
+            connectionId: connection.id,
+            error: connectionError.message || 'Unknown error',
+          });
+        }
       }
+
+      await prisma.$disconnect();
 
       return reply.send({
         success: true,
-        message: `Synced ${totalSynced} conversations from ${connections.length} connections`,
+        message: `Synced ${totalSynced} conversations from ${connections.length} connections${errors.length > 0 ? ` (${errors.length} errors)` : ''}`,
         totalSynced,
         connectionsProcessed: connections.length,
+        errors: errors.length > 0 ? errors : undefined,
       });
     } catch (error: any) {
-      logger.error('Error syncing all:', error);
+      logger.error('[Sync] Error syncing all:', error);
+      logger.error('[Sync] Error stack:', error instanceof Error ? error.stack : 'No stack');
+      
+      if (prisma) {
+        try {
+          await prisma.$disconnect();
+        } catch (disconnectError) {
+          logger.error('[Sync] Error disconnecting Prisma:', disconnectError);
+        }
+      }
+      
       return reply.status(500).send({
         success: false,
         message: error.message || 'Error syncing all conversations',
