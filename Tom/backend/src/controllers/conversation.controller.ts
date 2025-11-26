@@ -13,6 +13,7 @@ import {
 } from '../utils/validators.js';
 import { getSocketServer } from '../websocket/socket.server.js';
 import { ConversationStatus, MessageType } from '../models/types.js';
+import { logger } from '../config/logger.js';
 
 export class ConversationController {
   private conversationService = new ConversationService();
