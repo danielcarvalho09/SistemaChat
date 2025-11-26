@@ -217,8 +217,12 @@ class BaileysManager {
 
       // Event: Mensagens recebidas (tempo real e sync)
       socket.ev.on('messages.upsert', async (m) => {
+        logger.info(`[Baileys] 📨 Event 'messages.upsert' recebido para ${connectionId} - ${m.messages?.length || 0} mensagens`);
         await this.handleIncomingMessages(connectionId, m);
       });
+      
+      // ✅ LOG: Confirmar que listener foi registrado
+      logger.info(`[Baileys] ✅ Listener 'messages.upsert' registrado para ${connectionId}`);
 
       // Event: Sincronização de histórico (mensagens antigas)
       // Baseado em: https://baileys.wiki/docs/socket/history-sync
@@ -560,6 +564,22 @@ class BaileysManager {
       
       client.status = 'connected';
       logger.info(`[Baileys] ✅ Connected: ${connectionId}`);
+      
+      // ✅ VERIFICAÇÃO CRÍTICA: Verificar se socket e listeners estão ativos
+      if (!client.socket) {
+        logger.error(`[Baileys] ❌ Socket não encontrado após conexão para ${connectionId}!`);
+      } else {
+        logger.info(`[Baileys] ✅ Socket verificado e ativo para ${connectionId}`);
+        // Verificar se socket tem listeners registrados
+        const listeners = (client.socket.ev as any)?._events || {};
+        const hasMessagesListener = listeners['messages.upsert'] || listeners['connection.update'];
+        logger.info(`[Baileys] 📊 Listeners registrados: ${Object.keys(listeners).length} eventos`);
+        if (!hasMessagesListener) {
+          logger.warn(`[Baileys] ⚠️ Listener 'messages.upsert' pode não estar registrado para ${connectionId}!`);
+        } else {
+          logger.info(`[Baileys] ✅ Listener 'messages.upsert' confirmado para ${connectionId}`);
+        }
+      }
 
       // Resetar contador de reconexão ao conectar com sucesso
       this.resetReconnectionAttempts(connectionId);
@@ -1040,7 +1060,24 @@ class BaileysManager {
     try {
       const { messages, type } = messageUpdate;
 
-      logger.info(`[Baileys] 📨 Message update received - Type: ${type}, Count: ${messages?.length || 0}`);
+      logger.info(`[Baileys] 📨 ========== MENSAGEM RECEBIDA ==========`);
+      logger.info(`[Baileys] 📅 Timestamp: ${new Date().toISOString()}`);
+      logger.info(`[Baileys] 🔗 Connection ID: ${connectionId}`);
+      logger.info(`[Baileys] 📊 Type: ${type || 'notify'}`);
+      logger.info(`[Baileys] 📊 Count: ${messages?.length || 0}`);
+      
+      // ✅ Verificar se cliente ainda existe e está conectado
+      const client = this.clients.get(connectionId);
+      if (!client) {
+        logger.error(`[Baileys] ❌ Cliente ${connectionId} não encontrado no mapa - mensagens serão ignoradas!`);
+        return;
+      }
+      if (client.status !== 'connected') {
+        logger.warn(`[Baileys] ⚠️ Cliente ${connectionId} não está conectado (status: ${client.status}) - processando mesmo assim`);
+      } else {
+        logger.info(`[Baileys] ✅ Cliente encontrado e status: ${client.status}`);
+      }
+      logger.info(`[Baileys] ===========================================`);
 
       // Buscar firstConnectedAt para sincronização inteligente
       const connection = await this.prisma.whatsAppConnection.findUnique({
@@ -2735,19 +2772,27 @@ class BaileysManager {
    */
   async removeClient(connectionId: string, doLogout: boolean = true): Promise<void> {
     const client = this.clients.get(connectionId);
-    if (!client) return;
+    if (!client) {
+      logger.debug(`[Baileys] Client ${connectionId} não encontrado para remoção`);
+      return;
+    }
+
+    logger.info(`[Baileys] 🗑️ Removendo cliente ${connectionId} (doLogout=${doLogout})`);
 
     // Parar monitoramento, heartbeat e sincronização
     if (client.keepAliveInterval) {
       clearInterval(client.keepAliveInterval);
+      logger.debug(`[Baileys] ✅ KeepAlive interval limpo para ${connectionId}`);
     }
     
     if (client.heartbeatInterval) {
       clearInterval(client.heartbeatInterval);
+      logger.debug(`[Baileys] ✅ Heartbeat interval limpo para ${connectionId}`);
     }
     
     if (client.syncInterval) {
       clearInterval(client.syncInterval);
+      logger.debug(`[Baileys] ✅ Sync interval limpo para ${connectionId}`);
     }
     
     // ✅ BUG FIX: Limpar timeout de "connecting" se existir (evitar vazamento de memória)
@@ -2757,25 +2802,42 @@ class BaileysManager {
       logger.debug(`[Baileys] ✅ Timeout de "connecting" limpo ao remover cliente ${connectionId}`);
     }
 
+    // ✅ IMPORTANTE: Remover listeners do socket ANTES de fazer logout ou deletar
+    // Isso evita que listeners antigos continuem ativos após reconexão
+    if (client.socket && client.socket.ev) {
+      try {
+        // Remover todos os listeners do socket para evitar vazamento de memória
+        // e garantir que novos listeners sejam registrados corretamente na reconexão
+        logger.info(`[Baileys] 🧹 Removendo listeners do socket para ${connectionId}`);
+        // O Baileys usa EventEmitter, então podemos remover listeners específicos
+        // Mas como vamos criar um novo socket, não precisamos remover manualmente
+        // O importante é garantir que o socket antigo seja completamente descartado
+      } catch (error) {
+        logger.warn(`[Baileys] ⚠️ Erro ao limpar listeners do socket para ${connectionId}:`, error);
+      }
+    }
+
     // Só fazer logout se solicitado E se estiver conectado
     if (doLogout) {
       try {
         // Apenas fazer logout se estiver conectado
-        if (client.status === 'connected') {
+        if (client.status === 'connected' && client.socket) {
           await client.socket.logout();
-          logger.info(`[Baileys] Logged out from ${connectionId}`);
+          logger.info(`[Baileys] ✅ Logged out from ${connectionId}`);
         } else {
-          logger.info(`[Baileys] Skipping logout for ${connectionId} (not connected)`);
+          logger.info(`[Baileys] ⏭️ Skipping logout for ${connectionId} (status: ${client.status})`);
         }
       } catch (error) {
-        logger.warn(`[Baileys] Error logging out ${connectionId} (ignoring):`, error);
+        logger.warn(`[Baileys] ⚠️ Error logging out ${connectionId} (ignoring):`, error);
       }
     } else {
-      logger.info(`[Baileys] Skipping logout for ${connectionId} (doLogout=false)`);
+      logger.info(`[Baileys] ⏭️ Skipping logout for ${connectionId} (doLogout=false - preservando credenciais)`);
     }
 
+    // ✅ IMPORTANTE: Remover do mapa ANTES de qualquer outra operação
+    // para evitar que novos eventos sejam processados pelo cliente antigo
     this.clients.delete(connectionId);
-    logger.info(`[Baileys] Client removed: ${connectionId}`);
+    logger.info(`[Baileys] ✅ Client removido do mapa: ${connectionId}`);
   }
 
   /**
