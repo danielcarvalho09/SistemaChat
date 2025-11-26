@@ -588,12 +588,54 @@ class BaileysManager {
       // E forçar sincronização de mensagens desde a primeira conexão ao reconectar
       await this.saveFirstConnectedAt(connectionId);
 
-      // ✅ IMPORTANTE: Se já tem firstConnectedAt (não é primeira conexão), iniciar sincronização
-      // Isso garante que ao escanear QR code de conexão já conectada antes, sincronize desde firstConnectedAt
-      if (firstConnectedAt) {
-        logger.info(`[Baileys] 🔄 Conexão estabelecida após QR code - já tinha firstConnectedAt`);
-        logger.info(`[Baileys] ⏰ Primeira conexão foi em: ${firstConnectedAt.toISOString()}`);
+      // ✅ IMPORTANTE: Buscar firstConnectedAt novamente após saveFirstConnectedAt
+      // porque pode ter sido criado agora (primeira conexão)
+      // Mas só sincronizar se já existia ANTES (reconexão), não na primeira conexão
+      let shouldSync = firstConnectedAt !== null; // Sincronizar se já tinha firstConnectedAt (reconexão)
+      
+      // Se não tinha firstConnectedAt antes, verificar se foi criado agora
+      // Se foi criado agora, é primeira conexão - NÃO sincronizar (não há mensagens antigas)
+      if (!shouldSync) {
+        try {
+          const updatedConnection = await this.prisma.whatsAppConnection.findUnique({
+            where: { id: connectionId },
+            select: { firstConnectedAt: true },
+          });
+          // Se firstConnectedAt foi criado agora, é primeira conexão - não sincronizar
+          // Se já existia, é reconexão - sincronizar
+          // Mas como não tinha antes, não sincronizar agora (primeira conexão)
+          firstConnectedAt = updatedConnection?.firstConnectedAt ?? null;
+          shouldSync = false; // Primeira conexão - não sincronizar
+        } catch (fetchError) {
+          logger.warn(`[Baileys] ⚠️ Could not read updated firstConnectedAt for ${connectionId}:`, fetchError);
+          shouldSync = false;
+        }
+      }
+
+      // ✅ SINCRONIZAÇÃO AUTOMÁTICA: Sempre sincronizar quando conexão é aberta após reconexão
+      // Isso garante que mensagens perdidas durante desconexão sejam recuperadas
+      // Funciona para reconexões automáticas (sem QR code)
+      // E funciona mesmo sem o frontend aberto (rodando no backend)
+      // ✅ IMPORTANTE: Só sincronizar se já tinha firstConnectedAt ANTES (reconexão)
+      // porque na primeira conexão não há mensagens antigas para sincronizar
+      
+      if (shouldSync) {
+        const syncType = lastDisconnectAt ? 'reconexão automática' : 'primeira conexão';
+        logger.info(`[Baileys] 🔄 ========== SINCRONIZAÇÃO AUTOMÁTICA ==========`);
+        logger.info(`[Baileys] 📅 Timestamp: ${new Date().toISOString()}`);
+        logger.info(`[Baileys] 🔗 Connection ID: ${connectionId}`);
+        logger.info(`[Baileys] 🔄 Tipo: ${syncType}`);
+        if (firstConnectedAt) {
+          logger.info(`[Baileys] ⏰ Primeira conexão foi em: ${firstConnectedAt.toISOString()}`);
+        }
+        if (lastDisconnectAt) {
+          logger.info(`[Baileys] ⏰ Última desconexão foi em: ${lastDisconnectAt.toISOString()}`);
+          const disconnectDuration = Math.round((Date.now() - lastDisconnectAt.getTime()) / 1000);
+          logger.info(`[Baileys] ⏱️ Tempo desconectado: ${disconnectDuration} segundos`);
+        }
         logger.info(`[Baileys] 🔍 Iniciando sincronização de TODAS conversas desde firstConnectedAt...`);
+        logger.info(`[Baileys] 💡 Esta sincronização funciona mesmo sem o frontend aberto`);
+        logger.info(`[Baileys] ===========================================`);
         
         // Aguardar alguns segundos para conexão estabilizar completamente
         setTimeout(async () => {
@@ -605,10 +647,12 @@ class BaileysManager {
               return;
             }
 
+            logger.info(`[Baileys] 🔄 Iniciando sincronização automática...`);
+            
             // Forçar sincronização de TODAS as conversas ativas desde firstConnectedAt
             const syncedCount = await this.syncAllActiveConversations(connectionId, 100);
             
-            logger.info(`[Baileys] ✅ Sincronização pós-QR code completa: ${syncedCount} conversas sincronizadas`);
+            logger.info(`[Baileys] ✅ Sincronização automática completa: ${syncedCount} conversas sincronizadas`);
             
             // Também detectar e recuperar gaps
             const { gapsFound, recovered } = await this.detectAndRecoverGaps(connectionId);
@@ -633,10 +677,15 @@ class BaileysManager {
             }).catch((updateError) => {
               logger.warn(`[Baileys] ⚠️ Could not update lastSyncTo for ${connectionId}:`, updateError);
             });
+            
+            logger.info(`[Baileys] ✅ ========== SINCRONIZAÇÃO AUTOMÁTICA CONCLUÍDA ==========`);
           } catch (syncError) {
-            logger.error(`[Baileys] ❌ Erro na sincronização pós-QR code:`, syncError);
+            logger.error(`[Baileys] ❌ Erro na sincronização automática:`, syncError);
+            logger.error(`[Baileys] ❌ Stack trace:`, syncError instanceof Error ? syncError.stack : 'No stack');
           }
         }, 5000); // 5 segundos de espera para conexão estabilizar
+      } else {
+        logger.info(`[Baileys] ℹ️ Primeira conexão - sincronização será feita após salvar firstConnectedAt`);
       }
 
       await this.updateConnectionStatus(connectionId, 'connected', {
@@ -3347,45 +3396,7 @@ class BaileysManager {
         
         logger.info(`[Baileys] 🔄 RECONEXÃO detectada para ${connectionId}`);
         logger.info(`[Baileys] ⏰ Primeira conexão foi há ${hoursSinceFirst} horas (${connection.firstConnectedAt.toISOString()})`);
-        logger.info(`[Baileys] 🔍 Iniciando sincronização de TODAS conversas desde a primeira conexão...`);
-        
-        // Aguardar 5 segundos para conexão estabilizar
-        setTimeout(async () => {
-          try {
-            // Forçar sincronização de TODAS as conversas ativas desde firstConnectedAt
-            // Isso garante que mensagens perdidas durante desconexão sejam recuperadas
-            const syncedCount = await this.syncAllActiveConversations(connectionId, 100);
-            
-            logger.info(`[Baileys] ✅ Sincronização pós-reconexão completa: ${syncedCount} conversas sincronizadas`);
-            
-            // Também detectar e recuperar gaps
-            const { gapsFound, recovered } = await this.detectAndRecoverGaps(connectionId);
-            logger.info(`[Baileys] ✅ Detecção de gaps: ${gapsFound} encontrados, ${recovered} em recuperação`);
-
-            // Processar fila de mensagens que falharam anteriormente
-            const retried = await this.processRetryQueue(connectionId);
-            if (retried > 0) {
-              logger.info(`[Baileys] ✅ Retry queue drained: ${retried} mensagens reprocesadas após reconexão`);
-            }
-
-            const syncEnd = new Date();
-            const currentClient = this.clients.get(connectionId);
-            if (currentClient) {
-              currentClient.lastSyncTo = syncEnd;
-            }
-
-            await this.prisma.whatsAppConnection.update({
-              where: { id: connectionId },
-              data: {
-                lastSyncTo: syncEnd,
-              },
-            }).catch((updateError) => {
-              logger.warn(`[Baileys] ⚠️ Could not update lastSyncTo for ${connectionId}:`, updateError);
-            });
-          } catch (syncError) {
-            logger.error(`[Baileys] ❌ Erro na sincronização pós-reconexão:`, syncError);
-          }
-        }, 5000); // 5 segundos de espera
+        logger.info(`[Baileys] 💡 Sincronização será acionada automaticamente pelo handleConnectionUpdate`);
       }
     } catch (error) {
       logger.error(`[Baileys] Error saving firstConnectedAt for ${connectionId}:`, error);
