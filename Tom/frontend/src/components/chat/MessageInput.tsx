@@ -99,7 +99,29 @@ export function MessageInput({ onSendMessage, replyingTo, onCancelReply, contact
   const startRecording = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mediaRecorder = new MediaRecorder(stream);
+      
+      // Tentar usar codec de áudio preferido, com fallback
+      const options: MediaRecorderOptions = {};
+      const audioMimeTypes = [
+        'audio/webm;codecs=opus',
+        'audio/webm',
+        'audio/ogg;codecs=opus',
+        'audio/ogg',
+        'audio/mp4',
+        'audio/mpeg',
+      ];
+      
+      // Encontrar o primeiro tipo MIME suportado
+      let selectedMimeType = 'audio/webm'; // Fallback padrão
+      for (const mimeType of audioMimeTypes) {
+        if (MediaRecorder.isTypeSupported(mimeType)) {
+          selectedMimeType = mimeType;
+          options.mimeType = mimeType;
+          break;
+        }
+      }
+      
+      const mediaRecorder = new MediaRecorder(stream, options);
       mediaRecorderRef.current = mediaRecorder;
       audioChunksRef.current = [];
 
@@ -110,8 +132,31 @@ export function MessageInput({ onSendMessage, replyingTo, onCancelReply, contact
       };
 
       mediaRecorder.onstop = () => {
-        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/ogg; codecs=opus' });
-        const audioFile = new File([audioBlob], `audio-${Date.now()}.ogg`, { type: 'audio/ogg' });
+        // Determinar o tipo MIME correto baseado no que foi gravado
+        const recordedMimeType = mediaRecorder.mimeType || selectedMimeType;
+        
+        // Se o MediaRecorder gerou video/webm, tratar como áudio
+        let finalMimeType = recordedMimeType;
+        if (recordedMimeType.startsWith('video/webm')) {
+          // Converter para audio/webm se for um áudio gravado
+          finalMimeType = 'audio/webm';
+        }
+        
+        const audioBlob = new Blob(audioChunksRef.current, { type: finalMimeType });
+        
+        // Determinar extensão baseada no tipo MIME
+        let extension = '.webm';
+        if (finalMimeType.includes('ogg')) {
+          extension = '.ogg';
+        } else if (finalMimeType.includes('mp4')) {
+          extension = '.mp4';
+        } else if (finalMimeType.includes('mpeg')) {
+          extension = '.mp3';
+        }
+        
+        const audioFile = new File([audioBlob], `audio-${Date.now()}${extension}`, { 
+          type: finalMimeType.split(';')[0] // Remover codecs do tipo
+        });
         setSelectedFile(audioFile);
         
         // Parar todas as tracks do stream

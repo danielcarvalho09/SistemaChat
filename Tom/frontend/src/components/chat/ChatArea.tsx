@@ -76,7 +76,8 @@ export function ChatArea({ conversationId, onToggleDetails }: ChatAreaProps) {
         let messageType = 'document';
         if (file.type.startsWith('image/')) {
           messageType = 'image';
-        } else if (file.type.startsWith('audio/')) {
+        } else if (file.type.startsWith('audio/') || file.type === 'video/webm') {
+          // video/webm pode ser usado para gravação de áudio no navegador
           messageType = 'audio';
         } else if (file.type.startsWith('video/')) {
           messageType = 'video';

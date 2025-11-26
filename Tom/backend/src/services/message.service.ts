@@ -298,14 +298,87 @@ export class MessageService {
           logger.info(`📤 [BACKGROUND] Text message sent, externalId: ${externalId || 'none'}`);
         } else if (mediaUrl) {
           logger.info(`📤 [BACKGROUND] Sending media message: type=${messageType}, url=${mediaUrl}`);
-          externalId = await baileysManager.sendMessage(
-            conversation.connectionId,
-            conversation.contact.phoneNumber,
-            { url: mediaUrl, caption: formattedContent },
-            messageType as 'image' | 'audio' | 'video' | 'document',
-            quotedForSend ? { quotedMessage: quotedForSend } : undefined
-          );
-          logger.info(`📤 [BACKGROUND] Media message sent, externalId: ${externalId || 'none'}`);
+          
+          // ✅ CORREÇÃO: Áudio não suporta caption no WhatsApp
+          // Se houver texto E for áudio, enviar duas mensagens separadas
+          // Verificar se content não é apenas o nome do arquivo (geralmente começa com "audio-" e tem extensão)
+          const isLikelyFileName = /^audio-\d+\.(ogg|webm|mp3|wav|m4a)$/i.test(content);
+          const hasRealText = content && content.trim() && !isLikelyFileName;
+          
+          if (messageType === 'audio' && hasRealText) {
+            logger.info(`📤 [BACKGROUND] Audio with text detected - sending text first, then audio`);
+            logger.info(`📤 [BACKGROUND] Content: "${content}" (isFileName: ${isLikelyFileName})`);
+            
+            // 1. Enviar mensagem de texto primeiro (com nome do usuário)
+            const textExternalId = await baileysManager.sendMessage(
+              conversation.connectionId,
+              conversation.contact.phoneNumber,
+              formattedContent,
+              'text',
+              quotedForSend ? { quotedMessage: quotedForSend } : undefined
+            );
+            logger.info(`📤 [BACKGROUND] Text message sent first, externalId: ${textExternalId || 'none'}`);
+            
+            // 2. Criar e salvar mensagem de texto no banco
+            const textMessage = await this.prisma.message.create({
+              data: {
+                conversationId,
+                connectionId: conversation.connectionId,
+                senderId: userId,
+                content,
+                messageType: 'text',
+                status: textExternalId ? 'sent' : 'failed',
+                isFromContact: false,
+                timestamp: new Date(),
+                externalId: textExternalId || null,
+                quotedMessageId: quotedMessage?.id || null,
+              },
+            });
+            
+            // 3. Atualizar externalId da mensagem de texto
+            if (textExternalId) {
+              await this.prisma.message.update({
+                where: { id: textMessage.id },
+                data: { externalId: textExternalId },
+              });
+            }
+            
+            // 4. Emitir evento WebSocket para a mensagem de texto
+            try {
+              const socketServer = getSocketServer();
+              if (socketServer) {
+                const formattedTextMessage = this.formatMessageResponse(textMessage);
+                formattedTextMessage.status = textExternalId ? MessageStatus.SENT : MessageStatus.FAILED;
+                socketServer.emitNewMessage(conversationId, formattedTextMessage);
+              }
+            } catch (socketError) {
+              logger.error('[MessageService] ❌ Error emitting text message socket event:', socketError);
+            }
+            
+            // 5. Aguardar um pouco antes de enviar o áudio
+            await new Promise(resolve => setTimeout(resolve, 500));
+            
+            // 6. Enviar áudio sem caption
+            externalId = await baileysManager.sendMessage(
+              conversation.connectionId,
+              conversation.contact.phoneNumber,
+              { url: mediaUrl },
+              'audio',
+              undefined // Sem quoted message no áudio
+            );
+            logger.info(`📤 [BACKGROUND] Audio message sent, externalId: ${externalId || 'none'}`);
+          } else {
+            // Para outros tipos de mídia (image, video, document), usar caption normalmente
+            const caption = (messageType === 'audio') ? undefined : formattedContent;
+            externalId = await baileysManager.sendMessage(
+              conversation.connectionId,
+              conversation.contact.phoneNumber,
+              { url: mediaUrl, caption },
+              messageType as 'image' | 'audio' | 'video' | 'document',
+              quotedForSend ? { quotedMessage: quotedForSend } : undefined
+            );
+            logger.info(`📤 [BACKGROUND] Media message sent, externalId: ${externalId || 'none'}`);
+          }
         } else {
           throw new Error(`Invalid message type or missing mediaUrl for media message`);
         }

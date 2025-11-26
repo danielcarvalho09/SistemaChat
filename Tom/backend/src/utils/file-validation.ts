@@ -81,6 +81,7 @@ export const SAFE_MIME_TYPES = {
     'video/mpeg',
     'video/quicktime',
     'video/x-msvideo',
+    'video/webm', // Usado também para gravação de áudio no navegador
   ],
   documents: [
     'application/pdf',
