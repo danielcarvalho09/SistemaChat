@@ -1100,7 +1100,7 @@ class BaileysManager {
       // Para mensagens history: processar desde firstConnectedAt, deduplicação vai pular as já existentes
 
       // Atualizar timestamp de última mensagem recebida
-      const client = this.clients.get(connectionId);
+      // ✅ client já foi declarado acima, apenas atualizar
       if (client) {
         client.lastMessageReceived = new Date();
       }
