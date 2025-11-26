@@ -326,8 +326,9 @@ class BaileysManager {
             } else {
               creds = authData.creds;
               keys = authData.keys || {};
+              const meId = creds.me?.id || 'N/A';
               logger.info(`[Baileys] ✅ Loaded existing auth for ${connectionId} (has valid credentials)`);
-              logger.debug(`[Baileys] 📋 Credentials loaded - me.id: ${creds.me.id}`);
+              logger.debug(`[Baileys] 📋 Credentials loaded - me.id: ${meId}`);
             }
           } catch (parseError) {
             // Se falhar, pode ser dado legado criptografado - tentar descriptografar uma vez
@@ -344,8 +345,9 @@ class BaileysManager {
               } else {
                 creds = authData.creds;
                 keys = authData.keys || {};
+                const meId = creds.me?.id || 'N/A';
                 logger.info(`[Baileys] ✅ Loaded legacy encrypted auth for ${connectionId} (will save unencrypted)`);
-                logger.debug(`[Baileys] 📋 Legacy credentials loaded - me.id: ${creds.me.id}`);
+                logger.debug(`[Baileys] 📋 Legacy credentials loaded - me.id: ${meId}`);
               }
             } catch (legacyError) {
               logger.warn(`[Baileys] ⚠️ Failed to parse/decrypt auth data, creating new credentials:`, parseError);
