@@ -124,7 +124,8 @@ export class KeepAliveService {
             logger.warn(`💔 Baileys connection ${connection.id} (${connection.phoneNumber}) should be connected but client not found - attempting reconnect...`);
             // Tentar reconectar se deveria estar conectado mas não está
             try {
-              await baileysManager.createClient(connection.id);
+              // ✅ Usar manualReconnect que é público e trata o caso de não ter cliente
+              await baileysManager.manualReconnect(connection.id);
               logger.info(`✅ Reconnected Baileys connection ${connection.id}`);
             } catch (reconnectError) {
               logger.error(`❌ Failed to reconnect Baileys connection ${connection.id}:`, reconnectError);
@@ -134,7 +135,8 @@ export class KeepAliveService {
             // Se tem credenciais mas não está conectado, tentar reconectar
             if (client.hasCredentials) {
               try {
-                await baileysManager.attemptReconnection(connection.id);
+                // ✅ Usar manualReconnect que é público (attemptReconnection é privado)
+                await baileysManager.manualReconnect(connection.id);
                 logger.info(`🔄 Attempted reconnection for ${connection.id}`);
               } catch (reconnectError) {
                 logger.error(`❌ Failed to attempt reconnection for ${connection.id}:`, reconnectError);
