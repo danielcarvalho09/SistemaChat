@@ -126,9 +126,28 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
       return {
         messages: {
           ...state.messages,
-          [conversationId]: messages.map((msg) =>
-            msg.id === messageId ? { ...msg, ...updates } : msg
-          ),
+          [conversationId]: messages.map((msg) => {
+            if (msg.id !== messageId) return msg;
+            
+            // ✅ IMPORTANTE: Preservar campos críticos que não devem ser sobrescritos
+            // Se a atualização não inclui um campo, preservar o existente
+            return {
+              ...msg,
+              ...updates,
+              // Preservar mediaUrl se não estiver na atualização ou for null/undefined (evitar perda de URL)
+              mediaUrl: updates.mediaUrl !== undefined && updates.mediaUrl !== null 
+                ? updates.mediaUrl 
+                : msg.mediaUrl,
+              // Preservar messageType se não estiver na atualização
+              messageType: updates.messageType !== undefined 
+                ? updates.messageType 
+                : msg.messageType,
+              // Preservar content se não estiver na atualização
+              content: updates.content !== undefined 
+                ? updates.content 
+                : msg.content,
+            };
+          }),
         },
       };
     });

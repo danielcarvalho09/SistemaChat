@@ -12,41 +12,72 @@ export class SupabaseStorageService {
    *   -> https://xxxxx.supabase.co
    * - postgresql://postgres.xxxxx:[password]@aws-0-region.pooler.supabase.com:6543/postgres
    *   -> https://xxxxx.supabase.co
+   * - postgresql://postgres:[password]@aws-0-us-east-2.pooler.supabase.com:6543/postgres
+   *   -> Precisa extrair do username ou da URL do storage S3
    */
   private extractSupabaseUrl(databaseUrl: string): string | null {
     try {
+      logger.info(`[SupabaseStorage] 🔍 Attempting to extract Supabase URL from DATABASE_URL...`);
+      logger.info(`[SupabaseStorage] 🔍 DATABASE_URL (sanitized): ${databaseUrl.replace(/:[^:@]+@/, ':****@')}`);
+      
       // Tentar parsear a URL
       const url = new URL(databaseUrl.replace(/^postgresql:/, 'postgres:'));
       const host = url.hostname;
+      const user = url.username;
+
+      logger.info(`[SupabaseStorage] 🔍 Parsed hostname: ${host}`);
+      logger.info(`[SupabaseStorage] 🔍 Parsed username: ${user}`);
 
       // Formato 1: db.[PROJECT-REF].supabase.co
       const match1 = host.match(/^db\.([^.]+)\.supabase\.co$/);
       if (match1) {
-        return `https://${match1[1]}.supabase.co`;
+        const projectRef = match1[1];
+        const supabaseUrl = `https://${projectRef}.supabase.co`;
+        logger.info(`[SupabaseStorage] ✅ Extracted URL (format 1): ${supabaseUrl}`);
+        return supabaseUrl;
       }
 
       // Formato 2: postgres.[PROJECT-REF].pooler.supabase.com
       const match2 = host.match(/^postgres\.([^.]+)\.pooler\.supabase\.com$/);
       if (match2) {
-        return `https://${match2[1]}.supabase.co`;
+        const projectRef = match2[1];
+        const supabaseUrl = `https://${projectRef}.supabase.co`;
+        logger.info(`[SupabaseStorage] ✅ Extracted URL (format 2): ${supabaseUrl}`);
+        return supabaseUrl;
       }
 
       // Formato 3: aws-0-[region].pooler.supabase.com (precisa do project ref do user)
       const match3 = host.match(/^aws-0-[^.]+\.pooler\.supabase\.com$/);
       if (match3) {
-        // Neste caso, precisamos do project ref do usuário
         // Tentar extrair do user se estiver no formato postgres.PROJECT_REF
-        const user = url.username;
         const userMatch = user.match(/^postgres\.([^.]+)$/);
         if (userMatch) {
-          return `https://${userMatch[1]}.supabase.co`;
+          const projectRef = userMatch[1];
+          const supabaseUrl = `https://${projectRef}.supabase.co`;
+          logger.info(`[SupabaseStorage] ✅ Extracted URL (format 3 from user): ${supabaseUrl}`);
+          return supabaseUrl;
         }
       }
 
-      logger.warn(`⚠️ Could not extract Supabase URL from DATABASE_URL: ${host}`);
+      // Formato 4: Tentar extrair project ref de qualquer parte da URL
+      // Buscar por padrão de project ref (geralmente 20 caracteres alfanuméricos)
+      const projectRefMatch = databaseUrl.match(/([a-z0-9]{20,})/);
+      if (projectRefMatch) {
+        const possibleRef = projectRefMatch[1];
+        logger.info(`[SupabaseStorage] 🔍 Found possible project ref: ${possibleRef}`);
+        // Tentar construir URL com esse ref
+        const testUrl = `https://${possibleRef}.supabase.co`;
+        logger.info(`[SupabaseStorage] 🔍 Testing URL: ${testUrl}`);
+        return testUrl;
+      }
+
+      logger.warn(`[SupabaseStorage] ⚠️ Could not extract Supabase URL from DATABASE_URL`);
+      logger.warn(`[SupabaseStorage] ⚠️ Hostname: ${host}`);
+      logger.warn(`[SupabaseStorage] ⚠️ Username: ${user}`);
+      logger.warn(`[SupabaseStorage] 💡 Tip: Set SUPABASE_URL manually in environment variables`);
       return null;
     } catch (error) {
-      logger.error('❌ Error extracting Supabase URL:', error);
+      logger.error('[SupabaseStorage] ❌ Error extracting Supabase URL:', error);
       return null;
     }
   }
@@ -82,9 +113,15 @@ export class SupabaseStorageService {
     // Se não tiver URL ou chave, não configurar o cliente
     if (!supabaseUrl || !supabaseServiceKey) {
       logger.warn('⚠️ Supabase Storage credentials incomplete. File uploads will use local storage.');
+      logger.warn(`⚠️ Supabase URL: ${supabaseUrl || 'NOT FOUND'}`);
+      logger.warn(`⚠️ Supabase Key: ${supabaseServiceKey ? 'FOUND (length: ' + supabaseServiceKey.length + ')' : 'NOT FOUND'}`);
       logger.info('💡 To enable Supabase Storage:');
-      logger.info('   - Railway: Ensure Supabase project is connected (Railway provides SUPABASE_URL and SUPABASE_ANON_KEY automatically)');
-      logger.info('   - Manual: Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY (or SUPABASE_ANON_KEY) in environment variables');
+      logger.info('   1. Get your Supabase URL from: https://app.supabase.com/project/[PROJECT_REF]/settings/api');
+      logger.info('   2. Get your Service Role Key (recommended) or Anon Key from the same page');
+      logger.info('   3. Set in Railway environment variables:');
+      logger.info('      - SUPABASE_URL=https://[PROJECT_REF].supabase.co');
+      logger.info('      - SUPABASE_SERVICE_ROLE_KEY=your-service-role-key');
+      logger.info('   4. Or set SUPABASE_URL manually if extraction from DATABASE_URL failed');
       return;
     }
 
@@ -96,8 +133,14 @@ export class SupabaseStorageService {
         },
       });
       logger.info(`✅ Supabase Storage client initialized (URL: ${supabaseUrl})`);
+      
+      // ✅ TESTE: Verificar conexão testando listar buckets
+      this.testConnection().catch(err => {
+        logger.warn('[SupabaseStorage] ⚠️ Connection test failed (this is OK if buckets list is empty):', err?.message);
+      });
     } catch (error) {
       logger.error('❌ Failed to initialize Supabase Storage:', error);
+      this.client = null;
     }
   }
 
@@ -185,25 +228,68 @@ export class SupabaseStorageService {
   }
 
   /**
-   * Garante que o bucket existe, criando-o se necessário
+   * Testa a conexão com o Supabase Storage
    */
-  private async ensureBucketExists(): Promise<void> {
+  private async testConnection(): Promise<void> {
     if (!this.client) return;
 
     try {
+      logger.info('[SupabaseStorage] 🧪 Testing connection to Supabase Storage...');
+      const { data: buckets, error } = await this.client.storage.listBuckets();
+      
+      if (error) {
+        logger.error('[SupabaseStorage] ❌ Connection test failed:', error);
+        throw error;
+      }
+      
+      logger.info(`[SupabaseStorage] ✅ Connection test successful! Found ${buckets?.length || 0} bucket(s)`);
+      if (buckets && buckets.length > 0) {
+        logger.info(`[SupabaseStorage] 📦 Existing buckets: ${buckets.map(b => b.name).join(', ')}`);
+      }
+    } catch (error: any) {
+      logger.error('[SupabaseStorage] ❌ Connection test failed:', {
+        message: error?.message,
+        code: error?.code,
+        statusCode: error?.statusCode,
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Garante que o bucket existe, criando-o se necessário
+   */
+  private async ensureBucketExists(): Promise<void> {
+    if (!this.client) {
+      logger.warn('[SupabaseStorage] ⚠️ Cannot ensure bucket exists - client not initialized');
+      return;
+    }
+
+    try {
+      logger.info(`[SupabaseStorage] 🔍 Checking if bucket '${this.bucketName}' exists...`);
+      
       // Verificar se o bucket existe
       const { data: buckets, error: listError } = await this.client.storage.listBuckets();
 
       if (listError) {
-        logger.error('❌ Error listing buckets:', listError);
-        return;
+        logger.error('[SupabaseStorage] ❌ Error listing buckets:', {
+          message: listError.message,
+          code: (listError as any).statusCode,
+          error: listError,
+        });
+        throw listError;
       }
 
+      logger.info(`[SupabaseStorage] 📦 Found ${buckets?.length || 0} bucket(s) in project`);
+      
       const bucketExists = buckets?.some((bucket) => bucket.name === this.bucketName);
+      logger.info(`[SupabaseStorage] 🔍 Bucket '${this.bucketName}' exists: ${bucketExists}`);
 
       if (!bucketExists) {
+        logger.info(`[SupabaseStorage] 📦 Creating bucket '${this.bucketName}'...`);
+        
         // Criar o bucket se não existir
-        const { error: createError } = await this.client.storage.createBucket(this.bucketName, {
+        const { data: newBucket, error: createError } = await this.client.storage.createBucket(this.bucketName, {
           public: true, // Tornar público para URLs públicas
           fileSizeLimit: 10485760, // 10MB
           allowedMimeTypes: [
@@ -223,13 +309,26 @@ export class SupabaseStorageService {
         });
 
         if (createError) {
-          logger.error('❌ Error creating bucket:', createError);
-        } else {
-          logger.info(`✅ Created bucket: ${this.bucketName}`);
+          logger.error('[SupabaseStorage] ❌ Error creating bucket:', {
+            message: createError.message,
+            code: (createError as any).statusCode,
+            error: createError,
+          });
+          throw createError;
         }
+        
+        logger.info(`[SupabaseStorage] ✅ Bucket '${this.bucketName}' created successfully!`, newBucket);
+      } else {
+        logger.info(`[SupabaseStorage] ✅ Bucket '${this.bucketName}' already exists`);
       }
-    } catch (error) {
-      logger.error('❌ Exception ensuring bucket exists:', error);
+    } catch (error: any) {
+      logger.error('[SupabaseStorage] ❌ Exception ensuring bucket exists:', {
+        message: error?.message,
+        stack: error?.stack,
+        code: error?.code,
+        statusCode: error?.statusCode,
+      });
+      throw error;
     }
   }
 
@@ -260,4 +359,5 @@ export class SupabaseStorageService {
 
 // Singleton instance
 export const supabaseStorageService = new SupabaseStorageService();
+
 

@@ -6,14 +6,29 @@ import type { Message as ChatMessage, QuotedMessage } from '../../types';
 
 // Componente para carregar imagem sob demanda
 function ImageMessage({ mediaUrl, toAbsoluteUrl, messageId }: { mediaUrl: string; toAbsoluteUrl: (url: string) => string; messageId: string }) {
-  const [loaded, setLoaded] = useState(false);
-  const [imageExists, setImageExists] = useState<boolean | null>(null);
+  const absoluteUrl = toAbsoluteUrl(mediaUrl);
+  // ✅ Se a URL já é absoluta e válida, carregar automaticamente
+  const isAbsoluteUrl = mediaUrl.startsWith('http://') || mediaUrl.startsWith('https://');
+  const [loaded, setLoaded] = useState(isAbsoluteUrl); // Auto-load se for URL absoluta
+  const [imageExists, setImageExists] = useState<boolean | null>(isAbsoluteUrl ? true : null);
+  const [imageError, setImageError] = useState(false);
   const [isRedownloading, setIsRedownloading] = useState(false);
 
-  // Verificar se imagem existe no servidor
+  // Verificar se imagem existe no servidor (apenas para URLs relativas)
   const checkImageExists = async () => {
+    if (isAbsoluteUrl) {
+      // Para URLs absolutas, assumir que existe e tentar carregar
+      setImageExists(true);
+      return;
+    }
+    
     try {
-      const filename = mediaUrl.split('/').pop();
+      const filename = mediaUrl.split('/').pop()?.split('?')[0];
+      if (!filename) {
+        setImageExists(false);
+        return;
+      }
+      
       const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
       const token = localStorage.getItem('accessToken');
       
@@ -24,7 +39,13 @@ function ImageMessage({ mediaUrl, toAbsoluteUrl, messageId }: { mediaUrl: string
       });
       
       const data = await response.json();
-      setImageExists(data.data?.exists || false);
+      const exists = data.data?.exists || false;
+      setImageExists(exists);
+      
+      // Se existe, carregar automaticamente
+      if (exists) {
+        setLoaded(true);
+      }
     } catch (error) {
       console.error('Error checking image:', error);
       setImageExists(false);
@@ -79,6 +100,44 @@ function ImageMessage({ mediaUrl, toAbsoluteUrl, messageId }: { mediaUrl: string
     document.body.removeChild(link);
   };
 
+  // Verificar se imagem existe ao montar (apenas para URLs relativas)
+  useEffect(() => {
+    if (imageExists === null && !isAbsoluteUrl) {
+      checkImageExists();
+    }
+  }, [mediaUrl]); // ✅ Adicionar mediaUrl como dependência para reagir a mudanças
+
+  // Se houve erro ao carregar a imagem
+  if (imageError && !loaded) {
+    return (
+      <div 
+        className="w-full bg-gray-800 rounded-t-lg flex flex-col items-center justify-center cursor-pointer hover:bg-gray-700 transition-colors relative group"
+        style={{ minHeight: '200px' }}
+      >
+        <div className="text-center text-gray-400" onClick={() => {
+          setImageError(false);
+          setLoaded(true);
+        }}>
+          <ImageIcon className="w-12 h-12 mx-auto mb-2" />
+          <p className="text-sm">⚠️ Erro ao carregar imagem</p>
+          <p className="text-xs mt-1">Clique para tentar novamente</p>
+        </div>
+        <button
+          onClick={handleDownload}
+          disabled={isRedownloading}
+          className="absolute top-2 right-2 bg-gray-900/80 hover:bg-gray-900 text-white p-2 rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          title="Baixar imagem"
+        >
+          {isRedownloading ? (
+            <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+          ) : (
+            <Download className="w-4 h-4" />
+          )}
+        </button>
+      </div>
+    );
+  }
+
   if (!loaded) {
     // Verificar se imagem existe ao montar
     if (imageExists === null) {
@@ -90,7 +149,11 @@ function ImageMessage({ mediaUrl, toAbsoluteUrl, messageId }: { mediaUrl: string
         className="w-full bg-gray-800 rounded-t-lg flex flex-col items-center justify-center cursor-pointer hover:bg-gray-700 transition-colors relative group"
         style={{ minHeight: '200px' }}
       >
-        <div className="text-center text-gray-400" onClick={() => setLoaded(true)}>
+        <div className="text-center text-gray-400" onClick={() => {
+          if (imageExists !== false) {
+            setLoaded(true);
+          }
+        }}>
           <ImageIcon className="w-12 h-12 mx-auto mb-2" />
           <p className="text-sm">
             {imageExists === false ? '⚠️ Imagem expirada (7+ dias)' : 'Clique para visualizar'}
@@ -118,10 +181,20 @@ function ImageMessage({ mediaUrl, toAbsoluteUrl, messageId }: { mediaUrl: string
   return (
     <div className="relative group w-full">
       <img
-        src={toAbsoluteUrl(mediaUrl)}
+        src={absoluteUrl}
         alt="Imagem"
         className="w-full h-auto rounded-t-lg block"
         style={{ maxHeight: '300px', objectFit: 'contain' }}
+        onError={() => {
+          console.error('[ImageMessage] ❌ Error loading image:', absoluteUrl);
+          setImageError(true);
+          setLoaded(false);
+        }}
+        onLoad={() => {
+          console.log('[ImageMessage] ✅ Image loaded successfully:', absoluteUrl);
+          setImageError(false);
+        }}
+        loading="lazy"
       />
       <button
         onClick={handleDownload}
