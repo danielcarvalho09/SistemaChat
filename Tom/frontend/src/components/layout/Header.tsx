@@ -7,8 +7,10 @@ export function Header() {
   const { user, logout } = useAuthStore();
   const navigate = useNavigate();
 
-  // Verificar se o usuário é admin
+  // ✅ Verificar se o usuário é admin ou gerente
   const isAdmin = user?.roles?.some(role => role.name === 'admin') || false;
+  const isGerente = user?.roles?.some(role => role.name === 'gerente') || false;
+  const hasAdminAccess = isAdmin || isGerente;
 
   return (
     <header className="bg-[#008069] text-white px-4 py-3 flex items-center justify-between shadow-md">
@@ -30,13 +32,13 @@ export function Header() {
           </div>
         </div>
 
-        {isAdmin && (
+        {hasAdminAccess && (
           <Button
             variant="ghost"
             size="sm"
             className="text-white hover:bg-white/10"
             onClick={() => navigate('/admin')}
-            title="Painel de Administração"
+            title={isAdmin ? "Painel de Administração" : "Painel de Gerente"}
           >
             <Settings className="w-5 h-5" />
           </Button>

@@ -10,17 +10,29 @@ export function AdminLayout() {
   const { user, logout } = useAuthStore();
   const [isCollapsed, setIsCollapsed] = useState(false);
 
-  const navigation = [
-    { name: 'Dashboard', href: '/admin', icon: LayoutDashboard },
-    { name: 'Usuários', href: '/admin/users', icon: Users },
-    { name: 'Departamentos', href: '/admin/departments', icon: Building },
-    { name: 'Conexões WhatsApp', href: '/admin/connections', icon: Smartphone },
-    { name: 'Assistentes de IA', href: '/admin/ai-assistants', icon: Brain },
-    { name: 'Tags', href: '/admin/tags', icon: Tag },
-    { name: 'Disparo de Mensagens', href: '/admin/broadcast', icon: Send },
-    { name: 'Listas de Contatos', href: '/admin/contact-lists', icon: ListChecks },
-    { name: 'Configurar Intervalos', href: '/admin/broadcast-settings', icon: Clock },
+  // ✅ Verificar role do usuário
+  const isAdmin = user?.roles?.some(role => role.name === 'admin') || false;
+  const isGerente = user?.roles?.some(role => role.name === 'gerente') || false;
+
+  // ✅ Menu completo para admin
+  const allNavigation = [
+    { name: 'Dashboard', href: '/admin', icon: LayoutDashboard, roles: ['admin', 'gerente'] },
+    { name: 'Usuários', href: '/admin/users', icon: Users, roles: ['admin'] },
+    { name: 'Departamentos', href: '/admin/departments', icon: Building, roles: ['admin'] },
+    { name: 'Conexões WhatsApp', href: '/admin/connections', icon: Smartphone, roles: ['admin'] },
+    { name: 'Assistentes de IA', href: '/admin/ai-assistants', icon: Brain, roles: ['admin'] },
+    { name: 'Tags', href: '/admin/tags', icon: Tag, roles: ['admin'] },
+    { name: 'Disparo de Mensagens', href: '/admin/broadcast', icon: Send, roles: ['admin', 'gerente'] },
+    { name: 'Listas de Contatos', href: '/admin/contact-lists', icon: ListChecks, roles: ['admin', 'gerente'] },
+    { name: 'Configurar Intervalos', href: '/admin/broadcast-settings', icon: Clock, roles: ['admin', 'gerente'] },
   ];
+
+  // ✅ Filtrar menu baseado na role
+  const navigation = allNavigation.filter(item => {
+    if (isAdmin) return true; // Admin vê tudo
+    if (isGerente) return item.roles.includes('gerente'); // Gerente vê apenas itens permitidos
+    return false; // Outros usuários não veem nada
+  });
 
   const isActive = (href: string) => {
     if (href === '/admin') {

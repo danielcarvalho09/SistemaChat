@@ -30,6 +30,16 @@ export async function seedDatabase() {
       },
     });
 
+    // ✅ Criar role "gerente" (manager)
+    const gerenteRole = await prisma.role.upsert({
+      where: { name: 'gerente' },
+      update: {},
+      create: {
+        name: 'gerente',
+        description: 'Manager with broadcast and contact list access',
+      },
+    });
+
     // Definir permissões
     const permissions = [
       // Conexões
@@ -62,6 +72,13 @@ export async function seedDatabase() {
       // Métricas
       { name: 'view_analytics', resource: 'analytics', action: 'read', description: 'View analytics and metrics' },
       { name: 'export_reports', resource: 'analytics', action: 'create', description: 'Export reports' },
+      
+      // ✅ Broadcast e Contact Lists (para gerente)
+      { name: 'manage_broadcast', resource: 'broadcast', action: 'manage', description: 'Manage broadcast messages' },
+      { name: 'view_broadcast', resource: 'broadcast', action: 'read', description: 'View broadcast messages' },
+      { name: 'manage_contact_lists', resource: 'contact_lists', action: 'manage', description: 'Manage contact lists' },
+      { name: 'view_contact_lists', resource: 'contact_lists', action: 'read', description: 'View contact lists' },
+      { name: 'manage_broadcast_settings', resource: 'broadcast_settings', action: 'manage', description: 'Manage broadcast interval settings' },
     ];
 
     // Criar permissões
@@ -121,6 +138,50 @@ export async function seedDatabase() {
         },
       });
     }
+
+    // ✅ Atribuir permissões ao gerente: todas do user + broadcast/contact-lists/settings
+    const gerentePermissions = createdPermissions.filter((p) => {
+      // Todas as permissões do user
+      const isUserPermission = [
+        'view_connections',
+        'view_own_conversations',
+        'accept_conversations',
+        'transfer_conversations',
+        'send_messages',
+        'view_messages',
+        'view_departments',
+        'use_templates',
+      ].includes(p.name);
+      
+      // + Permissões de broadcast e contact lists
+      const isManagerPermission = [
+        'manage_broadcast',
+        'view_broadcast',
+        'manage_contact_lists',
+        'view_contact_lists',
+        'manage_broadcast_settings',
+      ].includes(p.name);
+      
+      return isUserPermission || isManagerPermission;
+    });
+
+    for (const permission of gerentePermissions) {
+      await prisma.rolePermission.upsert({
+        where: {
+          roleId_permissionId: {
+            roleId: gerenteRole.id,
+            permissionId: permission.id,
+          },
+        },
+        update: {},
+        create: {
+          roleId: gerenteRole.id,
+          permissionId: permission.id,
+        },
+      });
+    }
+
+    logger.info(`✅ Role "gerente" created with ${gerentePermissions.length} permissions`);
 
     // Criar departamentos padrão
     const defaultDepartments = [

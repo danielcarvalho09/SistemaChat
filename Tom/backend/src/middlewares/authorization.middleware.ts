@@ -73,6 +73,11 @@ export const requirePermission = (requiredPermissions: string[]) => {
 export const requireAdmin = requireRole(['admin']);
 
 /**
+ * Middleware para verificar se usuário é admin ou gerente
+ */
+export const requireAdminOrGerente = requireRole(['admin', 'gerente']);
+
+/**
  * Middleware para verificar se usuário tem acesso a uma conexão específica
  */
 export const requireConnectionAccess = async (
@@ -88,8 +93,8 @@ export const requireConnectionAccess = async (
 
   const { connectionId } = request.params;
 
-  // Admins têm acesso a todas as conexões
-  if (request.user.roles.includes('admin')) {
+  // Admins e gerentes têm acesso a todas as conexões
+  if (request.user.roles.includes('admin') || request.user.roles.includes('gerente')) {
     return;
   }
 
@@ -131,8 +136,8 @@ export const requireDepartmentAccess = async (
 
   const { departmentId } = request.params;
 
-  // Admins têm acesso a todos os departamentos
-  if (request.user.roles.includes('admin')) {
+  // Admins e gerentes têm acesso a todos os departamentos
+  if (request.user.roles.includes('admin') || request.user.roles.includes('gerente')) {
     return;
   }
 
@@ -173,8 +178,8 @@ export const requireOwnershipOrAdmin = (userIdField: string = 'userId') => {
       });
     }
 
-    // Admins podem acessar qualquer recurso
-    if (request.user.roles.includes('admin')) {
+    // Admins e gerentes podem acessar qualquer recurso
+    if (request.user.roles.includes('admin') || request.user.roles.includes('gerente')) {
       return;
     }
 
