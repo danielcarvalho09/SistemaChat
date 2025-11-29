@@ -38,8 +38,7 @@ export const resolveRequestUser = async (
     name?.trim() ||
     (email ? email.split('@')[0] : PUBLIC_USER_RESPONSE.name);
 
-  const adminRole = await ensureAdminRole();
-
+  // Buscar ou criar usuário
   const user = await prisma.user.upsert({
     where: { email: normalizedEmail },
     update: {
@@ -54,27 +53,53 @@ export const resolveRequestUser = async (
       status: 'online',
       isActive: true,
     },
-  });
-
-  await prisma.userRole.upsert({
-    where: {
-      userId_roleId: {
-        userId: user.id,
-        roleId: adminRole.id,
+    include: {
+      roles: {
+        include: {
+          role: true,
+        },
       },
     },
-    update: {},
-    create: {
-      userId: user.id,
-      roleId: adminRole.id,
-    },
   });
+
+  // ✅ Buscar roles reais do usuário do banco de dados
+  let userRoles: string[] = [];
+  
+  if (user.roles && user.roles.length > 0) {
+    // Usuário já tem roles atribuídas - usar essas
+    userRoles = user.roles.map(ur => ur.role.name);
+  } else {
+    // ✅ Usuário novo ou sem roles - atribuir role "user" como padrão (NÃO admin)
+    const userRole = await prisma.role.findUnique({
+      where: { name: 'user' },
+    });
+
+    if (userRole) {
+      await prisma.userRole.create({
+        data: {
+          userId: user.id,
+          roleId: userRole.id,
+        },
+      });
+      userRoles = ['user'];
+    } else {
+      // Fallback: se role "user" não existir, usar admin (mas isso não deveria acontecer)
+      const adminRole = await ensureAdminRole();
+      await prisma.userRole.create({
+        data: {
+          userId: user.id,
+          roleId: adminRole.id,
+        },
+      });
+      userRoles = [adminRole.name];
+    }
+  }
 
   return {
     userId: user.id,
     email: user.email,
     name: user.name,
-    roles: [adminRole.name],
+    roles: userRoles,
   };
 };
 
