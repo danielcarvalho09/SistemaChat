@@ -221,8 +221,13 @@ export function Users() {
         role: newUser.role,
       });
       
+      // Verificar se a resposta foi bem-sucedida e tem dados
+      if (!response.data?.success || !response.data?.data) {
+        throw new Error(response.data?.message || 'Erro ao criar usuário');
+      }
+      
       // Se foi selecionada uma conexão, associá-la
-      if (newUser.connectionId) {
+      if (newUser.connectionId && response.data.data?.id) {
         const userId = response.data.data.id;
         await api.post(`/users/${userId}/connections`, { connectionId: newUser.connectionId });
       }
@@ -230,9 +235,11 @@ export function Users() {
       setShowCreateModal(false);
       setNewUser({ name: '', email: '', password: '', role: 'user', connectionId: '' });
       fetchUsers();
+      alert('Usuário criado com sucesso!');
     } catch (error: any) {
       console.error('Erro ao criar usuário:', error);
-      alert(error.response?.data?.message || 'Erro ao criar usuário');
+      const errorMessage = error.response?.data?.message || error.message || 'Erro ao criar usuário';
+      alert(errorMessage);
     }
   };
 

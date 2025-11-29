@@ -79,11 +79,11 @@ export class UserController {
       }
       
       if (error.message?.includes('Role') && error.message?.includes('not found')) {
-        return reply.status(500).send({
+        return reply.status(400).send({
           success: false,
-          message: 'System roles not configured. Please contact administrator.',
-          details: 'The required roles (admin/user) are not set up in the database.',
-          action: 'Administrator should run: node create-roles-only.js',
+          message: `Role "${data.role || 'user'}" not found. Please run the database migration to create all roles.`,
+          details: 'The required roles (admin/user/gerente) are not set up in the database.',
+          action: 'Administrator should run the SQL migration: MIGRACAO_GERENTE_SUPABASE.sql',
         });
       }
 
