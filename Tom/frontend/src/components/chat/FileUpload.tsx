@@ -12,9 +12,24 @@ export function FileUpload({ onFileSelect }: FileUploadProps) {
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
+    console.log('[FileUpload] 📎 File selected from input:', {
+      hasFile: !!file,
+      name: file?.name,
+      type: file?.type,
+      size: file?.size,
+    });
+    
     if (file) {
+      console.log('[FileUpload] ✅ Calling onFileSelect...');
       onFileSelect(file);
       setIsOpen(false);
+    } else {
+      console.warn('[FileUpload] ⚠️ No file selected');
+    }
+    
+    // Limpar o input para permitir selecionar o mesmo arquivo novamente
+    if (e.target) {
+      e.target.value = '';
     }
   };
 

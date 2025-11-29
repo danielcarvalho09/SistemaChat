@@ -88,6 +88,7 @@ export function ChatArea({ conversationId, onToggleDetails }: ChatAreaProps) {
         // IMPORTANTE: NÃO definir Content-Type manualmente para FormData
         // O navegador define automaticamente com o boundary correto
         // O interceptor do axios já remove o Content-Type automaticamente
+        console.log('[ChatArea] 📤 Sending upload request...');
         const uploadResponse = await api.post('/upload', formData, {
           headers: {
             // Garantir que não há Content-Type definido
@@ -95,11 +96,26 @@ export function ChatArea({ conversationId, onToggleDetails }: ChatAreaProps) {
           },
         });
 
+        console.log('[ChatArea] 📥 Upload response:', {
+          success: uploadResponse.data?.success,
+          message: uploadResponse.data?.message,
+          url: uploadResponse.data?.data?.url,
+          status: uploadResponse.status,
+        });
+
         if (!uploadResponse.data?.success) {
+          console.error('[ChatArea] ❌ Upload failed:', uploadResponse.data);
           throw new Error(uploadResponse.data?.message || 'Erro ao fazer upload do arquivo');
         }
 
         const mediaUrl = uploadResponse.data.data?.url as string;
+        
+        if (!mediaUrl) {
+          console.error('[ChatArea] ❌ No mediaUrl in response:', uploadResponse.data);
+          throw new Error('URL da mídia não retornada pelo servidor');
+        }
+
+        console.log('[ChatArea] ✅ Upload successful, mediaUrl:', mediaUrl);
 
         // Determinar tipo de mensagem
         let messageType = 'document';
@@ -112,22 +128,43 @@ export function ChatArea({ conversationId, onToggleDetails }: ChatAreaProps) {
           messageType = 'video';
         }
 
+        console.log('[ChatArea] 📨 Sending message with media:', {
+          conversationId,
+          messageType,
+          mediaUrl,
+          content: content || '',
+        });
+
         // Enviar mensagem com mídia via API (user/sender resolvido pelo backend)
-        await api.post(`/conversations/${conversationId}/messages`, {
+        const messageResponse = await api.post(`/conversations/${conversationId}/messages`, {
           content: content || '', // Não usar file.name como fallback
           messageType,
           mediaUrl,
           quotedMessageId: replyingTo?.id || undefined,
         });
+
+        console.log('[ChatArea] ✅ Message sent successfully:', messageResponse.data);
+        
         // Não adicionar manualmente - deixar o WebSocket fazer isso para evitar duplicação
         setReplyingTo(null);
       } else {
         await sendMessage(conversationId, content, replyingTo?.id || undefined);
         setReplyingTo(null);
       }
-    } catch (error) {
-      console.error('Erro ao enviar mensagem:', error);
-      alert('Erro ao enviar mensagem. Tente novamente.');
+    } catch (error: any) {
+      console.error('[ChatArea] ❌ Error sending message:', {
+        error: error?.message || String(error),
+        response: error?.response?.data,
+        status: error?.response?.status,
+        stack: error?.stack,
+      });
+      
+      const errorMessage = error?.response?.data?.message 
+        || error?.response?.data?.error
+        || error?.message 
+        || 'Erro ao enviar mensagem. Tente novamente.';
+      
+      alert(errorMessage);
     }
   };
 

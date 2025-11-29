@@ -77,13 +77,27 @@ export function MessageInput({ onSendMessage, replyingTo, onCancelReply, contact
   };
 
   const handleFileSelect = (file: File) => {
+    console.log('[MessageInput] 📎 File selected:', {
+      name: file.name,
+      type: file.type,
+      size: file.size,
+      isImage: file.type.startsWith('image/'),
+    });
+    
     setSelectedFile(file);
     
     // Criar preview para imagens
     if (file.type.startsWith('image/')) {
+      console.log('[MessageInput] 🖼️ Creating image preview...');
       const reader = new FileReader();
       reader.onloadend = () => {
-        setPreviewUrl(reader.result as string);
+        const result = reader.result as string;
+        console.log('[MessageInput] ✅ Preview created, length:', result?.length || 0);
+        setPreviewUrl(result);
+      };
+      reader.onerror = (error) => {
+        console.error('[MessageInput] ❌ Error reading file for preview:', error);
+        setPreviewUrl(null);
       };
       reader.readAsDataURL(file);
     } else {
