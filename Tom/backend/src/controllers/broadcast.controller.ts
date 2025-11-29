@@ -54,6 +54,7 @@ export class BroadcastController {
   // Obter histórico de broadcasts
   getBroadcastHistory = async (request: FastifyRequest, reply: FastifyReply) => {
     const userId = request.user?.userId;
+    const userRoles = request.user?.roles || [];
 
     if (!userId) {
       return reply.status(401).send({
@@ -62,7 +63,9 @@ export class BroadcastController {
       });
     }
 
-    const history = await this.broadcastService.getBroadcastHistory(userId);
+    // ✅ Admin vê todos os broadcasts, gerente vê apenas os seus
+    const isAdmin = userRoles.includes('admin');
+    const history = await this.broadcastService.getBroadcastHistory(userId, isAdmin);
 
     return reply.status(200).send({
       success: true,
@@ -74,6 +77,7 @@ export class BroadcastController {
   getBroadcastDetails = async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
     const { id } = request.params;
     const userId = request.user?.userId;
+    const userRoles = request.user?.roles || [];
 
     if (!userId) {
       return reply.status(401).send({
@@ -82,7 +86,9 @@ export class BroadcastController {
       });
     }
 
-    const details = await this.broadcastService.getBroadcastDetails(id, userId);
+    // ✅ Admin pode ver detalhes de qualquer broadcast, gerente apenas os seus
+    const isAdmin = userRoles.includes('admin');
+    const details = await this.broadcastService.getBroadcastDetails(id, userId, isAdmin);
 
     return reply.status(200).send({
       success: true,

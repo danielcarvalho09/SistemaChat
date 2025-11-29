@@ -231,21 +231,43 @@ export class BroadcastService {
   }
 
   // Buscar histórico de broadcasts
-  async getBroadcastHistory(userId: string) {
-    return await this.prisma.broadcast.findMany({
-      where: { userId },
+  // ✅ Se isAdmin = true, retorna todos os broadcasts. Senão, apenas do usuário
+  async getBroadcastHistory(userId: string, isAdmin: boolean = false) {
+    const broadcasts = await this.prisma.broadcast.findMany({
+      where: isAdmin ? {} : { userId }, // ✅ Admin vê tudo, outros apenas os seus
       include: {
         list: { select: { name: true } }
       },
       orderBy: { createdAt: 'desc' },
       take: 50
     });
+
+    // ✅ Se for admin, buscar informações dos usuários que criaram os broadcasts
+    if (isAdmin && broadcasts.length > 0) {
+      const userIds = [...new Set(broadcasts.map(b => b.userId))];
+      const users = await this.prisma.user.findMany({
+        where: { id: { in: userIds } },
+        select: { id: true, name: true, email: true }
+      });
+      
+      const userMap = new Map(users.map(u => [u.id, u]));
+      
+      return broadcasts.map(broadcast => ({
+        ...broadcast,
+        user: userMap.get(broadcast.userId) || null
+      }));
+    }
+
+    return broadcasts;
   }
 
   // Buscar detalhes de um broadcast
-  async getBroadcastDetails(broadcastId: string, userId: string) {
+  // ✅ Se isAdmin = true, pode ver qualquer broadcast. Senão, apenas os seus
+  async getBroadcastDetails(broadcastId: string, userId: string, isAdmin: boolean = false) {
     const broadcast = await this.prisma.broadcast.findFirst({
-      where: { id: broadcastId, userId },
+      where: isAdmin 
+        ? { id: broadcastId } // ✅ Admin pode ver qualquer broadcast
+        : { id: broadcastId, userId }, // ✅ Outros apenas os seus
       include: {
         list: { select: { name: true } },
         logs: {
@@ -256,6 +278,25 @@ export class BroadcastService {
         }
       }
     });
+
+    if (!broadcast) {
+      return null;
+    }
+
+    // ✅ Se for admin, buscar informações do usuário que criou o broadcast
+    if (isAdmin) {
+      const user = await this.prisma.user.findUnique({
+        where: { id: broadcast.userId },
+        select: { id: true, name: true, email: true }
+      });
+      
+      return {
+        ...broadcast,
+        user: user || null
+      };
+    }
+
+    return broadcast;
 
     if (!broadcast) {
       throw new AppError('Broadcast não encontrado', 404);

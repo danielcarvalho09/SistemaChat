@@ -37,6 +37,7 @@ export const requireRole = (allowedRoles: string[]) => {
 /**
  * Middleware de autorização baseado em permissões
  * Verifica se o usuário possui pelo menos uma das permissões especificadas
+ * ✅ Admin tem acesso total (bypass automático)
  */
 export const requirePermission = (requiredPermissions: string[]) => {
   return async (
@@ -50,13 +51,20 @@ export const requirePermission = (requiredPermissions: string[]) => {
       });
     }
 
-    const hasPermission = requiredPermissions.some((permission) =>
+    // ✅ Admin tem acesso total - bypass automático
+    if (request.user.roles.includes('admin')) {
+      return;
+    }
+
+    // ✅ Verificar wildcard ou permissões específicas
+    const hasWildcard = request.user.permissions.includes('*');
+    const hasPermission = hasWildcard || requiredPermissions.some((permission) =>
       request.user!.permissions.includes(permission)
     );
 
     if (!hasPermission) {
       logger.warn(
-        `User ${request.user.userId} attempted to access resource requiring permissions: ${requiredPermissions.join(', ')}`
+        `User ${request.user.userId} (roles: ${request.user.roles.join(', ')}) attempted to access resource requiring permissions: ${requiredPermissions.join(', ')}`
       );
       return reply.status(403).send({
         statusCode: 403,
