@@ -838,7 +838,7 @@ export class MessageService {
             // Formatar conversa usando o mesmo formato da listagem
             const { ConversationService } = await import('./conversation.service.js');
             const conversationService = new ConversationService();
-            const formattedConversation = (conversationService as any).formatConversationResponse(fullConversation);
+            const formattedConversation = conversationService.formatConversationResponse(fullConversation);
             
             // Emitir nova conversa formatada para todos os usuários
             socketServer.getIO().emit('new_conversation', formattedConversation);
