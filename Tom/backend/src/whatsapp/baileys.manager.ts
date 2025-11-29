@@ -590,7 +590,29 @@ class BaileysManager {
       }
       
       client.status = 'connected';
-      logger.info(`[Baileys] ✅ Connected: ${connectionId}`);
+      logger.info(`[Baileys] ✅ ========== CONEXÃO ESTABELECIDA ==========`);
+      logger.info(`[Baileys] 📅 Timestamp: ${new Date().toISOString()}`);
+      logger.info(`[Baileys] 🔗 Connection ID: ${connectionId}`);
+      logger.info(`[Baileys] 🔑 Tem credenciais: ${client.hasCredentials ? 'SIM ✅' : 'NÃO ❌'}`);
+      logger.info(`[Baileys] 🔄 Tentativas de reconexão: ${client.reconnectAttempts || 0}`);
+      logger.info(`[Baileys] 🔒 Lock ativo: ${this.reconnectionLocks.get(connectionId)?.locked ? 'SIM ⚠️' : 'NÃO ✅'}`);
+      logger.info(`[Baileys] 🔄 Está reconectando: ${client.isReconnecting ? 'SIM ⚠️' : 'NÃO ✅'}`);
+      
+      // ✅ CRÍTICO: Limpar flags de reconexão imediatamente após conexão bem-sucedida
+      // Isso evita que processos de reconexão antigos interfiram com a nova conexão
+      if (client.isReconnecting) {
+        logger.warn(`[Baileys] ⚠️ Flag isReconnecting estava ativa - limpando agora`);
+        client.isReconnecting = false;
+      }
+      
+      // ✅ CRÍTICO: Limpar lock de reconexão se existir
+      const existingLock = this.reconnectionLocks.get(connectionId);
+      if (existingLock && existingLock.locked) {
+        logger.warn(`[Baileys] ⚠️ Lock de reconexão estava ativo - limpando agora`);
+        this.reconnectionLocks.delete(connectionId);
+      }
+      
+      logger.info(`[Baileys] ===========================================`);
       
       // ✅ VERIFICAÇÃO CRÍTICA: Verificar se socket e listeners estão ativos
       if (!client.socket) {
@@ -684,20 +706,25 @@ class BaileysManager {
         logger.info(`[Baileys] 💡 Esta sincronização funciona mesmo sem o frontend aberto`);
         logger.info(`[Baileys] ===========================================`);
         
-        // Aguardar alguns segundos para conexão estabilizar completamente
+        // ✅ AUMENTAR DELAY: Aguardar mais tempo para conexão estabilizar completamente
+        // Isso evita que a sincronização pesada cause desconexão imediata
         setTimeout(async () => {
           try {
-            // Verificar se ainda está conectado antes de sincronizar
+            // ✅ VERIFICAÇÃO CRÍTICA: Verificar se ainda está conectado antes de sincronizar
             const currentClient = this.clients.get(connectionId);
             if (!currentClient || currentClient.status !== 'connected') {
-              logger.warn(`[Baileys] ⚠️ Conexão não está mais conectada, cancelando sincronização`);
+              logger.warn(`[Baileys] ⚠️ Conexão não está mais conectada (status: ${currentClient?.status || 'not found'}), cancelando sincronização`);
+              logger.warn(`[Baileys] ⚠️ Isso pode indicar que a conexão foi desconectada logo após estabelecer`);
+              logger.warn(`[Baileys] ⚠️ Verifique os logs anteriores para identificar a causa da desconexão`);
               return;
             }
 
+            logger.info(`[Baileys] ✅ Conexão ainda está ativa antes de sincronizar (status: ${currentClient.status})`);
             logger.info(`[Baileys] 🔄 Iniciando sincronização automática...`);
             
-            // Forçar sincronização de TODAS as conversas ativas desde firstConnectedAt
-            const syncedCount = await this.syncAllActiveConversations(connectionId, 100);
+            // ✅ REDUZIR LIMITE: Sincronizar menos conversas de uma vez para evitar sobrecarga
+            // Limite reduzido de 100 para 20 para evitar desconexão por sobrecarga
+            const syncedCount = await this.syncAllActiveConversations(connectionId, 20);
             
             logger.info(`[Baileys] ✅ Sincronização automática completa: ${syncedCount} conversas sincronizadas`);
             
@@ -730,7 +757,8 @@ class BaileysManager {
             logger.error(`[Baileys] ❌ Erro na sincronização automática:`, syncError);
             logger.error(`[Baileys] ❌ Stack trace:`, syncError instanceof Error ? syncError.stack : 'No stack');
           }
-        }, 5000); // 5 segundos de espera para conexão estabilizar
+        }, 10000); // ✅ AUMENTADO: 10 segundos de espera para conexão estabilizar completamente
+        // Delay aumentado para evitar que sincronização pesada cause desconexão imediata
       } else {
         logger.info(`[Baileys] ℹ️ Primeira conexão - sincronização será feita após salvar firstConnectedAt`);
       }
@@ -748,6 +776,15 @@ class BaileysManager {
       const statusCode = (lastDisconnect?.error as Boom)?.output?.statusCode;
       const errorMessage = (lastDisconnect?.error as Error)?.message || 'Unknown error';
       const disconnectAt = new Date();
+      
+      // ✅ LOG CRÍTICO: Detectar se desconexão ocorreu logo após conexão
+      const timeSinceLastDisconnect = client.lastDisconnectAt 
+        ? Math.round((disconnectAt.getTime() - client.lastDisconnectAt.getTime()) / 1000)
+        : null;
+      
+      // ✅ Calcular tempo desde que status mudou para 'connected'
+      // Se não temos lastDisconnectAt, pode ser primeira desconexão após conexão
+      const isImmediateDisconnect = timeSinceLastDisconnect === null || timeSinceLastDisconnect < 60;
 
       // Determinar motivo da desconexão
       let disconnectReason = 'unknown';
@@ -786,9 +823,6 @@ class BaileysManager {
       client.status = 'disconnected';
       
       // ✅ LOGS DETALHADOS PARA RAILWAY + CONTEXTO ADICIONAL
-      logger.error(`[Baileys] ❌ ========== DESCONEXÃO DETECTADA ==========`);
-      logger.error(`[Baileys] 📅 Timestamp: ${disconnectAt.toISOString()}`);
-      logger.error(`[Baileys] 🔗 Connection ID: ${connectionId}`);
       logger.error(`[Baileys] 📊 Status Code: ${statusCode || 'N/A'}`);
       logger.error(`[Baileys] 🔍 Motivo: ${disconnectReason}`);
       logger.error(`[Baileys] 📝 Descrição: ${reasonDescription}`);
@@ -3608,9 +3642,13 @@ class BaileysManager {
     // Se não há cliente, criar novo
     if (!client) {
       logger.info(`[Baileys] 🔁 Manual reconnect for ${connectionId} - no client found, creating new one...`);
+      logger.info(`[Baileys] 📋 Estado antes de criar cliente:`);
+      logger.info(`[Baileys]    - Lock ativo: ${this.reconnectionLocks.get(connectionId)?.locked ? 'SIM' : 'NÃO'}`);
+      logger.info(`[Baileys]    - Credenciais válidas: ${hasValidCredentialsInDB ? 'SIM ✅' : 'NÃO ❌'}`);
       
-      // Limpar locks
+      // Limpar locks ANTES de criar cliente (evitar conflitos)
       this.reconnectionLocks.delete(connectionId);
+      logger.info(`[Baileys] ✅ Locks limpos antes de criar cliente`);
       
       // ✅ IMPORTANTE: Criar novo cliente (vai usar credenciais do banco se existirem)
       // O usePostgreSQLAuthState vai carregar as credenciais automaticamente
