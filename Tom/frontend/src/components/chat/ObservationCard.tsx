@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { ChevronDown, ChevronUp, X, Edit } from 'lucide-react';
+import { ChevronDown, Edit } from 'lucide-react';
 import { Button } from '../ui/button';
 import { ObservationModal } from './ObservationModal';
 
@@ -29,18 +29,36 @@ export function ObservationCard({ observation, conversationId, onUpdate, isHighl
 
   if (!observation) return null;
 
+  // Quando minimizado, mostrar apenas a seta para baixo
+  if (isMinimized) {
+    return (
+      <div className="w-full flex justify-center items-center py-2">
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => setIsMinimized(false)}
+          className="h-8 px-3 hover:bg-gray-700/50 rounded"
+          title="Mostrar observação"
+        >
+          <ChevronDown className="w-4 h-4 text-white/70" />
+        </Button>
+      </div>
+    );
+  }
+
   return (
     <>
       <div
-        className={`mb-4 rounded-lg border transition-all duration-300 ${
+        className={`w-full transition-all duration-300 ${
           shouldHighlight
-            ? 'bg-gray-700/90 border-yellow-500 shadow-lg shadow-yellow-500/20 animate-pulse'
-            : 'bg-gray-800/80 border-gray-600'
+            ? 'bg-gray-700/90 shadow-lg shadow-yellow-500/20 animate-pulse'
+            : 'bg-gray-800/80'
         }`}
+        style={{ aspectRatio: '1 / 1' }}
       >
-        <div className="flex items-start justify-between p-3">
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2 mb-2">
+        <div className="flex flex-col h-full p-4">
+          <div className="flex items-center justify-between mb-3 flex-shrink-0">
+            <div className="flex items-center gap-2">
               <span className="text-xs font-semibold text-white/80 uppercase tracking-wide">
                 Observação
               </span>
@@ -50,35 +68,31 @@ export function ObservationCard({ observation, conversationId, onUpdate, isHighl
                 </span>
               )}
             </div>
-            {!isMinimized && (
-              <p className="text-sm text-white leading-relaxed whitespace-pre-wrap break-words">
-                {observation}
-              </p>
-            )}
-          </div>
-          <div className="flex items-center gap-1 ml-2">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setShowEditModal(true)}
-              className="h-7 w-7 p-0 hover:bg-gray-700/50"
-              title="Editar observação"
-            >
-              <Edit className="w-4 h-4 text-white/70" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setIsMinimized(!isMinimized)}
-              className="h-7 w-7 p-0 hover:bg-gray-700/50"
-              title={isMinimized ? 'Expandir' : 'Minimizar'}
-            >
-              {isMinimized ? (
+            <div className="flex items-center gap-1">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setShowEditModal(true)}
+                className="h-7 w-7 p-0 hover:bg-gray-700/50"
+                title="Editar observação"
+              >
+                <Edit className="w-4 h-4 text-white/70" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setIsMinimized(true)}
+                className="h-7 w-7 p-0 hover:bg-gray-700/50"
+                title="Minimizar"
+              >
                 <ChevronDown className="w-4 h-4 text-white/70" />
-              ) : (
-                <ChevronUp className="w-4 h-4 text-white/70" />
-              )}
-            </Button>
+              </Button>
+            </div>
+          </div>
+          <div className="flex-1 overflow-y-auto min-h-0">
+            <p className="text-sm text-white leading-relaxed whitespace-pre-wrap break-words">
+              {observation}
+            </p>
           </div>
         </div>
       </div>

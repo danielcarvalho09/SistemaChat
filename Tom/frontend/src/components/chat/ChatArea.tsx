@@ -249,7 +249,7 @@ export function ChatArea({ conversationId, onToggleDetails }: ChatAreaProps) {
 
       {/* Observation Card - Logo abaixo do header */}
       {conversation?.internalNotes && (
-        <div className="px-4 pt-3 pb-2 bg-[#0b141a] border-b border-[#2a3942]">
+        <div className="w-full">
           <ObservationCard 
             observation={conversation.internalNotes}
             conversationId={conversationId}
