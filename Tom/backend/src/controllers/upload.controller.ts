@@ -257,6 +257,17 @@ export class UploadController {
         return reply.status(400).send({ success: false, message: 'File is empty' });
       }
       
+      // ✅ VALIDAÇÃO: Verificar se buffer tem conteúdo válido
+      if (buffer.length !== total) {
+        logger.error(`[UploadController] ❌ Buffer size mismatch! Expected: ${total} bytes, Got: ${buffer.length} bytes`);
+        return reply.status(500).send({ 
+          success: false, 
+          message: `File buffer size mismatch: expected ${total} bytes but got ${buffer.length} bytes` 
+        });
+      }
+      
+      logger.info(`[UploadController] ✅ Buffer validated: ${buffer.length} bytes (matches expected ${total} bytes)`);
+      
       // ✅ Passo 3: Detectar tipo MIME
       let typeCheck;
       try {
@@ -328,7 +339,57 @@ export class UploadController {
             // Fallback para armazenamento local
             const filepath = path.join(this.uploadsDir, uniqueName);
             savedPath = filepath;
+            // ✅ GARANTIR que o diretório existe antes de salvar
+            if (!fs.existsSync(this.uploadsDir)) {
+              fs.mkdirSync(this.uploadsDir, { recursive: true, mode: 0o700 });
+              logger.info(`[UploadController] 📁 Created uploads directory: ${this.uploadsDir}`);
+            }
+            
+            logger.info(`[UploadController] 💾 Writing file to: ${filepath} (${buffer.length} bytes)`);
             fs.writeFileSync(filepath, buffer, { mode: 0o600 });
+            
+            // ✅ VALIDAÇÃO: Verificar se o arquivo foi salvo corretamente
+            if (!fs.existsSync(filepath)) {
+              logger.error(`[UploadController] ❌ File does not exist after write: ${filepath}`);
+              throw new Error('File was not saved correctly - file does not exist after write');
+            }
+            
+            const savedStats = fs.statSync(filepath);
+            logger.info(`[UploadController] 📊 File stats after save: size=${savedStats.size} bytes, buffer=${buffer.length} bytes`);
+            
+            if (savedStats.size === 0) {
+              logger.error(`[UploadController] ❌ File was saved but is EMPTY: ${filepath}`);
+              // Tentar deletar arquivo vazio
+              try {
+                fs.unlinkSync(filepath);
+              } catch (unlinkError) {
+                logger.error('[UploadController] Error deleting empty file:', unlinkError);
+              }
+              throw new Error('File was saved but is empty (0 bytes)');
+            }
+            
+            if (savedStats.size !== buffer.length) {
+              logger.error(`[UploadController] ❌ File size mismatch! Expected: ${buffer.length}, Saved: ${savedStats.size}`);
+              // Tentar deletar arquivo corrompido
+              try {
+                fs.unlinkSync(filepath);
+              } catch (unlinkError) {
+                logger.error('[UploadController] Error deleting corrupted file:', unlinkError);
+              }
+              throw new Error(`File size mismatch: expected ${buffer.length} bytes, got ${savedStats.size} bytes`);
+            }
+            
+            // ✅ VALIDAÇÃO FINAL: Ler arquivo salvo e comparar hash
+            const savedBuffer = fs.readFileSync(filepath);
+            const bufferHash = crypto.createHash('sha256').update(buffer).digest('hex');
+            const savedHash = crypto.createHash('sha256').update(savedBuffer).digest('hex');
+            
+            if (bufferHash !== savedHash) {
+              logger.error(`[UploadController] ❌ File hash mismatch! Buffer and saved file are different`);
+              throw new Error('File content mismatch - saved file differs from buffer');
+            }
+            
+            logger.info(`[UploadController] ✅ File saved and verified successfully (${savedStats.size} bytes, hash: ${bufferHash.substring(0, 8)}...)`);
             
             // ✅ Converter URL relativa para absoluta desde o início
             const baseUrl = process.env.API_BASE_URL || process.env.RAILWAY_PUBLIC_DOMAIN || 'http://localhost:3000';
@@ -345,7 +406,57 @@ export class UploadController {
             fs.mkdirSync(this.uploadsDir, { recursive: true, mode: 0o700 });
           }
           
+          // ✅ GARANTIR que o diretório existe antes de salvar
+          if (!fs.existsSync(this.uploadsDir)) {
+            fs.mkdirSync(this.uploadsDir, { recursive: true, mode: 0o700 });
+            logger.info(`[UploadController] 📁 Created uploads directory: ${this.uploadsDir}`);
+          }
+          
+          logger.info(`[UploadController] 💾 Writing file to: ${filepath} (${buffer.length} bytes)`);
           fs.writeFileSync(filepath, buffer, { mode: 0o600 });
+          
+          // ✅ VALIDAÇÃO: Verificar se o arquivo foi salvo corretamente
+          if (!fs.existsSync(filepath)) {
+            logger.error(`[UploadController] ❌ File does not exist after write: ${filepath}`);
+            throw new Error('File was not saved correctly - file does not exist after write');
+          }
+          
+          const savedStats = fs.statSync(filepath);
+          logger.info(`[UploadController] 📊 File stats after save: size=${savedStats.size} bytes, buffer=${buffer.length} bytes`);
+          
+          if (savedStats.size === 0) {
+            logger.error(`[UploadController] ❌ File was saved but is EMPTY: ${filepath}`);
+            // Tentar deletar arquivo vazio
+            try {
+              fs.unlinkSync(filepath);
+            } catch (unlinkError) {
+              logger.error('[UploadController] Error deleting empty file:', unlinkError);
+            }
+            throw new Error('File was saved but is empty (0 bytes)');
+          }
+          
+          if (savedStats.size !== buffer.length) {
+            logger.error(`[UploadController] ❌ File size mismatch! Expected: ${buffer.length}, Saved: ${savedStats.size}`);
+            // Tentar deletar arquivo corrompido
+            try {
+              fs.unlinkSync(filepath);
+            } catch (unlinkError) {
+              logger.error('[UploadController] Error deleting corrupted file:', unlinkError);
+            }
+            throw new Error(`File size mismatch: expected ${buffer.length} bytes, got ${savedStats.size} bytes`);
+          }
+          
+          // ✅ VALIDAÇÃO FINAL: Ler arquivo salvo e comparar hash
+          const savedBuffer = fs.readFileSync(filepath);
+          const bufferHash = crypto.createHash('sha256').update(buffer).digest('hex');
+          const savedHash = crypto.createHash('sha256').update(savedBuffer).digest('hex');
+          
+          if (bufferHash !== savedHash) {
+            logger.error(`[UploadController] ❌ File hash mismatch! Buffer and saved file are different`);
+            throw new Error('File content mismatch - saved file differs from buffer');
+          }
+          
+          logger.info(`[UploadController] ✅ File saved and verified successfully (${savedStats.size} bytes, hash: ${bufferHash.substring(0, 8)}...)`);
           
           // ✅ Converter URL relativa para absoluta desde o início
           const baseUrl = process.env.API_BASE_URL || process.env.RAILWAY_PUBLIC_DOMAIN || 'http://localhost:3000';

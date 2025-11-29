@@ -153,7 +153,19 @@ export async function buildApp(): Promise<FastifyInstance> {
     } else if (filePath.endsWith('.txt')) {
         res.setHeader('Content-Type', 'text/plain; charset=utf-8')
     } else if (filePath.match(/\.(jpg|jpeg|png|gif|webp)$/i)) {
-      res.setHeader('Content-Type', `image/${filePath.split('.').pop()}`)
+      const ext = filePath.split('.').pop()?.toLowerCase();
+      const mimeTypes: Record<string, string> = {
+        'jpg': 'image/jpeg',
+        'jpeg': 'image/jpeg',
+        'png': 'image/png',
+        'gif': 'image/gif',
+        'webp': 'image/webp',
+      };
+      if (ext && mimeTypes[ext]) {
+        res.setHeader('Content-Type', mimeTypes[ext]);
+      } else {
+        res.setHeader('Content-Type', 'image/png'); // fallback
+      }
     } else if (filePath.endsWith('.mp4')) {
         res.setHeader('Content-Type', 'video/mp4')
     } else if (filePath.match(/\.(ogg|oga)$/i)) {
@@ -184,10 +196,17 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(fastifyStatic, {
     root: path.join(process.cwd(), 'secure-uploads'),
     prefix: '/secure-uploads/',
-    setHeaders: setStaticHeaders,
+    setHeaders: (res: any, filePath: string) => {
+      logger.debug(`[Static] Serving file: ${filePath}`);
+      setStaticHeaders(res, filePath);
+    },
     list: config.server.isDevelopment,
-    dotfiles: 'allow'
+    dotfiles: 'allow',
+    index: false, // Não servir index.html como padrão
+    serve: true,
   });
+  
+  logger.info('✅ Static file server registered for /secure-uploads/');
 
   // Swagger/OpenAPI Documentation
   if (config.server.isDevelopment) {
@@ -249,6 +268,14 @@ export async function buildApp(): Promise<FastifyInstance> {
         logger.warn(`[Static] Path is not a file: ${fullPath}`);
         return reply.status(404).send({ error: 'Not a file' });
       }
+      
+      // ✅ VALIDAÇÃO: Verificar se arquivo não está vazio
+      if (stats.size === 0) {
+        logger.error(`[Static] ❌ File is empty: ${fullPath}`);
+        return reply.status(500).send({ error: 'File is empty' });
+      }
+      
+      logger.info(`[Static] ✅ Serving file: ${urlPath} (${stats.size} bytes)`);
       
       // Configurar headers
       setStaticHeaders(reply.raw, fullPath);
