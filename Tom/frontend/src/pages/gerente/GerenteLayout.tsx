@@ -1,31 +1,26 @@
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, Users, Building, Smartphone, LogOut, Settings, Tag, Send, ListChecks, Clock, ChevronLeft, Brain } from 'lucide-react';
+import { LayoutDashboard, Send, ListChecks, Clock, ChevronLeft, LogOut } from 'lucide-react';
 import { useAuthStore } from '../../store/authStore';
 import { Button } from '../../components/ui/button';
 import { useState } from 'react';
 
-export function AdminLayout() {
+export function GerenteLayout() {
   const location = useLocation();
   const navigate = useNavigate();
   const { user, logout } = useAuthStore();
   const [isCollapsed, setIsCollapsed] = useState(false);
 
-  // ✅ Menu completo para admin (gerente tem seu próprio painel)
+  // ✅ Menu específico para gerente (apenas as opções permitidas)
   const navigation = [
-    { name: 'Dashboard', href: '/admin', icon: LayoutDashboard },
-    { name: 'Usuários', href: '/admin/users', icon: Users },
-    { name: 'Departamentos', href: '/admin/departments', icon: Building },
-    { name: 'Conexões WhatsApp', href: '/admin/connections', icon: Smartphone },
-    { name: 'Assistentes de IA', href: '/admin/ai-assistants', icon: Brain },
-    { name: 'Tags', href: '/admin/tags', icon: Tag },
-    { name: 'Disparo de Mensagens', href: '/admin/broadcast', icon: Send },
-    { name: 'Listas de Contatos', href: '/admin/contact-lists', icon: ListChecks },
-    { name: 'Configurar Intervalos', href: '/admin/broadcast-settings', icon: Clock },
+    { name: 'Dashboard', href: '/gerente', icon: LayoutDashboard },
+    { name: 'Disparo de Mensagens', href: '/gerente/broadcast', icon: Send },
+    { name: 'Listas de Contatos', href: '/gerente/contact-lists', icon: ListChecks },
+    { name: 'Configurar Intervalos', href: '/gerente/broadcast-settings', icon: Clock },
   ];
 
   const isActive = (href: string) => {
-    if (href === '/admin') {
-      return location.pathname === '/admin';
+    if (href === '/gerente') {
+      return location.pathname === '/gerente';
     }
     return location.pathname.startsWith(href);
   };
@@ -82,7 +77,7 @@ export function AdminLayout() {
           {!isCollapsed ? (
             <>
               <div className="flex items-center gap-3 mb-3">
-                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-blue-700 flex items-center justify-center text-white font-semibold">
+                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-purple-500 to-purple-700 flex items-center justify-center text-white font-semibold">
                   {user?.name?.charAt(0).toUpperCase()}
                 </div>
                 <div className="flex-1 min-w-0">
@@ -92,23 +87,19 @@ export function AdminLayout() {
                   <div className="text-xs text-gray-600 truncate">{user?.email}</div>
                 </div>
               </div>
-              <div className="flex gap-2">
-                <Button variant="outline" size="sm" className="flex-1 border-gray-300 text-gray-700 hover:bg-gray-100">
-                  <Settings className="w-4 h-4" />
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="flex-1 border-gray-300 text-gray-700 hover:bg-red-50 hover:text-red-600 hover:border-red-300"
-                  onClick={logout}
-                >
-                  <LogOut className="w-4 h-4" />
-                </Button>
-              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                className="w-full border-gray-300 text-gray-700 hover:bg-red-50 hover:text-red-600 hover:border-red-300"
+                onClick={logout}
+              >
+                <LogOut className="w-4 h-4 mr-2" />
+                Sair
+              </Button>
             </>
           ) : (
             <div className="flex flex-col gap-2">
-              <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-blue-700 flex items-center justify-center text-white font-semibold mx-auto">
+              <div className="w-10 h-10 rounded-full bg-gradient-to-br from-purple-500 to-purple-700 flex items-center justify-center text-white font-semibold mx-auto">
                 {user?.name?.charAt(0).toUpperCase()}
               </div>
               <Button 
@@ -132,3 +123,4 @@ export function AdminLayout() {
     </div>
   );
 }
+

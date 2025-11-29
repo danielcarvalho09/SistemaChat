@@ -15,13 +15,13 @@ export function AdminRoutes() {
   return (
     <Routes>
       <Route element={
-        <ProtectedRoute allowedRoles={['admin', 'gerente']}>
+        <ProtectedRoute allowedRoles={['admin']}>
           <AdminLayout />
         </ProtectedRoute>
       }>
-        {/* Dashboard - acessível para admin e gerente */}
+        {/* Dashboard - apenas para admin */}
         <Route index element={
-          <ProtectedRoute allowedRoles={['admin', 'gerente']}>
+          <ProtectedRoute allowedRoles={['admin']}>
             <AdminDashboard />
           </ProtectedRoute>
         } />
@@ -53,19 +53,19 @@ export function AdminRoutes() {
           </ProtectedRoute>
         } />
         
-        {/* Rotas para admin e gerente */}
+        {/* Rotas para admin */}
         <Route path="broadcast" element={
-          <ProtectedRoute allowedRoles={['admin', 'gerente']}>
+          <ProtectedRoute allowedRoles={['admin']}>
             <Broadcast />
           </ProtectedRoute>
         } />
         <Route path="contact-lists" element={
-          <ProtectedRoute allowedRoles={['admin', 'gerente']}>
+          <ProtectedRoute allowedRoles={['admin']}>
             <ContactLists />
           </ProtectedRoute>
         } />
         <Route path="broadcast-settings" element={
-          <ProtectedRoute allowedRoles={['admin', 'gerente']}>
+          <ProtectedRoute allowedRoles={['admin']}>
             <BroadcastSettings />
           </ProtectedRoute>
         } />

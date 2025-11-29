@@ -4,10 +4,11 @@ import { User } from '../types';
 import api from '../lib/axios';
 import socketService from '../lib/socket';
 
-const DEFAULT_USER_NAME = import.meta.env.VITE_APP_USER_NAME || 'Administrador';
+const DEFAULT_USER_NAME = import.meta.env.VITE_APP_USER_NAME || 'Usuário';
 
 const buildUser = (email: string, name?: string): User => {
-  const derivedName = name?.trim() || DEFAULT_USER_NAME || email.split('@')[0] || 'Usuário';
+  // ✅ Usar nome do email se não tiver nome, não usar "Administrador" como padrão
+  const derivedName = name?.trim() || email.split('@')[0] || DEFAULT_USER_NAME || 'Usuário';
   const timestamp = new Date().toISOString();
   return {
     id: `user-${email}`,

@@ -32,13 +32,24 @@ export function Header() {
           </div>
         </div>
 
-        {hasAdminAccess && (
+        {isAdmin && (
           <Button
             variant="ghost"
             size="sm"
             className="text-white hover:bg-white/10"
             onClick={() => navigate('/admin')}
-            title={isAdmin ? "Painel de Administração" : "Painel de Gerente"}
+            title="Painel de Administração"
+          >
+            <Settings className="w-5 h-5" />
+          </Button>
+        )}
+        {isGerente && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="text-white hover:bg-white/10"
+            onClick={() => navigate('/gerente')}
+            title="Painel de Gerente"
           >
             <Settings className="w-5 h-5" />
           </Button>

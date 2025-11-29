@@ -8,6 +8,7 @@ import { DashboardLayout } from './pages/dashboard/DashboardLayout';
 import { Kanban } from './pages/dashboard/Kanban';
 import { Agenda } from './pages/dashboard/Agenda';
 import { AdminRoutes } from './routes/AdminRoutes';
+import { GerenteRoutes } from './routes/GerenteRoutes';
 import { Toaster } from './components/ui/toaster';
 import { ConnectionStatus } from './components/ConnectionStatus';
 import { WebSocketProvider } from './contexts/WebSocketContext';
@@ -60,6 +61,12 @@ function App() {
         <Route
           path="/admin/*"
           element={isAuthenticated ? <AdminRoutes /> : <Navigate to="/login" />}
+        />
+
+        {/* Rotas Gerente */}
+        <Route
+          path="/gerente/*"
+          element={isAuthenticated ? <GerenteRoutes /> : <Navigate to="/login" />}
         />
 
         {/* Redirect padrão */}

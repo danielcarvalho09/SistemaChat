@@ -34,15 +34,17 @@ export const resolveRequestUser = async (
   name?: string
 ): Promise<ResolvedRequestUser> => {
   const normalizedEmail = (email ?? PUBLIC_USER_RESPONSE.email).toLowerCase();
+  // ✅ Usar nome do email se não tiver nome fornecido (não usar "Public User")
   const resolvedName =
     name?.trim() ||
-    (email ? email.split('@')[0] : PUBLIC_USER_RESPONSE.name);
+    (email ? email.split('@')[0] : 'Usuário');
 
   // Buscar ou criar usuário
+  // ✅ NÃO atualizar o nome se o usuário já existir (preservar nome do banco)
   const user = await prisma.user.upsert({
     where: { email: normalizedEmail },
     update: {
-      name: resolvedName,
+      // ✅ NÃO atualizar name - preservar o nome que já está no banco
       isActive: true,
     },
     create: {

@@ -8,6 +8,10 @@ import { cn } from '../../lib/utils';
 export function DashboardLayout() {
   const { user, logout } = useAuthStore();
   const [open, setOpen] = useState(false);
+  
+  // ✅ Verificar roles do usuário
+  const isAdmin = user?.roles?.some(role => role.name === 'admin') || false;
+  const isGerente = user?.roles?.some(role => role.name === 'gerente') || false;
 
   const links = [
     {
@@ -63,13 +67,24 @@ export function DashboardLayout() {
 
             {/* Action Buttons */}
             <div className="flex gap-2">
-              <SidebarLink
-                link={{
-                  label: 'Admin',
-                  href: '/admin',
-                  icon: <Settings className="text-gray-700 h-5 w-5 flex-shrink-0" />,
-                }}
-              />
+              {isAdmin && (
+                <SidebarLink
+                  link={{
+                    label: 'Admin',
+                    href: '/admin',
+                    icon: <Settings className="text-gray-700 h-5 w-5 flex-shrink-0" />,
+                  }}
+                />
+              )}
+              {isGerente && (
+                <SidebarLink
+                  link={{
+                    label: 'Gerente',
+                    href: '/gerente',
+                    icon: <Settings className="text-gray-700 h-5 w-5 flex-shrink-0" />,
+                  }}
+                />
+              )}
               <button
                 onClick={logout}
                 className="flex items-center justify-center gap-2 group/sidebar py-2 px-2 rounded-lg hover:bg-gray-100 transition-all duration-200 flex-1"
