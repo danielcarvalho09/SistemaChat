@@ -123,94 +123,165 @@ export class UploadController {
     let savedPath: string | null = null;
 
     try {
-      logger.info('[UploadController] Starting file upload...');
-      const data = await request.file();
-      if (!data) {
-        logger.warn('[UploadController] No file uploaded');
-        return reply.status(400).send({ success: false, message: 'No file uploaded' });
+      logger.info('[UploadController] 📤 Starting file upload...');
+      
+      // ✅ Passo 1: Obter arquivo do request
+      let data;
+      try {
+        data = await request.file();
+        if (!data) {
+          logger.warn('[UploadController] ❌ No file uploaded');
+          return reply.status(400).send({ success: false, message: 'No file uploaded' });
+        }
+        logger.info(`[UploadController] ✅ File received: ${data.filename || 'unnamed'}, mimetype: ${data.mimetype || 'unknown'}`);
+      } catch (fileError: any) {
+        logger.error('[UploadController] ❌ Error reading file from request:', fileError);
+        return reply.status(400).send({ 
+          success: false, 
+          message: 'Error reading file from request',
+          error: process.env.NODE_ENV === 'development' ? (fileError?.message || String(fileError)) : undefined
+        });
       }
 
-      logger.info(`[UploadController] File received: ${data.filename}, mimetype: ${data.mimetype}`);
-
+      // ✅ Passo 2: Ler chunks do arquivo
       const chunks: Buffer[] = [];
       let total = 0;
-      for await (const chunk of data.file) {
-        total += chunk.length;
-        if (total > MAX_FILE_SIZE) {
-          logger.warn(`[UploadController] File size exceeds limit: ${total} bytes`);
-          return reply.status(413).send({
-            success: false,
-            message: `File size exceeds maximum allowed (${MAX_FILE_SIZE / 1024 / 1024}MB)`,
-          });
+      
+      try {
+        for await (const chunk of data.file) {
+          total += chunk.length;
+          if (total > MAX_FILE_SIZE) {
+            logger.warn(`[UploadController] ❌ File size exceeds limit: ${total} bytes`);
+            return reply.status(413).send({
+              success: false,
+              message: `File size exceeds maximum allowed (${MAX_FILE_SIZE / 1024 / 1024}MB)`,
+            });
+          }
+          chunks.push(chunk);
         }
-        chunks.push(chunk);
+        logger.info(`[UploadController] ✅ File read complete: ${total} bytes`);
+      } catch (readError: any) {
+        logger.error('[UploadController] ❌ Error reading file chunks:', readError);
+        return reply.status(400).send({
+          success: false,
+          message: 'Error reading file',
+          error: process.env.NODE_ENV === 'development' ? (readError?.message || String(readError)) : undefined
+        });
       }
 
-      logger.info(`[UploadController] File read complete: ${total} bytes`);
       const buffer = Buffer.concat(chunks);
+      if (buffer.length === 0) {
+        logger.warn('[UploadController] ❌ File buffer is empty');
+        return reply.status(400).send({ success: false, message: 'File is empty' });
+      }
       
-      const typeCheck = await this.detectMime(buffer, data.filename);
-      logger.info(`[UploadController] MIME detection result:`, { isValid: typeCheck.isValid, mime: typeCheck.mime, error: typeCheck.error });
+      // ✅ Passo 3: Detectar tipo MIME
+      let typeCheck;
+      try {
+        typeCheck = await this.detectMime(buffer, data.filename);
+        logger.info(`[UploadController] MIME detection:`, { 
+          isValid: typeCheck.isValid, 
+          mime: typeCheck.mime, 
+          error: typeCheck.error 
+        });
+      } catch (mimeError: any) {
+        logger.error('[UploadController] ❌ Error detecting MIME type:', mimeError);
+        // Continuar mesmo se falhar - usar mimetype do request como fallback
+        typeCheck = {
+          isValid: true,
+          mime: data.mimetype || 'application/octet-stream'
+        };
+        logger.warn('[UploadController] ⚠️ Using request mimetype as fallback:', typeCheck.mime);
+      }
       
       if (!typeCheck.isValid) {
-        logger.warn(`[UploadController] Invalid file type: ${typeCheck.error}`);
+        logger.warn(`[UploadController] ❌ Invalid file type: ${typeCheck.error}`);
         return reply.status(415).send({ success: false, message: typeCheck.error || 'Invalid file type' });
       }
 
-      const originalName = this.sanitizeFileName(data.filename);
-      const ext = path.extname(originalName).toLowerCase();
+      // ✅ Passo 4: Validar extensão e conteúdo
+      const originalName = data.filename || 'upload';
+      const sanitizedName = this.sanitizeFileName(originalName);
+      const ext = path.extname(sanitizedName).toLowerCase();
+      
       if (BLOCKED_EXTENSIONS.has(ext)) {
+        logger.warn(`[UploadController] ❌ Blocked extension: ${ext}`);
         return reply.status(400).send({ success: false, message: 'File extension is not allowed' });
       }
 
-      if (this.hasMaliciousContent(buffer)) {
-        logger.warn(`Malicious content detected in upload from ${request.ip}`);
-        return reply.status(400).send({ success: false, message: 'File contains malicious content' });
+      try {
+        if (this.hasMaliciousContent(buffer)) {
+          logger.warn(`[UploadController] ❌ Malicious content detected from ${request.ip}`);
+          return reply.status(400).send({ success: false, message: 'File contains malicious content' });
+        }
+      } catch (securityError: any) {
+        logger.error('[UploadController] ⚠️ Error checking for malicious content:', securityError);
+        // Continuar mesmo se a verificação de segurança falhar
       }
 
-      const uniqueName = `${Date.now()}_${crypto.randomBytes(12).toString('hex')}${ext}`;
-      
-      // ✅ Tentar fazer upload para Supabase Storage primeiro
+      // ✅ Passo 5: Gerar nome único e fazer upload
+      const uniqueName = `${Date.now()}_${crypto.randomBytes(12).toString('hex')}${ext || ''}`;
       let fileUrl: string;
       
-      if (supabaseStorageService.isConfigured()) {
-        logger.info('📤 Uploading to Supabase Storage...');
-        const supabaseUrl = await supabaseStorageService.uploadFile(
-          buffer,
-          uniqueName,
-          typeCheck.mime || 'application/octet-stream'
-        );
+      try {
+        if (supabaseStorageService.isConfigured()) {
+          logger.info('[UploadController] 📤 Attempting Supabase Storage upload...');
+          try {
+            const supabaseUrl = await supabaseStorageService.uploadFile(
+              buffer,
+              uniqueName,
+              typeCheck.mime || 'application/octet-stream'
+            );
 
-        if (supabaseUrl) {
-          fileUrl = supabaseUrl;
-          logger.info('✅ File uploaded to Supabase Storage successfully');
+            if (supabaseUrl) {
+              fileUrl = supabaseUrl;
+              logger.info('[UploadController] ✅ File uploaded to Supabase Storage successfully');
+            } else {
+              throw new Error('Supabase upload returned null');
+            }
+          } catch (supabaseError: any) {
+            logger.error('[UploadController] ❌ Supabase upload failed:', supabaseError);
+            logger.warn('[UploadController] ⚠️ Falling back to local storage');
+            
+            // Fallback para armazenamento local
+            const filepath = path.join(this.uploadsDir, uniqueName);
+            savedPath = filepath;
+            fs.writeFileSync(filepath, buffer, { mode: 0o600 });
+            fileUrl = `/secure-uploads/${uniqueName}`;
+            logger.info('[UploadController] ✅ File saved to local storage');
+          }
         } else {
-          // Fallback para armazenamento local se Supabase falhar
-          logger.warn('⚠️ Supabase upload failed, falling back to local storage');
+          logger.info('[UploadController] 📤 Uploading to local storage (Supabase not configured)...');
           const filepath = path.join(this.uploadsDir, uniqueName);
           savedPath = filepath;
+          
+          // Garantir que o diretório existe
+          if (!fs.existsSync(this.uploadsDir)) {
+            fs.mkdirSync(this.uploadsDir, { recursive: true, mode: 0o700 });
+          }
+          
           fs.writeFileSync(filepath, buffer, { mode: 0o600 });
           fileUrl = `/secure-uploads/${uniqueName}`;
+          logger.info('[UploadController] ✅ File saved to local storage');
         }
-      } else {
-        // Usar armazenamento local se Supabase não estiver configurado
-        logger.info('📤 Uploading to local storage...');
-        const filepath = path.join(this.uploadsDir, uniqueName);
-        savedPath = filepath;
-        fs.writeFileSync(filepath, buffer, { mode: 0o600 });
-        fileUrl = `/secure-uploads/${uniqueName}`;
+      } catch (uploadError: any) {
+        logger.error('[UploadController] ❌ Error during file upload/save:', uploadError);
+        throw uploadError; // Re-throw para ser capturado no catch externo
       }
 
+      // ✅ Passo 6: Preparar resposta
       const response = {
         filename: uniqueName,
         url: fileUrl,
-        mimetype: typeCheck.mime,
+        mimetype: typeCheck.mime || 'application/octet-stream',
         size: total,
         hash: crypto.createHash('sha256').update(buffer).digest('hex'),
       };
 
-      logger.info('Secure upload complete', {
-        ...response,
+      logger.info('[UploadController] ✅ Upload complete', {
+        filename: response.filename,
+        size: response.size,
+        mimetype: response.mimetype,
         userId: request.user?.userId,
         ip: request.ip,
         storage: supabaseStorageService.isConfigured() ? 'supabase' : 'local',
@@ -222,23 +293,31 @@ export class UploadController {
         data: response,
       });
     } catch (error) {
+      // Limpar arquivo salvo se houve erro
       if (savedPath && fs.existsSync(savedPath)) {
-        fs.unlinkSync(savedPath);
+        try {
+          fs.unlinkSync(savedPath);
+          logger.info('[UploadController] 🗑️ Cleaned up partial file:', savedPath);
+        } catch (cleanupError) {
+          logger.error('[UploadController] ❌ Error cleaning up file:', cleanupError);
+        }
       }
       
-      logger.error('[UploadController] Error uploading file:', error);
-      logger.error('[UploadController] Error stack:', error instanceof Error ? error.stack : 'No stack trace');
-      logger.error('[UploadController] Error details:', {
-        message: error instanceof Error ? error.message : String(error),
-        name: error instanceof Error ? error.name : 'Unknown',
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorStack = error instanceof Error ? error.stack : undefined;
+      
+      logger.error('[UploadController] ❌ Error uploading file:', {
+        message: errorMessage,
+        stack: errorStack,
         userId: request.user?.userId,
         ip: request.ip,
+        userAgent: request.headers['user-agent'],
       });
       
       return reply.status(500).send({ 
         success: false, 
         message: 'Error uploading file',
-        error: process.env.NODE_ENV === 'development' ? (error instanceof Error ? error.message : String(error)) : undefined
+        error: process.env.NODE_ENV === 'development' ? errorMessage : undefined
       });
     }
   };

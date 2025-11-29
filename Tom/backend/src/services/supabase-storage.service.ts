@@ -126,10 +126,19 @@ export class SupabaseStorageService {
     }
 
     try {
+      logger.info(`[SupabaseStorage] 📤 Starting upload: ${filename} (${buffer.length} bytes, ${mimetype})`);
+      
       // Garantir que o bucket existe
-      await this.ensureBucketExists();
+      try {
+        await this.ensureBucketExists();
+        logger.info(`[SupabaseStorage] ✅ Bucket verified: ${this.bucketName}`);
+      } catch (bucketError: any) {
+        logger.error('[SupabaseStorage] ❌ Error ensuring bucket exists:', bucketError);
+        throw bucketError;
+      }
 
       // Fazer upload do arquivo
+      logger.info(`[SupabaseStorage] 📤 Uploading file to bucket...`);
       const { data, error } = await this.client.storage
         .from(this.bucketName)
         .upload(filename, buffer, {
@@ -138,21 +147,39 @@ export class SupabaseStorageService {
         });
 
       if (error) {
-        logger.error('❌ Error uploading to Supabase Storage:', error);
+        logger.error('[SupabaseStorage] ❌ Error uploading to Supabase Storage:', {
+          error: error.message || error,
+          code: (error as any).statusCode,
+          filename,
+          mimetype,
+          size: buffer.length,
+        });
+        return null;
+      }
+
+      if (!data) {
+        logger.error('[SupabaseStorage] ❌ Upload returned no data');
         return null;
       }
 
       // Obter URL pública do arquivo
+      logger.info(`[SupabaseStorage] 🔗 Getting public URL for path: ${data.path}`);
       const { data: urlData } = this.client.storage
         .from(this.bucketName)
         .getPublicUrl(data.path);
 
       const publicUrl = urlData.publicUrl;
-      logger.info(`✅ File uploaded to Supabase Storage: ${publicUrl}`);
+      logger.info(`[SupabaseStorage] ✅ File uploaded successfully: ${publicUrl}`);
 
       return publicUrl;
-    } catch (error) {
-      logger.error('❌ Exception uploading to Supabase Storage:', error);
+    } catch (error: any) {
+      logger.error('[SupabaseStorage] ❌ Exception uploading to Supabase Storage:', {
+        message: error?.message || String(error),
+        stack: error?.stack,
+        filename,
+        mimetype,
+        size: buffer.length,
+      });
       return null;
     }
   }
