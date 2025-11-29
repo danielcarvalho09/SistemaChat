@@ -115,8 +115,26 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(multipart, {
     limits: {
       fileSize: 10 * 1024 * 1024, // 10MB
+      files: 1, // Apenas 1 arquivo por vez
     },
+    attachFieldsToBody: false, // Não anexar campos ao body
+    throwFileSizeLimit: false, // Não lançar erro automaticamente, vamos tratar manualmente
   });
+  
+  // Hook para logar requests de upload antes do multipart processar
+  app.addHook('onRequest', async (request, reply) => {
+    if (request.url.includes('/upload') && request.method === 'POST') {
+      logger.info('[App] 📤 Upload request detected:', {
+        url: request.url,
+        contentType: request.headers['content-type'],
+        contentLength: request.headers['content-length'],
+        method: request.method,
+        headers: Object.keys(request.headers),
+      });
+    }
+  });
+  
+  logger.info('✅ Multipart plugin registered for file uploads');
 
   // Função auxiliar para configurar headers de arquivos estáticos
   const setStaticHeaders = (res: any, filePath: string) => {

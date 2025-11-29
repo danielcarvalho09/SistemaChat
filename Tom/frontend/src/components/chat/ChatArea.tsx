@@ -78,9 +78,22 @@ export function ChatArea({ conversationId, onToggleDetails }: ChatAreaProps) {
         const formData = new FormData();
         formData.append('file', file);
 
+        console.log('[ChatArea] 📤 Uploading file:', {
+          name: file.name,
+          type: file.type,
+          size: file.size,
+          isFormData: formData instanceof FormData,
+        });
+
         // IMPORTANTE: NÃO definir Content-Type manualmente para FormData
         // O navegador define automaticamente com o boundary correto
-        const uploadResponse = await api.post('/upload', formData);
+        // O interceptor do axios já remove o Content-Type automaticamente
+        const uploadResponse = await api.post('/upload', formData, {
+          headers: {
+            // Garantir que não há Content-Type definido
+            'Content-Type': undefined,
+          },
+        });
 
         if (!uploadResponse.data?.success) {
           throw new Error(uploadResponse.data?.message || 'Erro ao fazer upload do arquivo');

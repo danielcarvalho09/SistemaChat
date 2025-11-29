@@ -10,9 +10,6 @@ const getCsrfToken = (): string | null => {
 export const api: AxiosInstance = axios.create({
   baseURL: `${API_URL}/api/v1`,
   withCredentials: true,
-  headers: {
-    'Content-Type': 'application/json',
-  },
   timeout: 30000,
   validateStatus: (status) => status < 500,
 });
@@ -24,6 +21,20 @@ api.interceptors.request.use(
       const csrfToken = getCsrfToken();
       if (csrfToken) {
         config.headers['X-CSRF-Token'] = csrfToken;
+      }
+    }
+
+    // ✅ CRÍTICO: Se for FormData, NÃO definir Content-Type
+    // O navegador precisa definir automaticamente com o boundary correto
+    if (config.data instanceof FormData) {
+      // Remover qualquer Content-Type que possa ter sido definido
+      delete config.headers['Content-Type'];
+      delete config.headers['content-type'];
+      console.log('[Axios] ✅ FormData detected - Content-Type removed, browser will set boundary automatically');
+    } else if (config.data && typeof config.data === 'object' && !Array.isArray(config.data) && !(config.data instanceof FormData)) {
+      // Apenas definir Content-Type para JSON se não for FormData
+      if (!config.headers['Content-Type'] && !config.headers['content-type']) {
+        config.headers['Content-Type'] = 'application/json';
       }
     }
 

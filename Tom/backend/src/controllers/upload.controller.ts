@@ -123,35 +123,109 @@ export class UploadController {
     let savedPath: string | null = null;
 
     try {
-      logger.info('[UploadController] 📤 Starting file upload...');
+      logger.info('[UploadController] 📤 ========== STARTING FILE UPLOAD ==========');
+      logger.info('[UploadController] Request details:', {
+        method: request.method,
+        url: request.url,
+        headers: {
+          'content-type': request.headers['content-type'],
+          'content-length': request.headers['content-length'],
+          'user-agent': request.headers['user-agent'],
+        },
+        userId: request.user?.userId,
+        ip: request.ip,
+      });
       
-      // ✅ Passo 1: Obter arquivo do request
+      // ✅ Passo 1: Verificar se o request é multipart
+      const contentType = request.headers['content-type'] || '';
+      logger.info('[UploadController] Content-Type:', contentType);
+      
+      if (!contentType.includes('multipart/form-data')) {
+        logger.error('[UploadController] ❌ Invalid Content-Type. Expected multipart/form-data, got:', contentType);
+        return reply.status(400).send({ 
+          success: false, 
+          message: 'Invalid Content-Type. Expected multipart/form-data',
+          received: contentType
+        });
+      }
+      
+      // ✅ Passo 2: Obter arquivo do request
       let data;
       try {
+        logger.info('[UploadController] 📥 Attempting to read file from request...');
         data = await request.file();
+        logger.info('[UploadController] File read result:', {
+          hasData: !!data,
+          filename: data?.filename || 'N/A',
+          mimetype: data?.mimetype || 'N/A',
+          encoding: data?.encoding || 'N/A',
+          fieldname: data?.fieldname || 'N/A',
+        });
+        
         if (!data) {
-          logger.warn('[UploadController] ❌ No file uploaded');
+          logger.warn('[UploadController] ❌ No file uploaded - request.file() returned null/undefined');
+          logger.warn('[UploadController] Request body type:', typeof request.body);
+          logger.warn('[UploadController] Request body keys:', request.body ? Object.keys(request.body) : 'no body');
           return reply.status(400).send({ success: false, message: 'No file uploaded' });
         }
+        
         logger.info(`[UploadController] ✅ File received: ${data.filename || 'unnamed'}, mimetype: ${data.mimetype || 'unknown'}`);
       } catch (fileError: any) {
-        logger.error('[UploadController] ❌ Error reading file from request:', fileError);
+        logger.error('[UploadController] ❌ Error reading file from request:', {
+          error: fileError?.message || String(fileError),
+          stack: fileError?.stack,
+          name: fileError?.name,
+          code: fileError?.code,
+          statusCode: fileError?.statusCode,
+          contentType: request.headers['content-type'],
+          hasBody: !!request.body,
+          bodyType: typeof request.body,
+        });
+        
+        // Verificar se é erro específico do Fastify multipart
+        if (fileError?.code === 'FST_ERR_REQ_INVALID_CONTENT_TYPE') {
+          logger.error('[UploadController] ❌ Fastify multipart error: Invalid content type');
+          return reply.status(400).send({ 
+            success: false, 
+            message: 'Invalid request format. Please use multipart/form-data',
+            error: 'FST_ERR_REQ_INVALID_CONTENT_TYPE'
+          });
+        }
+        
         return reply.status(400).send({ 
           success: false, 
           message: 'Error reading file from request',
-          error: process.env.NODE_ENV === 'development' ? (fileError?.message || String(fileError)) : undefined
+          error: process.env.NODE_ENV === 'development' ? (fileError?.message || String(fileError)) : undefined,
+          errorCode: fileError?.code
         });
       }
 
-      // ✅ Passo 2: Ler chunks do arquivo
+      // ✅ Passo 3: Ler chunks do arquivo
       const chunks: Buffer[] = [];
       let total = 0;
+      let chunkCount = 0;
       
       try {
+        logger.info('[UploadController] 📖 Starting to read file chunks...');
+        
+        if (!data.file) {
+          logger.error('[UploadController] ❌ data.file is null or undefined');
+          return reply.status(400).send({
+            success: false,
+            message: 'File stream is not available'
+          });
+        }
+        
         for await (const chunk of data.file) {
+          chunkCount++;
           total += chunk.length;
+          
+          if (chunkCount % 10 === 0) {
+            logger.debug(`[UploadController] Read ${chunkCount} chunks, ${total} bytes so far...`);
+          }
+          
           if (total > MAX_FILE_SIZE) {
-            logger.warn(`[UploadController] ❌ File size exceeds limit: ${total} bytes`);
+            logger.warn(`[UploadController] ❌ File size exceeds limit: ${total} bytes (max: ${MAX_FILE_SIZE} bytes)`);
             return reply.status(413).send({
               success: false,
               message: `File size exceeds maximum allowed (${MAX_FILE_SIZE / 1024 / 1024}MB)`,
@@ -159,9 +233,17 @@ export class UploadController {
           }
           chunks.push(chunk);
         }
-        logger.info(`[UploadController] ✅ File read complete: ${total} bytes`);
+        
+        logger.info(`[UploadController] ✅ File read complete: ${chunkCount} chunks, ${total} bytes total`);
       } catch (readError: any) {
-        logger.error('[UploadController] ❌ Error reading file chunks:', readError);
+        logger.error('[UploadController] ❌ Error reading file chunks:', {
+          error: readError?.message || String(readError),
+          stack: readError?.stack,
+          name: readError?.name,
+          code: readError?.code,
+          chunksRead: chunkCount,
+          bytesRead: total,
+        });
         return reply.status(400).send({
           success: false,
           message: 'Error reading file',
