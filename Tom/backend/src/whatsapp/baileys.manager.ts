@@ -101,46 +101,20 @@ class BaileysManager {
    * Implementa auth state persistente no PostgreSQL conforme docs
    */
   async createClient(connectionId: string): Promise<BaileysClient> {
-    const createStartTime = new Date();
     try {
-      logger.info(`[Baileys] 🚀 ========== INICIANDO CRIAÇÃO DE CLIENTE ==========`);
-      logger.info(`[Baileys] 📅 Timestamp: ${createStartTime.toISOString()}`);
-      logger.info(`[Baileys] 🔗 Connection ID: ${connectionId}`);
-
-      // Verificar se já está em processo de criação/reconexão
-      const existingLock = this.reconnectionLocks.get(connectionId);
-      if (existingLock && existingLock.locked) {
-        // Verificar se o lock expirou (timeout de segurança)
-        const lockAge = Date.now() - existingLock.lockedAt.getTime();
-        if (lockAge > this.LOCK_TIMEOUT_MS) {
-          logger.warn(`[Baileys] ⚠️ Lock expired for ${connectionId} (${Math.round(lockAge / 1000)}s old) - releasing and retrying`);
-          this.reconnectionLocks.delete(connectionId);
-        } else {
-          logger.warn(`[Baileys] ⚠️ Client ${connectionId} is already being created/reconnected (lock age: ${Math.round(lockAge / 1000)}s), skipping...`);
-        throw new ClientCreationInProgressError(connectionId);
-        }
-      }
+      logger.info(`[Baileys] 🚀 Creating client for ${connectionId}`);
 
       // Verificar se cliente já existe e está conectado
       const existingClient = this.clients.get(connectionId);
       if (existingClient && existingClient.status === 'connected') {
-        logger.info(`[Baileys] ✅ Client ${connectionId} already exists and is connected - returning existing client`);
+        logger.info(`[Baileys] ✅ Client ${connectionId} already connected`);
         return existingClient;
       }
 
-      // Marcar como em processo de criação (com timestamp)
-      const lockTime = new Date();
-      this.reconnectionLocks.set(connectionId, {
-        locked: true,
-        lockedAt: lockTime,
-      });
-      logger.info(`[Baileys] 🔒 Lock criado para ${connectionId} em ${lockTime.toISOString()}`);
-
-      // Remover cliente existente se houver (se não estiver conectado)
-      // Usar a mesma variável existingClient já declarada acima
+      // Remover cliente existente se não estiver conectado
       if (existingClient && existingClient.status !== 'connected') {
-        logger.warn(`[Baileys] ⚠️ Client ${connectionId} already exists but status is '${existingClient.status}', removing...`);
-        await this.removeClient(connectionId, false); // false = não fazer logout
+        logger.info(`[Baileys] Removing disconnected client ${connectionId}`);
+        this.clients.delete(connectionId);
       }
 
       // Carregar ou criar auth state do banco de dados
@@ -162,23 +136,57 @@ class BaileysManager {
         logger.info(`[Baileys] 💡 Nova conexão: QR code será gerado após escanear`);
       }
 
+      // ✅ Buscar lastDisconnectAt para configurar shouldSyncHistoryMessage
+      // Conforme documentação: https://baileys.wiki/docs/socket/history-sync
+      let lastDisconnectAtForSync: Date | null = null;
+      let firstConnectedAtForSync: Date | null = null;
+      try {
+        const connectionForSync = await this.prisma.whatsAppConnection.findUnique({
+          where: { id: connectionId },
+          select: { lastDisconnectAt: true, firstConnectedAt: true },
+        });
+        lastDisconnectAtForSync = connectionForSync?.lastDisconnectAt ?? null;
+        firstConnectedAtForSync = connectionForSync?.firstConnectedAt ?? null;
+      } catch (error) {
+        logger.warn(`[Baileys] ⚠️ Could not read sync config for ${connectionId}:`, error);
+      }
+
       // Criar socket Baileys conforme documentação
+      // Baseado em: https://baileys.wiki/docs/socket/history-sync
       const socket = makeWASocket({
         auth: state,
         printQRInTerminal: false,
         logger: pino({ level: 'silent' }),
         browser: ['WhatsApp Multi-Device', 'Chrome', '1.0.0'],
-        syncFullHistory: false, // Desabilitado: só sincronizar mensagens a partir da primeira conexão
-        markOnlineOnConnect: true, // Marcar como online ao conectar (IMPORTANTE para manter conexão)
-        // Configurações otimizadas para melhorar estabilidade da conexão
-        connectTimeoutMs: 120000, // Timeout de 120s para conectar (aumentado para mais estabilidade)
-        defaultQueryTimeoutMs: 120000, // Timeout para queries (aumentado)
-        keepAliveIntervalMs: 20000, // Pings a cada 20s (mais frequente para manter conexão viva)
-        retryRequestDelayMs: 500, // Delay mínimo entre tentativas (aumentado para evitar sobrecarga)
-        emitOwnEvents: true, // Emitir eventos de mensagens enviadas por nós
-        fireInitQueries: true, // Executar queries iniciais ao conectar
+        syncFullHistory: false, // Não sincronizar histórico completo
+        markOnlineOnConnect: true, // Marcar como online ao conectar
+        // ✅ shouldSyncHistoryMessage: Controlar quais mensagens sincronizar
+        // Conforme documentação: https://baileys.wiki/docs/socket/history-sync
+        // O parâmetro é uma notificação de sincronização, não a mensagem em si
+        // A filtragem real será feita no evento messaging-history.set
+        shouldSyncHistoryMessage: () => {
+          // Primeira conexão: não sincronizar histórico
+          if (!firstConnectedAtForSync) {
+            logger.debug(`[Baileys] ⏭️ Primeira conexão - desabilitando history sync`);
+            return false;
+          }
+          
+          // Reconexão: permitir sincronização (filtraremos por timestamp no evento)
+          if (lastDisconnectAtForSync) {
+            logger.debug(`[Baileys] ✅ Reconexão detectada - permitindo history sync desde ${lastDisconnectAtForSync.toISOString()}`);
+          }
+          
+          return true;
+        },
+        connectTimeoutMs: 120000,
+        defaultQueryTimeoutMs: 120000,
+        keepAliveIntervalMs: 20000,
+        retryRequestDelayMs: 500,
+        emitOwnEvents: true,
+        fireInitQueries: true,
         getMessage: async (key) => {
           // Buscar mensagem do banco pelo externalId para histórico
+          // Conforme documentação: deve fornecer mensagens para getMessage
           try {
             const msg = await this.prisma.message.findFirst({
               where: { externalId: key.id as string },
@@ -267,57 +275,20 @@ class BaileysManager {
       
       
 
-      logger.info(`[Baileys] ✅ Client created successfully: ${connectionId}`);
-      
-      // Liberar lock após criação bem-sucedida
-      this.reconnectionLocks.delete(connectionId);
-      
-      const createEndTime = new Date();
-      const createDuration = Math.round((createEndTime.getTime() - createStartTime.getTime()) / 1000);
-      logger.info(`[Baileys] ✅ ========== CLIENTE CRIADO COM SUCESSO ==========`);
-      logger.info(`[Baileys] 📅 Timestamp: ${createEndTime.toISOString()}`);
-      logger.info(`[Baileys] ⏱️ Duração: ${createDuration} segundos`);
-      logger.info(`[Baileys] 🔗 Connection ID: ${connectionId}`);
-      logger.info(`[Baileys] ===========================================`);
-      
+      logger.info(`[Baileys] ✅ Client created: ${connectionId}`);
       return client;
     } catch (error) {
-      const errorTime = new Date();
-      const errorDuration = Math.round((errorTime.getTime() - createStartTime.getTime()) / 1000);
+      logger.error(`[Baileys] ❌ Error creating client ${connectionId}:`, error);
       
-      // ✅ LOGS DETALHADOS DE ERRO
-      logger.error(`[Baileys] ❌ ========== ERRO AO CRIAR CLIENTE ==========`);
-      logger.error(`[Baileys] 📅 Timestamp: ${errorTime.toISOString()}`);
-      logger.error(`[Baileys] ⏱️ Duração até erro: ${errorDuration} segundos`);
-      logger.error(`[Baileys] 🔗 Connection ID: ${connectionId}`);
-      logger.error(`[Baileys] ❌ Tipo de erro: ${error instanceof Error ? error.constructor.name : typeof error}`);
-      logger.error(`[Baileys] 💬 Mensagem: ${error instanceof Error ? error.message : String(error)}`);
-      if (error instanceof Error && error.stack) {
-        logger.error(`[Baileys] 📋 Stack trace:`, error.stack);
-      }
-      logger.error(`[Baileys] ===========================================`);
-      
-      // ✅ LIBERAR LOCK EM CASO DE ERRO (sempre garantir liberação)
-      this.reconnectionLocks.delete(connectionId);
-      logger.info(`[Baileys] 🔓 Lock liberado para ${connectionId} após erro`);
-      
-      // Se for ClientCreationInProgressError, não fazer mais nada
-      if (error instanceof ClientCreationInProgressError) {
-        logger.warn(`[Baileys] ⚠️ Criação já em progresso para ${connectionId} (após ${errorDuration}s)`);
-        throw error; // Re-throw para que o chamador saiba que é um erro esperado
-      }
-      
-      // ✅ Emitir evento de falha de conexão
+      // Emitir evento de falha
       try {
         const socketServer = getSocketServer();
-        const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido ao criar cliente';
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
         socketServer.emitWhatsAppConnectionFailed(connectionId, errorMessage);
-        
-        // Atualizar status no banco
         await this.updateConnectionStatus(connectionId, 'disconnected');
         this.emitStatus(connectionId, 'disconnected');
       } catch (emitError) {
-        logger.error(`[Baileys] ❌ Erro ao emitir evento de falha:`, emitError);
+        logger.error(`[Baileys] ❌ Error emitting failure event:`, emitError);
       }
       
       throw error;
@@ -515,13 +486,7 @@ class BaileysManager {
       client.status = 'connecting';
       
       // ✅ LOG DETALHADO PARA DIAGNÓSTICO
-      logger.info(`[Baileys] 🔄 ========== TENTATIVA DE CONEXÃO ==========`);
-      logger.info(`[Baileys] 📅 Timestamp: ${connectingAt.toISOString()}`);
-      logger.info(`[Baileys] 🔗 Connection ID: ${connectionId}`);
-      logger.info(`[Baileys] 🔑 Tem credenciais: ${client.hasCredentials ? 'SIM' : 'NÃO'}`);
-      logger.info(`[Baileys] 🔄 Tentativas de reconexão: ${client.reconnectAttempts || 0}`);
-      logger.info(`[Baileys] 🔒 Lock ativo: ${this.reconnectionLocks.get(connectionId)?.locked ? 'SIM' : 'NÃO'}`);
-      logger.info(`[Baileys] ===========================================`);
+      logger.info(`[Baileys] 🔄 Connecting ${connectionId}...`);
       
       this.emitStatus(connectionId, 'connecting');
       
@@ -563,8 +528,7 @@ class BaileysManager {
               await this.updateConnectionStatus(connectionId, 'disconnected');
               this.emitStatus(connectionId, 'disconnected');
               
-              // Limpar lock se existir
-              this.reconnectionLocks.delete(connectionId);
+              // Status atualizado
             } else {
               logger.info(`[Baileys] ✅ Conexão mudou de status durante timeout - cancelando ação`);
             }
@@ -590,177 +554,72 @@ class BaileysManager {
       }
       
       client.status = 'connected';
-      logger.info(`[Baileys] ✅ ========== CONEXÃO ESTABELECIDA ==========`);
-      logger.info(`[Baileys] 📅 Timestamp: ${new Date().toISOString()}`);
-      logger.info(`[Baileys] 🔗 Connection ID: ${connectionId}`);
-      logger.info(`[Baileys] 🔑 Tem credenciais: ${client.hasCredentials ? 'SIM ✅' : 'NÃO ❌'}`);
-      logger.info(`[Baileys] 🔄 Tentativas de reconexão: ${client.reconnectAttempts || 0}`);
-      logger.info(`[Baileys] 🔒 Lock ativo: ${this.reconnectionLocks.get(connectionId)?.locked ? 'SIM ⚠️' : 'NÃO ✅'}`);
-      logger.info(`[Baileys] 🔄 Está reconectando: ${client.isReconnecting ? 'SIM ⚠️' : 'NÃO ✅'}`);
+      logger.info(`[Baileys] ✅ Connected: ${connectionId}`);
       
-      // ✅ CRÍTICO: Limpar flags de reconexão imediatamente após conexão bem-sucedida
-      // Isso evita que processos de reconexão antigos interfiram com a nova conexão
-      if (client.isReconnecting) {
-        logger.warn(`[Baileys] ⚠️ Flag isReconnecting estava ativa - limpando agora`);
-        client.isReconnecting = false;
-      }
-      
-      // ✅ CRÍTICO: Limpar lock de reconexão se existir
-      const existingLock = this.reconnectionLocks.get(connectionId);
-      if (existingLock && existingLock.locked) {
-        logger.warn(`[Baileys] ⚠️ Lock de reconexão estava ativo - limpando agora`);
-        this.reconnectionLocks.delete(connectionId);
-      }
-      
-      logger.info(`[Baileys] ===========================================`);
-      
-      // ✅ VERIFICAÇÃO CRÍTICA: Verificar se socket e listeners estão ativos
-      if (!client.socket) {
-        logger.error(`[Baileys] ❌ Socket não encontrado após conexão para ${connectionId}!`);
-      } else {
-        logger.info(`[Baileys] ✅ Socket verificado e ativo para ${connectionId}`);
-        // Verificar se socket tem listeners registrados
-        const listeners = (client.socket.ev as any)?._events || {};
-        const hasMessagesListener = listeners['messages.upsert'] || listeners['connection.update'];
-        logger.info(`[Baileys] 📊 Listeners registrados: ${Object.keys(listeners).length} eventos`);
-        if (!hasMessagesListener) {
-          logger.warn(`[Baileys] ⚠️ Listener 'messages.upsert' pode não estar registrado para ${connectionId}!`);
-        } else {
-          logger.info(`[Baileys] ✅ Listener 'messages.upsert' confirmado para ${connectionId}`);
-        }
-      }
-
-      // Resetar contador de reconexão ao conectar com sucesso
+      // Limpar flags de reconexão
+      client.isReconnecting = false;
       this.resetReconnectionAttempts(connectionId);
-      
-      // ✅ Resetar circuit breaker após conexão bem-sucedida
-      this.resetCircuitBreaker(connectionId);
 
+      // ✅ LÓGICA DE SINCRONIZAÇÃO CONFORME REQUISITO:
+      // 1. Primeira conexão: NÃO sincronizar nada
+      // 2. Reconexão: Sincronizar desde lastDisconnectAt até agora
+      
       let lastDisconnectAt: Date | null = null;
       let firstConnectedAt: Date | null = null;
+      let wasFirstConnection = false;
+      
       try {
         const connectionRecord = await this.prisma.whatsAppConnection.findUnique({
           where: { id: connectionId },
           select: { lastDisconnectAt: true, firstConnectedAt: true },
         });
+        
         lastDisconnectAt = connectionRecord?.lastDisconnectAt ?? null;
         firstConnectedAt = connectionRecord?.firstConnectedAt ?? null;
+        
+        // Verificar se é primeira conexão (não tem firstConnectedAt)
+        wasFirstConnection = firstConnectedAt === null;
+        
+        // Salvar firstConnectedAt se for a primeira conexão
+        if (wasFirstConnection) {
+          await this.saveFirstConnectedAt(connectionId);
+          logger.info(`[Baileys] 📅 Primeira conexão detectada - firstConnectedAt salvo`);
+        }
       } catch (fetchError) {
         logger.warn(`[Baileys] ⚠️ Could not read connection data for ${connectionId}:`, fetchError);
       }
 
+      // Atualizar client com lastDisconnectAt
       client.lastDisconnectAt = lastDisconnectAt;
       client.lastSyncFrom = lastDisconnectAt;
       client.lastSyncTo = null;
 
-      // Salvar firstConnectedAt se for a primeira conexão
-      // E forçar sincronização de mensagens desde a primeira conexão ao reconectar
-      await this.saveFirstConnectedAt(connectionId);
-
-      // ✅ IMPORTANTE: Buscar firstConnectedAt novamente após saveFirstConnectedAt
-      // porque pode ter sido criado agora (primeira conexão)
-      // Mas só sincronizar se já existia ANTES (reconexão), não na primeira conexão
-      let shouldSync = firstConnectedAt !== null; // Sincronizar se já tinha firstConnectedAt (reconexão)
-      
-      // Se não tinha firstConnectedAt antes, verificar se foi criado agora
-      // Se foi criado agora, é primeira conexão - NÃO sincronizar (não há mensagens antigas)
-      if (!shouldSync) {
-        try {
-          const updatedConnection = await this.prisma.whatsAppConnection.findUnique({
-            where: { id: connectionId },
-            select: { firstConnectedAt: true },
-          });
-          // Se firstConnectedAt foi criado agora, é primeira conexão - não sincronizar
-          // Se já existia, é reconexão - sincronizar
-          // Mas como não tinha antes, não sincronizar agora (primeira conexão)
-          firstConnectedAt = updatedConnection?.firstConnectedAt ?? null;
-          shouldSync = false; // Primeira conexão - não sincronizar
-        } catch (fetchError) {
-          logger.warn(`[Baileys] ⚠️ Could not read updated firstConnectedAt for ${connectionId}:`, fetchError);
-          shouldSync = false;
-        }
-      }
-
-      // ✅ SINCRONIZAÇÃO AUTOMÁTICA: Sempre sincronizar quando conexão é aberta após reconexão
-      // Isso garante que mensagens perdidas durante desconexão sejam recuperadas
-      // Funciona para reconexões automáticas (sem QR code)
-      // E funciona mesmo sem o frontend aberto (rodando no backend)
-      // ✅ IMPORTANTE: Só sincronizar se já tinha firstConnectedAt ANTES (reconexão)
-      // porque na primeira conexão não há mensagens antigas para sincronizar
-      
-      if (shouldSync) {
-        const syncType = lastDisconnectAt ? 'reconexão automática' : 'primeira conexão';
-        logger.info(`[Baileys] 🔄 ========== SINCRONIZAÇÃO AUTOMÁTICA ==========`);
-        logger.info(`[Baileys] 📅 Timestamp: ${new Date().toISOString()}`);
-        logger.info(`[Baileys] 🔗 Connection ID: ${connectionId}`);
-        logger.info(`[Baileys] 🔄 Tipo: ${syncType}`);
-        if (firstConnectedAt) {
-          logger.info(`[Baileys] ⏰ Primeira conexão foi em: ${firstConnectedAt.toISOString()}`);
-        }
-        if (lastDisconnectAt) {
-          logger.info(`[Baileys] ⏰ Última desconexão foi em: ${lastDisconnectAt.toISOString()}`);
-          const disconnectDuration = Math.round((Date.now() - lastDisconnectAt.getTime()) / 1000);
-          logger.info(`[Baileys] ⏱️ Tempo desconectado: ${disconnectDuration} segundos`);
-        }
-        logger.info(`[Baileys] 🔍 Iniciando sincronização de TODAS conversas desde firstConnectedAt...`);
-        logger.info(`[Baileys] 💡 Esta sincronização funciona mesmo sem o frontend aberto`);
-        logger.info(`[Baileys] ===========================================`);
+      // ✅ SINCRONIZAÇÃO: Apenas se for RECONEXÃO (não primeira conexão) E tiver lastDisconnectAt
+      if (!wasFirstConnection && lastDisconnectAt) {
+        logger.info(`[Baileys] 🔄 Reconexão detectada - sincronizando desde ${lastDisconnectAt.toISOString()}`);
+        logger.info(`[Baileys] 📊 Período de sincronização: ${lastDisconnectAt.toISOString()} até agora`);
         
-        // ✅ AUMENTAR DELAY: Aguardar mais tempo para conexão estabilizar completamente
-        // Isso evita que a sincronização pesada cause desconexão imediata
+        // Sincronização após conexão estabilizar
         setTimeout(async () => {
           try {
-            // ✅ VERIFICAÇÃO CRÍTICA: Verificar se ainda está conectado antes de sincronizar
             const currentClient = this.clients.get(connectionId);
             if (!currentClient || currentClient.status !== 'connected') {
-              logger.warn(`[Baileys] ⚠️ Conexão não está mais conectada (status: ${currentClient?.status || 'not found'}), cancelando sincronização`);
-              logger.warn(`[Baileys] ⚠️ Isso pode indicar que a conexão foi desconectada logo após estabelecer`);
-              logger.warn(`[Baileys] ⚠️ Verifique os logs anteriores para identificar a causa da desconexão`);
+              logger.warn(`[Baileys] ⚠️ Conexão não está mais ativa - cancelando sincronização`);
               return;
             }
-
-            logger.info(`[Baileys] ✅ Conexão ainda está ativa antes de sincronizar (status: ${currentClient.status})`);
-            logger.info(`[Baileys] 🔄 Iniciando sincronização automática...`);
             
-            // ✅ REDUZIR LIMITE: Sincronizar menos conversas de uma vez para evitar sobrecarga
-            // Limite reduzido de 100 para 20 para evitar desconexão por sobrecarga
-            const syncedCount = await this.syncAllActiveConversations(connectionId, 20);
-            
-            logger.info(`[Baileys] ✅ Sincronização automática completa: ${syncedCount} conversas sincronizadas`);
-            
-            // Também detectar e recuperar gaps
-            const { gapsFound, recovered } = await this.detectAndRecoverGaps(connectionId);
-            logger.info(`[Baileys] ✅ Detecção de gaps: ${gapsFound} encontrados, ${recovered} em recuperação`);
-
-            // Processar fila de mensagens que falharam anteriormente
-            const retried = await this.processRetryQueue(connectionId);
-            if (retried > 0) {
-              logger.info(`[Baileys] ✅ Retry queue drained: ${retried} mensagens reprocesadas`);
-            }
-
-            const syncEnd = new Date();
-            if (currentClient) {
-              currentClient.lastSyncTo = syncEnd;
-            }
-
-            await this.prisma.whatsAppConnection.update({
-              where: { id: connectionId },
-              data: {
-                lastSyncTo: syncEnd,
-              },
-            }).catch((updateError) => {
-              logger.warn(`[Baileys] ⚠️ Could not update lastSyncTo for ${connectionId}:`, updateError);
-            });
-            
-            logger.info(`[Baileys] ✅ ========== SINCRONIZAÇÃO AUTOMÁTICA CONCLUÍDA ==========`);
+            // Sincronizar todas conversas ativas desde lastDisconnectAt
+            logger.info(`[Baileys] 🔄 Iniciando sincronização de mensagens perdidas...`);
+            await this.syncAllActiveConversations(connectionId, 50);
+            logger.info(`[Baileys] ✅ Sincronização concluída`);
           } catch (syncError) {
-            logger.error(`[Baileys] ❌ Erro na sincronização automática:`, syncError);
-            logger.error(`[Baileys] ❌ Stack trace:`, syncError instanceof Error ? syncError.stack : 'No stack');
+            logger.error(`[Baileys] ❌ Erro na sincronização:`, syncError);
           }
-        }, 10000); // ✅ AUMENTADO: 10 segundos de espera para conexão estabilizar completamente
-        // Delay aumentado para evitar que sincronização pesada cause desconexão imediata
+        }, 5000); // Aguardar 5s para conexão estabilizar
+      } else if (wasFirstConnection) {
+        logger.info(`[Baileys] ℹ️ Primeira conexão - nenhuma sincronização necessária`);
       } else {
-        logger.info(`[Baileys] ℹ️ Primeira conexão - sincronização será feita após salvar firstConnectedAt`);
+        logger.info(`[Baileys] ℹ️ Reconexão sem lastDisconnectAt - sincronização automática via eventos do Baileys`);
       }
 
       await this.updateConnectionStatus(connectionId, 'connected', {
@@ -771,235 +630,81 @@ class BaileysManager {
       return;
     }
 
-    // Desconectado
+    // Desconectado - Simplificado conforme documentação oficial
+    // Baseado em: https://baileys.wiki/docs/socket/connecting
     if (connection === 'close') {
       const statusCode = (lastDisconnect?.error as Boom)?.output?.statusCode;
       const errorMessage = (lastDisconnect?.error as Error)?.message || 'Unknown error';
+      
+      // ✅ CRÍTICO: Salvar momento exato da desconexão para sincronização futura
       const disconnectAt = new Date();
-      
-      // ✅ LOG CRÍTICO: Detectar se desconexão ocorreu logo após conexão
-      const timeSinceLastDisconnect = client.lastDisconnectAt 
-        ? Math.round((disconnectAt.getTime() - client.lastDisconnectAt.getTime()) / 1000)
-        : null;
-      
-      // ✅ Calcular tempo desde que status mudou para 'connected'
-      // Se não temos lastDisconnectAt, pode ser primeira desconexão após conexão
-      const isImmediateDisconnect = timeSinceLastDisconnect === null || timeSinceLastDisconnect < 60;
-
-      // Determinar motivo da desconexão
-      let disconnectReason = 'unknown';
-      let reasonDescription = 'Desconexão desconhecida';
-
-      if (statusCode === DisconnectReason.restartRequired) {
-        disconnectReason = 'restart_required';
-        reasonDescription = 'Reinício necessário (normal após escanear QR code)';
-      } else if (statusCode === DisconnectReason.loggedOut) {
-        disconnectReason = 'logged_out';
-        reasonDescription = 'Logout realizado no celular';
-      } else if (statusCode === DisconnectReason.badSession) {
-        disconnectReason = 'bad_session';
-        reasonDescription = 'Sessão inválida ou credenciais corrompidas';
-      } else if (statusCode === DisconnectReason.timedOut) {
-        disconnectReason = 'timed_out';
-        reasonDescription = 'Timeout na conexão';
-      } else if (statusCode === 503) {
-        disconnectReason = 'service_unavailable';
-        reasonDescription = 'Serviço WhatsApp temporariamente indisponível';
-      } else if (statusCode === 500) {
-        disconnectReason = 'server_error';
-        reasonDescription = 'Erro interno do servidor WhatsApp';
-      } else if (statusCode === 401) {
-        disconnectReason = 'unauthorized';
-        reasonDescription = 'Não autorizado - credenciais inválidas';
-      } else if (statusCode === 408) {
-        disconnectReason = 'request_timeout';
-        reasonDescription = 'Timeout na requisição';
-      } else if (statusCode) {
-        disconnectReason = `error_${statusCode}`;
-        reasonDescription = `Erro ${statusCode}: ${errorMessage}`;
-      }
-
-      // Marcar cliente como desconectado imediatamente para parar heartbeats/presence
       client.status = 'disconnected';
-      
-      // ✅ LOGS DETALHADOS PARA RAILWAY + CONTEXTO ADICIONAL
-      logger.error(`[Baileys] 📊 Status Code: ${statusCode || 'N/A'}`);
-      logger.error(`[Baileys] 🔍 Motivo: ${disconnectReason}`);
-      logger.error(`[Baileys] 📝 Descrição: ${reasonDescription}`);
-      logger.error(`[Baileys] 💬 Mensagem de Erro: ${errorMessage}`);
-      logger.error(`[Baileys] 🔄 Tem credenciais salvas: ${client.hasCredentials ? 'SIM' : 'NÃO'}`);
-      logger.error(`[Baileys] 📱 Número: ${client.socket?.user?.id || 'N/A'}`);
-      logger.error(`[Baileys] ⏰ Último heartbeat: ${client.lastHeartbeat ? client.lastHeartbeat.toISOString() : 'Nunca'}`);
-      logger.error(`[Baileys] 📥 Última mensagem recebida: ${client.lastMessageReceived ? client.lastMessageReceived.toISOString() : 'Nunca'}`);
-      
-      // ✅ VERIFICAR SE É DESCONEXÃO RELACIONADA A FALTA DE ATIVIDADE
-      if (statusCode === DisconnectReason.timedOut) {
-        logger.error(`[Baileys] ⚠️ ATENÇÃO: Desconexão por TIMEOUT detectada!`);
-        logger.error(`[Baileys] 💡 A conexão Baileys deveria continuar ativa mesmo sem clientes WebSocket conectados`);
-        logger.error(`[Baileys] 💡 Isso pode indicar que o Railway está matando o processo ou há timeout no Baileys`);
-        logger.error(`[Baileys] 💡 Verifique os logs do Railway para ver se o processo foi encerrado`);
-      }
-      logger.error(`[Baileys] 🔢 DisconnectReason.restartRequired = ${DisconnectReason.restartRequired}`);
-      logger.error(`[Baileys] 🔢 DisconnectReason.loggedOut = ${DisconnectReason.loggedOut}`);
-      logger.error(`[Baileys] 🔢 DisconnectReason.badSession = ${DisconnectReason.badSession}`);
-      logger.error(`[Baileys] 🔢 DisconnectReason.timedOut = ${DisconnectReason.timedOut}`);
-      
-      // Log detalhado do erro completo
-      if (lastDisconnect?.error) {
-        try {
-          const errorDetails = {
-            name: (lastDisconnect.error as Error).name,
-            message: (lastDisconnect.error as Error).message,
-            stack: (lastDisconnect.error as Error).stack,
-            output: (lastDisconnect.error as Boom)?.output,
-            data: (lastDisconnect.error as Boom)?.data,
-          };
-          logger.error(`[Baileys] 📋 Detalhes completos do erro:`, JSON.stringify(errorDetails, null, 2));
-        } catch (e) {
-          logger.error(`[Baileys] 📋 Erro ao serializar detalhes:`, e);
-        }
-      }
-      
-      logger.error(`[Baileys] ===========================================`);
-
       client.lastDisconnectAt = disconnectAt;
-      client.lastSyncFrom = null;
-      client.lastSyncTo = null;
-
-      // Salvar motivo da desconexão no banco
+      
+      logger.info(`[Baileys] ❌ Connection closed for ${connectionId}. Status: ${statusCode || 'N/A'}, Error: ${errorMessage}`);
+      logger.info(`[Baileys] 📅 Disconnect timestamp saved: ${disconnectAt.toISOString()} (será usado para sincronização na reconexão)`);
+      
+      // ✅ CRÍTICO: Salvar lastDisconnectAt no banco para sincronização na reconexão
       try {
         await this.prisma.whatsAppConnection.update({
           where: { id: connectionId },
           data: {
-            lastDisconnectAt: disconnectAt,
+            lastDisconnectAt: disconnectAt, // Salvar momento exato da desconexão
             status: 'disconnected',
           },
         });
+        logger.info(`[Baileys] ✅ lastDisconnectAt salvo no banco: ${disconnectAt.toISOString()}`);
       } catch (dbError) {
-        logger.error(`[Baileys] ❌ Erro ao salvar motivo da desconexão no banco:`, dbError);
+        logger.error(`[Baileys] ❌ Error saving lastDisconnectAt:`, dbError);
       }
 
-      // Restart required (normal após QR scan)
+      // Conforme documentação: restartRequired é NORMAL após escanear QR
+      // Deve criar um novo socket (este socket é inútil agora)
       if (statusCode === DisconnectReason.restartRequired) {
-        logger.info(`[Baileys] Restart required for ${connectionId} (normal after QR scan)`);
+        logger.info(`[Baileys] 🔄 Restart required for ${connectionId} (normal after QR scan - creating new socket)`);
         
-        // Aguardar 3 segundos antes de reiniciar para evitar conflitos
+        // Remover cliente antigo
+        this.clients.delete(connectionId);
+        
+        // Criar novo socket após pequeno delay
         setTimeout(async () => {
           try {
-            // Verificar se não está já reconectando
-            const lock = this.reconnectionLocks.get(connectionId);
-            if (!lock || !lock.locked) {
-              await this.createClient(connectionId);
-            } else {
-              logger.info(`[Baileys] Skipping restart for ${connectionId} - already reconnecting`);
-            }
+            await this.createClient(connectionId);
           } catch (error) {
-            logger.error(`[Baileys] Error restarting ${connectionId}:`, error);
+            logger.error(`[Baileys] ❌ Error creating new socket after restart:`, error);
           }
-        }, 3000);
+        }, 2000);
         return;
       }
 
-      // Logout
+      // Logout - invalidar sessão
       if (statusCode === DisconnectReason.loggedOut) {
+        logger.warn(`[Baileys] ⚠️ Logged out for ${connectionId} - invalidating session`);
         await this.handleSessionInvalidation(connectionId, 'logged_out', lastDisconnect?.error);
         return;
       }
 
-      // Sessão inválida / credenciais corrompidas (stream:error ack -> badSession)
-      // ✅ TRATAMENTO ESPECÍFICO PARA ERRO 500
-      if (statusCode === DisconnectReason.badSession || statusCode === 500) {
-        logger.warn(`[Baileys] ⚠️ Bad session or error 500 detected for ${connectionId}`);
-        
-        // Verificar circuit breaker antes de tentar reconectar
-        const circuitState = this.getCircuitBreakerState(connectionId);
-        
-        if (circuitState === 'open') {
-          logger.warn(`[Baileys] 🚫 Circuit breaker OPEN for ${connectionId} - too many failures, waiting before retry`);
-          await this.updateConnectionStatus(connectionId, 'disconnected', {
-            lastDisconnectAt: disconnectAt,
-          });
-          this.emitStatus(connectionId, 'disconnected');
-          
-          // Aguardar timeout do circuit breaker antes de resetar credenciais
-          setTimeout(async () => {
-            try {
-            logger.info(`[Baileys] 🔄 Circuit breaker timeout expired for ${connectionId}, resetting credentials...`);
-            await this.handleSessionInvalidation(connectionId, 'bad_session', lastDisconnect?.error);
-            } catch (error) {
-              logger.error(`[Baileys] ❌ Erro ao resetar credenciais após circuit breaker timeout:`, error);
-            }
-          }, this.CIRCUIT_BREAKER_TIMEOUT);
-          return;
-        }
-        
-        // Registrar falha no circuit breaker
-        this.recordCircuitBreakerFailure(connectionId);
-        
-        // Tentar reconexão inteligente antes de resetar credenciais
-        const reconnectAttempts = client.reconnectAttempts || 0;
-        const shouldRetry = reconnectAttempts < 3; // Tentar 3 vezes antes de resetar
-        
-        if (shouldRetry) {
-          logger.info(`[Baileys] 🔄 Attempting smart reconnection for ${connectionId} (attempt ${reconnectAttempts + 1}/3)`);
-          await this.attemptReconnection(connectionId);
-          return;
-        }
-        
-        // Após 3 tentativas, resetar credenciais
-        logger.warn(`[Baileys] 🔄 Max retry attempts reached, resetting credentials for ${connectionId}`);
-        await this.handleSessionInvalidation(connectionId, 'bad_session', lastDisconnect?.error);
-        return;
-      }
-
-      // Tratamento especial para erro 503 (Service Unavailable)
-      if (statusCode === 503) {
-        logger.warn(`[Baileys] ⚠️ Error 503 (Service Unavailable) - WhatsApp may be temporarily unavailable`);
-        logger.warn(`[Baileys] 💡 Will wait 30 seconds before attempting reconnection`);
-        
-        // Aguardar 30 segundos antes de tentar reconectar (evitar múltiplas tentativas)
-        setTimeout(async () => {
-          try {
-          const shouldReconnect = this.shouldAttemptReconnection(connectionId, statusCode);
-          if (shouldReconnect) {
-            logger.info(`[Baileys] 🔄 Auto-reconnecting ${connectionId} after 503 error...`);
-            await this.attemptReconnection(connectionId);
-            }
-          } catch (error) {
-            logger.error(`[Baileys] ❌ Erro ao reconectar após erro 503:`, error);
-          }
-        }, 30000); // 30 segundos para erro 503
-        
-        await this.updateConnectionStatus(connectionId, 'disconnected', {
-          lastDisconnectAt: disconnectAt,
-          lastDisconnectReason: `${disconnectReason}: ${reasonDescription}`,
-        });
-        this.emitStatus(connectionId, 'disconnected');
-        return;
-      }
-      
-      // Reconexão automática inteligente
-      // Só reconecta se:
-      // 1. Tem credenciais salvas (já foi conectado antes)
-      // 2. Não é um logout deliberado
-      // 3. Não excedeu o limite de tentativas
-      const shouldReconnect = this.shouldAttemptReconnection(connectionId, statusCode);
+      // Outros erros - tentar reconectar se tiver credenciais válidas
+      // Conforme documentação: se tem credenciais válidas, deve reconectar automaticamente
+      const shouldReconnect = statusCode !== DisconnectReason.loggedOut && client.hasCredentials;
       
       if (shouldReconnect) {
-        logger.info(`[Baileys] 🔄 Auto-reconnecting ${connectionId}...`);
-        await this.attemptReconnection(connectionId);
-      } else {
-        // Verificar se é uma conexão com credenciais que falhou por outro motivo
-        if (client.hasCredentials) {
-          logger.warn(`[Baileys] ⚠️ Connection with credentials failed (code: ${statusCode})`);
-          logger.warn(`[Baileys] 💡 Try reconnecting manually or check WhatsApp on phone`);
-        }
+        logger.info(`[Baileys] 🔄 Attempting reconnection for ${connectionId} (has valid credentials)`);
         
-        logger.warn(`[Baileys] ❌ Disconnected: ${connectionId} (code: ${statusCode}).`);
-        await this.updateConnectionStatus(connectionId, 'disconnected', {
-          lastDisconnectAt: disconnectAt,
-          lastDisconnectReason: `${disconnectReason}: ${reasonDescription}`,
-        });
+        // Remover cliente antigo
+        this.clients.delete(connectionId);
+        
+        // Aguardar antes de reconectar (evitar reconexão imediata)
+        setTimeout(async () => {
+          try {
+            await this.createClient(connectionId);
+          } catch (error) {
+            logger.error(`[Baileys] ❌ Error reconnecting:`, error);
+          }
+        }, 5000);
+      } else {
+        logger.warn(`[Baileys] ⚠️ Not reconnecting ${connectionId} - no valid credentials or logged out`);
+        await this.updateConnectionStatus(connectionId, 'disconnected');
         this.emitStatus(connectionId, 'disconnected');
       }
     }
@@ -1150,25 +855,33 @@ class BaileysManager {
       }
       logger.info(`[Baileys] ===========================================`);
 
-      // Buscar firstConnectedAt para sincronização inteligente
+      // ✅ Buscar firstConnectedAt e lastDisconnectAt para sincronização inteligente
       const connection = await this.prisma.whatsAppConnection.findUnique({
         where: { id: connectionId },
-        select: { firstConnectedAt: true },
+        select: { firstConnectedAt: true, lastDisconnectAt: true },
       });
 
       const firstConnectedAt = connection?.firstConnectedAt;
+      const lastDisconnectAt = connection?.lastDisconnectAt;
       
-      // Se não tem firstConnectedAt, ainda não conectou pela primeira vez
-      // Nesse caso, não processar histórico antigo (aguardar conexão)
-      // Mas mensagens em tempo real (notify) sempre devem ser processadas
+      // ✅ LÓGICA DE SINCRONIZAÇÃO:
+      // 1. Primeira conexão (sem firstConnectedAt): Não processar histórico antigo
+      // 2. Reconexão (com lastDisconnectAt): Processar apenas desde lastDisconnectAt
+      // 3. Mensagens em tempo real (notify): Sempre processar
+      
       if (!firstConnectedAt && type === 'history') {
-        logger.info(`[Baileys] ⏭️ Skipping history sync - connection ${connectionId} hasn't been connected yet (will process after first connection)`);
+        logger.info(`[Baileys] ⏭️ Skipping history sync - primeira conexão (sem firstConnectedAt)`);
         return;
       }
       
-      // IMPORTANTE: Mensagens em tempo real (notify/append) sempre processar, mesmo sem firstConnectedAt
-      // Elas são novas e devem ser capturadas imediatamente
-      // Para mensagens history: processar desde firstConnectedAt, deduplicação vai pular as já existentes
+      // ✅ IMPORTANTE: Atualizar client.lastSyncFrom com lastDisconnectAt para filtro correto
+      if (client && lastDisconnectAt) {
+        client.lastSyncFrom = lastDisconnectAt;
+        logger.debug(`[Baileys] 📅 Usando lastDisconnectAt para filtro: ${lastDisconnectAt.toISOString()}`);
+      }
+      
+      // Mensagens em tempo real (notify/append) sempre processar
+      // Para mensagens history/append: processar desde lastDisconnectAt (se houver)
 
       // Atualizar timestamp de última mensagem recebida
       // ✅ client já foi declarado acima, apenas atualizar
@@ -1343,13 +1056,20 @@ class BaileysManager {
           messageTimestamp = new Date(Number(msg.key.messageTimestamp) * 1000);
         }
 
+        // ✅ FILTRO CRÍTICO: Durante sincronização após reconexão, processar apenas mensagens desde lastDisconnectAt
+        // syncWindowStart = lastDisconnectAt (momento em que conexão caiu)
+        // Isso garante que apenas mensagens perdidas durante desconexão sejam recuperadas
         if (syncWindowStart && (type === 'history' || type === 'append')) {
           if (messageTimestamp && messageTimestamp < syncWindowStart) {
             logger.debug(
-              `[Baileys] ⏭️ Skipping message before last disconnect window (${messageTimestamp.toISOString()})`
+              `[Baileys] ⏭️ Skipping message before lastDisconnectAt (${messageTimestamp.toISOString()} < ${syncWindowStart.toISOString()})`
             );
             syncStats.skipped++;
             continue;
+          }
+          // Mensagens sem timestamp durante sincronização: processar (podem ser recentes)
+          if (!messageTimestamp) {
+            logger.debug(`[Baileys] ✅ Processing message without timestamp during sync (will deduplicate if exists)`);
           }
         }
 
@@ -3338,8 +3058,9 @@ class BaileysManager {
       clearInterval(client.syncInterval);
     }
 
-    // Sincronização leve a cada 5 minutos (300000ms)
-    // Intervalo longo para não interferir com recebimento em tempo real
+    // ✅ Sincronização periódica leve a cada 5 minutos (backup)
+    // IMPORTANTE: Esta é apenas um backup - a sincronização principal ocorre na reconexão
+    // Não deve interferir com a lógica de sincronização baseada em lastDisconnectAt
     client.syncInterval = setInterval(async () => {
       const currentClient = this.clients.get(connectionId);
       if (!currentClient || currentClient.status !== 'connected') {
@@ -3351,10 +3072,23 @@ class BaileysManager {
       }
 
       try {
+        // ✅ Verificar se é primeira conexão - não sincronizar periodicamente
+        const connection = await this.prisma.whatsAppConnection.findUnique({
+          where: { id: connectionId },
+          select: { firstConnectedAt: true },
+        });
+
+        // Primeira conexão: não fazer sync periódico (apenas backup após reconexão)
+        if (!connection?.firstConnectedAt) {
+          logger.debug(`[Baileys] ⏭️ Periodic sync skipped - primeira conexão (sem firstConnectedAt)`);
+          return;
+        }
+
         logger.info(`[Baileys] 🔄 Periodic sync (backup) for ${connectionId} - checking for missed messages...`);
         
         // Sincronização leve: apenas conversas ativas recentes (últimas 10)
         // Limite baixo para não sobrecarregar
+        // ✅ Esta sincronização é apenas backup - a principal ocorre na reconexão
         const syncedCount = await this.syncAllActiveConversations(connectionId, 10);
         
         if (syncedCount > 0) {
