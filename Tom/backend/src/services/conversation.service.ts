@@ -373,17 +373,15 @@ export class ConversationService {
   }
 
   /**
-   * Transfere conversa para outro usuário, departamento ou conexão
-   * IMPORTANTE: Mantém histórico de mensagens
-   * NOVA LÓGICA: Ao transferir para setor, a conversa fica visível para todos os usuários do setor
-   * e a conexão só muda quando alguém aceitar a conversa
+   * Transfere conversa para usuário específico
+   * IMPORTANTE: Mantém histórico de mensagens e observações (internalNotes)
+   * NOVA LÓGICA: Transferência agora é apenas para usuário específico
+   * A conversa ficará visível apenas para o usuário selecionado e administradores
    */
   async transferConversation(
     conversationId: string,
     fromUserId: string,
-    toUserId?: string,
-    toDepartmentId?: string,
-    toConnectionId?: string,
+    toUserId: string,
     reason?: string
   ): Promise<void> {
     const conversation = await this.prisma.conversation.findUnique({

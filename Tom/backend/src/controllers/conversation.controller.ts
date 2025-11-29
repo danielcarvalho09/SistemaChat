@@ -104,7 +104,7 @@ export class ConversationController {
 
   /**
    * POST /api/v1/conversations/:conversationId/transfer
-   * Transfere conversa para usuário, departamento ou conexão
+   * Transfere conversa para usuário específico
    */
   transferConversation = async (
     request: FastifyRequest<{ Params: { conversationId: string } }>,
@@ -112,29 +112,23 @@ export class ConversationController {
   ) => {
     const { conversationId } = request.params;
     console.log('🔄 [transferConversation] Request body:', JSON.stringify(request.body));
-    const { toUserId, toDepartmentId, toConnectionId, reason } = validate(
+    const { toUserId, reason } = validate(
       transferConversationSchema,
       request.body
     );
     const userId = request.user!.userId;
-    console.log('✅ [transferConversation] Validated:', { toUserId, toDepartmentId, toConnectionId, reason });
+    console.log('✅ [transferConversation] Validated:', { toUserId, reason });
 
     await this.conversationService.transferConversation(
       conversationId,
       userId,
       toUserId,
-      toDepartmentId,
-      toConnectionId,
       reason
     );
 
     // Emitir evento via WebSocket
     const socketServer = getSocketServer();
-    if (toUserId) {
-      socketServer.emitConversationTransferred(conversationId, userId, toUserId);
-    } else {
-      socketServer.emitConversationUpdate(conversationId, { status: 'waiting', assignedUserId: null });
-    }
+    socketServer.emitConversationTransferred(conversationId, userId, toUserId);
 
     return reply.status(200).send({
       success: true,

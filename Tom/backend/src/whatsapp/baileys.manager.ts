@@ -2163,10 +2163,77 @@ class BaileysManager {
         messageContent = { text: content as string };
       } else if (messageType === 'image') {
         const { url, caption } = content as { url: string; caption?: string };
-        // Só passar caption se houver conteúdo real
-        messageContent = caption && caption.trim() 
-          ? { image: { url }, caption }
-          : { image: { url } };
+        
+        // ✅ Converter URL relativa para absoluta se necessário
+        let imageUrl = url;
+        let imageBuffer: Buffer | null = null;
+        let filename: string | null = null;
+        
+        // Extrair filename da URL
+        if (!imageUrl.startsWith('http://') && !imageUrl.startsWith('https://')) {
+          // URL relativa - extrair filename
+          filename = imageUrl.split('/').pop()?.split('?')[0] || null;
+        } else {
+          // URL absoluta - extrair filename
+          const urlParts = imageUrl.split('/');
+          filename = urlParts[urlParts.length - 1]?.split('?')[0] || null;
+        }
+        
+        // ✅ Tentar ler arquivo localmente para enviar como buffer (mais eficiente)
+        if (filename) {
+          // Tentar primeiro em secure-uploads (diretório usado pelo upload controller)
+          const secureUploadsDir = path.join(process.cwd(), 'secure-uploads');
+          const secureUploadsPath = path.join(secureUploadsDir, filename);
+          
+          // Tentar também em uploads (fallback)
+          const uploadsDir = path.join(process.cwd(), 'uploads');
+          const uploadsPath = path.join(uploadsDir, filename);
+          
+          if (fs.existsSync(secureUploadsPath)) {
+            try {
+              imageBuffer = fs.readFileSync(secureUploadsPath);
+              logger.info(`[Baileys] ✅ Image file found locally in secure-uploads: ${filename} (${imageBuffer.length} bytes)`);
+            } catch (fileError) {
+              logger.error(`[Baileys] ❌ Failed to read image file from secure-uploads:`, fileError);
+              imageBuffer = null;
+            }
+          } else if (fs.existsSync(uploadsPath)) {
+            try {
+              imageBuffer = fs.readFileSync(uploadsPath);
+              logger.info(`[Baileys] ✅ Image file found locally in uploads: ${filename} (${imageBuffer.length} bytes)`);
+            } catch (fileError) {
+              logger.error(`[Baileys] ❌ Failed to read image file from uploads:`, fileError);
+              imageBuffer = null;
+            }
+          } else {
+            logger.warn(`[Baileys] ⚠️ Image file not found locally: ${filename}`);
+          }
+          
+          // ✅ Converter URL relativa para absoluta (necessário para Baileys baixar)
+          if (!imageUrl.startsWith('http://') && !imageUrl.startsWith('https://')) {
+            const baseUrl = process.env.API_BASE_URL || process.env.RAILWAY_PUBLIC_DOMAIN || 'http://localhost:3000';
+            imageUrl = imageUrl.startsWith('/') 
+              ? `${baseUrl}${imageUrl}` 
+              : `${baseUrl}/${imageUrl}`;
+            logger.info(`[Baileys] Converted relative image URL to absolute: ${imageUrl}`);
+          }
+        }
+        
+        // ✅ Estratégia: Tentar buffer primeiro (mais eficiente), senão usar URL pública
+        // Baseado na documentação do Baileys: https://baileys.wiki/docs/sending-messages/
+        if (imageBuffer) {
+          // ✅ Enviar como buffer (mais eficiente e confiável)
+          messageContent = caption && caption.trim() 
+            ? { image: imageBuffer, caption }
+            : { image: imageBuffer };
+          logger.info(`[Baileys] ✅ Using image buffer (size: ${imageBuffer.length} bytes)`);
+        } else {
+          // ✅ Usar URL pública (deve ser absoluta e acessível)
+          messageContent = caption && caption.trim() 
+            ? { image: { url: imageUrl }, caption }
+            : { image: { url: imageUrl } };
+          logger.info(`[Baileys] ✅ Using image URL: ${imageUrl}`);
+        }
       } else if (messageType === 'audio') {
         const { url } = content as { url: string };
         // ✅ Converter URL relativa para absoluta se necessário
@@ -2260,19 +2327,32 @@ class BaileysManager {
         
         // ✅ Tentar ler arquivo localmente para enviar como buffer
         if (filename) {
-          const uploadsDir = path.join(process.cwd(), 'uploads');
-          const filepath = path.join(uploadsDir, filename);
+          // Tentar primeiro em secure-uploads (diretório usado pelo upload controller)
+          const secureUploadsDir = path.join(process.cwd(), 'secure-uploads');
+          const secureUploadsPath = path.join(secureUploadsDir, filename);
           
-          if (fs.existsSync(filepath)) {
+          // Tentar também em uploads (fallback)
+          const uploadsDir = path.join(process.cwd(), 'uploads');
+          const uploadsPath = path.join(uploadsDir, filename);
+          
+          if (fs.existsSync(secureUploadsPath)) {
             try {
-              audioBuffer = fs.readFileSync(filepath);
-              logger.info(`[Baileys] ✅ Audio file found locally: ${filename} (${audioBuffer.length} bytes)`);
+              audioBuffer = fs.readFileSync(secureUploadsPath);
+              logger.info(`[Baileys] ✅ Audio file found locally in secure-uploads: ${filename} (${audioBuffer.length} bytes)`);
             } catch (fileError) {
-              logger.error(`[Baileys] ❌ Failed to read audio file:`, fileError);
+              logger.error(`[Baileys] ❌ Failed to read audio file from secure-uploads:`, fileError);
+              audioBuffer = null;
+            }
+          } else if (fs.existsSync(uploadsPath)) {
+            try {
+              audioBuffer = fs.readFileSync(uploadsPath);
+              logger.info(`[Baileys] ✅ Audio file found locally in uploads: ${filename} (${audioBuffer.length} bytes)`);
+            } catch (fileError) {
+              logger.error(`[Baileys] ❌ Failed to read audio file from uploads:`, fileError);
               audioBuffer = null;
             }
           } else {
-            logger.warn(`[Baileys] ⚠️ Audio file not found locally: ${filepath}`);
+            logger.warn(`[Baileys] ⚠️ Audio file not found locally: ${filename}`);
           }
           
           // ✅ Se arquivo existe localmente, garantir que a URL seja absoluta e pública
@@ -2315,18 +2395,155 @@ class BaileysManager {
         }
       } else if (messageType === 'video') {
         const { url, caption } = content as { url: string; caption?: string };
-        // Só passar caption se houver conteúdo real
-        messageContent = caption && caption.trim()
-          ? { video: { url }, caption }
-          : { video: { url } };
+        
+        // ✅ Converter URL relativa para absoluta se necessário
+        let videoUrl = url;
+        let videoBuffer: Buffer | null = null;
+        let filename: string | null = null;
+        
+        // Extrair filename da URL
+        if (!videoUrl.startsWith('http://') && !videoUrl.startsWith('https://')) {
+          // URL relativa - extrair filename
+          filename = videoUrl.split('/').pop()?.split('?')[0] || null;
+        } else {
+          // URL absoluta - extrair filename
+          const urlParts = videoUrl.split('/');
+          filename = urlParts[urlParts.length - 1]?.split('?')[0] || null;
+        }
+        
+        // ✅ Tentar ler arquivo localmente para enviar como buffer (mais eficiente)
+        if (filename) {
+          // Tentar primeiro em secure-uploads (diretório usado pelo upload controller)
+          const secureUploadsDir = path.join(process.cwd(), 'secure-uploads');
+          const secureUploadsPath = path.join(secureUploadsDir, filename);
+          
+          // Tentar também em uploads (fallback)
+          const uploadsDir = path.join(process.cwd(), 'uploads');
+          const uploadsPath = path.join(uploadsDir, filename);
+          
+          if (fs.existsSync(secureUploadsPath)) {
+            try {
+              videoBuffer = fs.readFileSync(secureUploadsPath);
+              logger.info(`[Baileys] ✅ Video file found locally in secure-uploads: ${filename} (${videoBuffer.length} bytes)`);
+            } catch (fileError) {
+              logger.error(`[Baileys] ❌ Failed to read video file from secure-uploads:`, fileError);
+              videoBuffer = null;
+            }
+          } else if (fs.existsSync(uploadsPath)) {
+            try {
+              videoBuffer = fs.readFileSync(uploadsPath);
+              logger.info(`[Baileys] ✅ Video file found locally in uploads: ${filename} (${videoBuffer.length} bytes)`);
+            } catch (fileError) {
+              logger.error(`[Baileys] ❌ Failed to read video file from uploads:`, fileError);
+              videoBuffer = null;
+            }
+          } else {
+            logger.warn(`[Baileys] ⚠️ Video file not found locally: ${filename}`);
+          }
+          
+          // ✅ Converter URL relativa para absoluta (necessário para Baileys baixar)
+          if (!videoUrl.startsWith('http://') && !videoUrl.startsWith('https://')) {
+            const baseUrl = process.env.API_BASE_URL || process.env.RAILWAY_PUBLIC_DOMAIN || 'http://localhost:3000';
+            videoUrl = videoUrl.startsWith('/') 
+              ? `${baseUrl}${videoUrl}` 
+              : `${baseUrl}/${videoUrl}`;
+            logger.info(`[Baileys] Converted relative video URL to absolute: ${videoUrl}`);
+          }
+        }
+        
+        // ✅ Estratégia: Tentar buffer primeiro (mais eficiente), senão usar URL pública
+        // Baseado na documentação do Baileys: https://baileys.wiki/docs/sending-messages/
+        if (videoBuffer) {
+          // ✅ Enviar como buffer (mais eficiente e confiável)
+          messageContent = caption && caption.trim()
+            ? { video: videoBuffer, caption }
+            : { video: videoBuffer };
+          logger.info(`[Baileys] ✅ Using video buffer (size: ${videoBuffer.length} bytes)`);
+        } else {
+          // ✅ Usar URL pública (deve ser absoluta e acessível)
+          messageContent = caption && caption.trim()
+            ? { video: { url: videoUrl }, caption }
+            : { video: { url: videoUrl } };
+          logger.info(`[Baileys] ✅ Using video URL: ${videoUrl}`);
+        }
       } else if (messageType === 'document') {
         const { url, caption } = content as { url: string; caption?: string };
-        // Para documentos, extrair nome do arquivo da URL ou usar padrão, mas não usar caption como fileName
-        const fileName = url.split('/').pop()?.split('?')[0] || 'document';
-        // Só passar caption se houver conteúdo real
-        messageContent = caption && caption.trim()
-          ? { document: { url }, fileName, caption }
-          : { document: { url }, fileName };
+        
+        // ✅ Converter URL relativa para absoluta se necessário
+        let documentUrl = url;
+        let documentBuffer: Buffer | null = null;
+        let filename: string | null = null;
+        
+        // Para documentos, extrair nome do arquivo da URL ou usar padrão
+        const fileName = documentUrl.split('/').pop()?.split('?')[0] || 'document';
+        filename = fileName !== 'document' ? fileName : null;
+        
+        // Extrair filename da URL
+        if (!documentUrl.startsWith('http://') && !documentUrl.startsWith('https://')) {
+          // URL relativa - extrair filename
+          filename = documentUrl.split('/').pop()?.split('?')[0] || null;
+        } else {
+          // URL absoluta - extrair filename
+          const urlParts = documentUrl.split('/');
+          filename = urlParts[urlParts.length - 1]?.split('?')[0] || null;
+        }
+        
+        // ✅ Tentar ler arquivo localmente para enviar como buffer (mais eficiente)
+        if (filename) {
+          // Tentar primeiro em secure-uploads (diretório usado pelo upload controller)
+          const secureUploadsDir = path.join(process.cwd(), 'secure-uploads');
+          const secureUploadsPath = path.join(secureUploadsDir, filename);
+          
+          // Tentar também em uploads (fallback)
+          const uploadsDir = path.join(process.cwd(), 'uploads');
+          const uploadsPath = path.join(uploadsDir, filename);
+          
+          if (fs.existsSync(secureUploadsPath)) {
+            try {
+              documentBuffer = fs.readFileSync(secureUploadsPath);
+              logger.info(`[Baileys] ✅ Document file found locally in secure-uploads: ${filename} (${documentBuffer.length} bytes)`);
+            } catch (fileError) {
+              logger.error(`[Baileys] ❌ Failed to read document file from secure-uploads:`, fileError);
+              documentBuffer = null;
+            }
+          } else if (fs.existsSync(uploadsPath)) {
+            try {
+              documentBuffer = fs.readFileSync(uploadsPath);
+              logger.info(`[Baileys] ✅ Document file found locally in uploads: ${filename} (${documentBuffer.length} bytes)`);
+            } catch (fileError) {
+              logger.error(`[Baileys] ❌ Failed to read document file from uploads:`, fileError);
+              documentBuffer = null;
+            }
+          } else {
+            logger.warn(`[Baileys] ⚠️ Document file not found locally: ${filename}`);
+          }
+          
+          // ✅ Converter URL relativa para absoluta (necessário para Baileys baixar)
+          if (!documentUrl.startsWith('http://') && !documentUrl.startsWith('https://')) {
+            const baseUrl = process.env.API_BASE_URL || process.env.RAILWAY_PUBLIC_DOMAIN || 'http://localhost:3000';
+            documentUrl = documentUrl.startsWith('/') 
+              ? `${baseUrl}${documentUrl}` 
+              : `${baseUrl}/${documentUrl}`;
+            logger.info(`[Baileys] Converted relative document URL to absolute: ${documentUrl}`);
+          }
+        }
+        
+        // ✅ Estratégia: Tentar buffer primeiro (mais eficiente), senão usar URL pública
+        // Baseado na documentação do Baileys: https://baileys.wiki/docs/sending-messages/
+        const finalFileName = filename || 'document';
+        if (documentBuffer) {
+          // ✅ Enviar como buffer (mais eficiente e confiável)
+          messageContent = caption && caption.trim()
+            ? { document: documentBuffer, fileName: finalFileName, caption }
+            : { document: documentBuffer, fileName: finalFileName };
+          logger.info(`[Baileys] ✅ Using document buffer (size: ${documentBuffer.length} bytes, fileName: ${finalFileName})`);
+        } else {
+          // ✅ Usar URL pública (deve ser absoluta e acessível)
+          messageContent = caption && caption.trim()
+            ? { document: { url: documentUrl }, fileName: finalFileName, caption }
+            : { document: { url: documentUrl }, fileName: finalFileName };
+          logger.info(`[Baileys] ✅ Using document URL: ${documentUrl} (fileName: ${finalFileName})`);
+        }
       }
 
       logger.info(`[Baileys] Attempting to send message to ${jid}, type: ${messageType}`);
