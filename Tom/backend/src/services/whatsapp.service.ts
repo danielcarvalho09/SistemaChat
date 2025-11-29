@@ -2,6 +2,7 @@ import { getPrismaClient } from '../config/database.js';
 import { baileysManager, ClientCreationInProgressError } from '../whatsapp/baileys.manager.js';
 import { logger } from '../config/logger.js';
 import { NotFoundError, ConflictError } from '../middlewares/error.middleware.js';
+import { BufferJSON } from '@whiskeysockets/baileys';
 
 /**
  * Serviço de gerenciamento de conexões WhatsApp
@@ -148,6 +149,7 @@ export class WhatsAppService {
     try {
       const connection = await this.prisma.whatsAppConnection.findUnique({
         where: { id: connectionId },
+        select: { id: true, authData: true, status: true },
       });
 
       if (!connection) {
@@ -165,6 +167,53 @@ export class WhatsAppService {
         };
       }
 
+      // ✅ Verificar se há credenciais válidas ANTES de tentar conectar
+      // Se tiver credenciais válidas e estiver desconectada, usar reconexão automática
+      let hasValidCredentials = false;
+      if (connection.authData && connection.authData !== null && connection.authData !== '') {
+        try {
+          const authDataString = connection.authData as string;
+          if (authDataString.trim() !== '') {
+            const authData = JSON.parse(authDataString, BufferJSON.reviver);
+            // ✅ Credenciais válidas = têm creds.me.id (já conectou antes)
+            hasValidCredentials = !!(authData.creds && authData.creds.me && authData.creds.me.id);
+            
+            if (hasValidCredentials) {
+              const meId = authData.creds.me.id;
+              logger.info(`[WhatsApp] ✅ Credenciais VÁLIDAS encontradas para ${connectionId} (me.id: ${meId})`);
+              logger.info(`[WhatsApp] 💡 Conexão já foi conectada antes - usando reconexão automática sem QR code`);
+            } else {
+              logger.info(`[WhatsApp] ⚠️ AuthData existe mas credenciais são INVÁLIDAS para ${connectionId} (sem creds.me.id)`);
+              logger.info(`[WhatsApp] 💡 QR code será gerado`);
+            }
+          }
+        } catch (parseError) {
+          logger.warn(`[WhatsApp] ⚠️ Erro ao verificar credenciais para ${connectionId}:`, parseError);
+        }
+      }
+
+      // ✅ Se tem credenciais válidas e está desconectada, usar reconexão automática
+      if (hasValidCredentials && (connection.status === 'disconnected' || !connection.status)) {
+        logger.info(`[WhatsApp] 🔄 Conexão ${connectionId} tem credenciais válidas - usando reconexão automática...`);
+        
+        try {
+          const reconnectResult = await baileysManager.manualReconnect(connectionId);
+          logger.info(`[WhatsApp] ✅ Reconexão automática iniciada para ${connectionId}: ${reconnectResult.status}`);
+          
+          return {
+            connectionId,
+            status: reconnectResult.status,
+            qrCode: undefined, // Não precisa de QR code se tem credenciais
+            message: reconnectResult.message || 'Reconectando usando credenciais guardadas...',
+          };
+        } catch (reconnectError) {
+          logger.error(`[WhatsApp] ❌ Erro na reconexão automática para ${connectionId}:`, reconnectError);
+          // Se falhar a reconexão, tentar criar cliente normalmente (vai gerar QR code)
+          logger.info(`[WhatsApp] 🔄 Tentando criar cliente normalmente (vai gerar QR code)...`);
+        }
+      }
+
+      // Se não tem credenciais válidas ou reconexão falhou, criar cliente normalmente
       // Criar cliente Baileys (QR Code será emitido via Socket.IO)
       logger.info(`[WhatsApp] Connecting ${connectionId}...`);
       
