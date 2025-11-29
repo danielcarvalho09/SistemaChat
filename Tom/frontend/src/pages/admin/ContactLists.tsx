@@ -241,7 +241,7 @@ export function ContactLists() {
       if (invalid.length > 0) {
         toast.success(`${response.data.message}. ${invalid.length} número(s) inválido(s) foram ignorados.`);
       } else {
-        toast.success(response.data.message);
+      toast.success(response.data.message);
       }
       
       setShowImportModal(false);

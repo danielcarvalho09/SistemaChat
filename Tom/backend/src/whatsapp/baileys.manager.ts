@@ -119,7 +119,7 @@ class BaileysManager {
           this.reconnectionLocks.delete(connectionId);
         } else {
           logger.warn(`[Baileys] ⚠️ Client ${connectionId} is already being created/reconnected (lock age: ${Math.round(lockAge / 1000)}s), skipping...`);
-          throw new ClientCreationInProgressError(connectionId);
+        throw new ClientCreationInProgressError(connectionId);
         }
       }
 
@@ -242,7 +242,7 @@ class BaileysManager {
           await this.handleHistoryContacts(connectionId, contacts);
         }
         
-        // Processar mensagens do histórico
+          // Processar mensagens do histórico
         if (messages && messages.length > 0) {
           await this.handleIncomingMessages(connectionId, {
             messages,
@@ -383,8 +383,8 @@ class BaileysManager {
                 logger.warn(`[Baileys] ⚠️ Legacy auth data exists but is invalid for ${connectionId}, creating new credentials`);
                 creds = initAuthCreds();
               } else {
-                creds = authData.creds;
-                keys = authData.keys || {};
+        creds = authData.creds;
+        keys = authData.keys || {};
                 const meId = creds.me?.id || 'N/A';
                 logger.info(`[Baileys] ✅ Loaded legacy encrypted auth for ${connectionId} (will save unencrypted)`);
                 logger.debug(`[Baileys] 📋 Legacy credentials loaded - me.id: ${meId}`);
@@ -853,8 +853,8 @@ class BaileysManager {
           // Aguardar timeout do circuit breaker antes de resetar credenciais
           setTimeout(async () => {
             try {
-              logger.info(`[Baileys] 🔄 Circuit breaker timeout expired for ${connectionId}, resetting credentials...`);
-              await this.handleSessionInvalidation(connectionId, 'bad_session', lastDisconnect?.error);
+            logger.info(`[Baileys] 🔄 Circuit breaker timeout expired for ${connectionId}, resetting credentials...`);
+            await this.handleSessionInvalidation(connectionId, 'bad_session', lastDisconnect?.error);
             } catch (error) {
               logger.error(`[Baileys] ❌ Erro ao resetar credenciais após circuit breaker timeout:`, error);
             }
@@ -889,10 +889,10 @@ class BaileysManager {
         // Aguardar 30 segundos antes de tentar reconectar (evitar múltiplas tentativas)
         setTimeout(async () => {
           try {
-            const shouldReconnect = this.shouldAttemptReconnection(connectionId, statusCode);
-            if (shouldReconnect) {
-              logger.info(`[Baileys] 🔄 Auto-reconnecting ${connectionId} after 503 error...`);
-              await this.attemptReconnection(connectionId);
+          const shouldReconnect = this.shouldAttemptReconnection(connectionId, statusCode);
+          if (shouldReconnect) {
+            logger.info(`[Baileys] 🔄 Auto-reconnecting ${connectionId} after 503 error...`);
+            await this.attemptReconnection(connectionId);
             }
           } catch (error) {
             logger.error(`[Baileys] ❌ Erro ao reconectar após erro 503:`, error);
@@ -1065,7 +1065,7 @@ class BaileysManager {
       logger.info(`[Baileys] 🔗 Connection ID: ${connectionId}`);
       logger.info(`[Baileys] 📊 Type: ${type || 'notify'}`);
       logger.info(`[Baileys] 📊 Count: ${messages?.length || 0}`);
-      
+
       // ✅ Verificar se cliente ainda existe e está conectado
       const client = this.clients.get(connectionId);
       if (!client) {
@@ -1218,7 +1218,7 @@ class BaileysManager {
         const isFromMe = msg.key.fromMe || false;
         const externalId = msg.key.id;
         const pushName = msg.pushName || null;
-        
+
         // ✅ Capturar participante em grupos (quem enviou a mensagem dentro do grupo)
         const isGroup = from?.endsWith('@g.us') || false;
         const participant = msg.key.participant || null; // JID do participante que enviou (em grupos)
@@ -1960,7 +1960,7 @@ class BaileysManager {
         this.reconnectionLocks.delete(connectionId);
       } else {
         logger.info(`[Baileys] ⏭️ Skipping reconnection for ${connectionId}: Already reconnecting (lock age: ${Math.round(lockAge / 1000)}s)`);
-        return;
+      return;
       }
     }
 
@@ -2881,7 +2881,7 @@ class BaileysManager {
       } else {
         // Não logar warning para status 'connecting' ou 'qr' - são estados normais
         if (currentClient.status !== 'connecting' && currentClient.status !== 'qr') {
-          logger.warn(`[Baileys] ⚠️ Connection ${connectionId} is ${currentClient.status}, not connected!`);
+        logger.warn(`[Baileys] ⚠️ Connection ${connectionId} is ${currentClient.status}, not connected!`);
         }
         
         // Se está desconectado mas tem credenciais, tentar reconectar
@@ -3280,11 +3280,11 @@ class BaileysManager {
         this.reconnectionLocks.delete(connectionId);
       } else {
         logger.info(`[Baileys] 🔁 Manual reconnect for ${connectionId} ignored - reconnection already in progress (lock age: ${Math.round(lockAge / 1000)}s).`);
-        return {
-          status: 'already_reconnecting',
-          message: 'Já existe um processo de reconexão em andamento.',
-        };
-      }
+      return {
+        status: 'already_reconnecting',
+        message: 'Já existe um processo de reconexão em andamento.',
+      };
+    }
     }
 
     // Se não há cliente, criar novo
@@ -3359,13 +3359,13 @@ class BaileysManager {
 
     return hasCredentialsInDB
       ? {
-          status: 'reconnecting',
+      status: 'reconnecting',
           message: 'Reconectando com credenciais existentes...',
         }
       : {
           status: 'awaiting_qr',
           message: 'Aguardando QR code...',
-        };
+    };
   }
 
   /**
