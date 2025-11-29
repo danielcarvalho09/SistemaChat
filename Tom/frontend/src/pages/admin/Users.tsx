@@ -37,7 +37,9 @@ export function Users() {
   const [departments, setDepartments] = useState<Department[]>([]);
   const [userDepartments, setUserDepartments] = useState<string[]>([]);
   const [showCreateModal, setShowCreateModal] = useState(false);
-  const [newUser, setNewUser] = useState({ name: '', email: '', password: '', role: 'user' as 'admin' | 'user', connectionId: '' });
+  const [newUser, setNewUser] = useState({ name: '', email: '', password: '', role: 'user' as 'admin' | 'user' | 'gerente', connectionId: '' });
+  const [showRoleModal, setShowRoleModal] = useState(false);
+  const [selectedUserForRole, setSelectedUserForRole] = useState<User | null>(null);
   const [showEditModal, setShowEditModal] = useState(false);
   const [editingUser, setEditingUser] = useState<{ id: string; name: string } | null>(null);
   const [showConnectionsModal, setShowConnectionsModal] = useState(false);
@@ -143,14 +145,28 @@ export function Users() {
     }
   };
 
-  const handleToggleRole = async (userId: string, currentRole: string) => {
-    const newRole = currentRole === 'admin' ? 'user' : 'admin';
-    const confirmMsg = `Tem certeza que deseja tornar este usuário ${newRole === 'admin' ? 'ADMIN' : 'USER'}?`;
+  const handleManageRole = async (user: User) => {
+    setSelectedUserForRole(user);
+    setShowRoleModal(true);
+  };
+
+  const handleUpdateRole = async (role: 'admin' | 'user' | 'gerente') => {
+    if (!selectedUserForRole) return;
+    
+    const roleNames = {
+      admin: 'ADMINISTRADOR',
+      user: 'USUÁRIO',
+      gerente: 'GERENTE'
+    };
+    
+    const confirmMsg = `Tem certeza que deseja tornar este usuário ${roleNames[role]}?`;
     
     if (!confirm(confirmMsg)) return;
     
     try {
-      await api.patch(`/users/${userId}/role`, { role: newRole });
+      await api.patch(`/users/${selectedUserForRole.id}/role`, { role });
+      setShowRoleModal(false);
+      setSelectedUserForRole(null);
       fetchUsers();
     } catch (error) {
       console.error('Erro ao atualizar role:', error);
@@ -363,14 +379,10 @@ export function Users() {
                         <Button
                           variant="ghost"
                           size="sm"
-                          onClick={() => handleToggleRole(user.id, user.roles[0]?.name || 'user')}
-                          title={user.roles[0]?.name === 'admin' ? 'Tornar User' : 'Tornar Admin'}
+                          onClick={() => handleManageRole(user)}
+                          title="Gerenciar Role"
                         >
-                          {user.roles[0]?.name === 'admin' ? (
-                            <ShieldOff className="w-4 h-4 text-orange-500" />
-                          ) : (
-                            <Shield className="w-4 h-4 text-blue-500" />
-                          )}
+                          <Shield className="w-4 h-4 text-blue-500" />
                         </Button>
                         <Button
                           variant="ghost"
@@ -529,10 +541,11 @@ export function Users() {
                 <label className="block text-sm font-medium text-gray-700 mb-2">Permissão</label>
                 <select
                   value={newUser.role}
-                  onChange={(e) => setNewUser({ ...newUser, role: e.target.value as 'admin' | 'user' })}
+                  onChange={(e) => setNewUser({ ...newUser, role: e.target.value as 'admin' | 'user' | 'gerente' })}
                   className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500"
                 >
                   <option value="user">Usuário</option>
+                  <option value="gerente">Gerente</option>
                   <option value="admin">Administrador</option>
                 </select>
               </div>
@@ -706,6 +719,74 @@ export function Users() {
               >
                 Concluído
               </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Gerenciamento de Role */}
+      {showRoleModal && selectedUserForRole && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="bg-white rounded-lg shadow-xl p-6 max-w-md w-full mx-4">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-bold">Gerenciar Role</h2>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setShowRoleModal(false);
+                  setSelectedUserForRole(null);
+                }}
+              >
+                <X className="w-5 h-5" />
+              </Button>
+            </div>
+            
+            <div className="mb-4">
+              <p className="text-sm text-gray-600">
+                Usuário: <span className="font-semibold">{selectedUserForRole.name}</span>
+              </p>
+              <p className="text-xs text-gray-500 mt-1">
+                Role atual: <span className="font-semibold">{selectedUserForRole.roles[0]?.name || 'user'}</span>
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <button
+                onClick={() => handleUpdateRole('admin')}
+                className={`w-full text-left px-4 py-3 rounded-lg border-2 transition-all ${
+                  selectedUserForRole.roles[0]?.name === 'admin'
+                    ? 'border-blue-500 bg-blue-50'
+                    : 'border-gray-200 hover:border-blue-300 hover:bg-blue-50'
+                }`}
+              >
+                <div className="font-semibold text-gray-900">Administrador</div>
+                <div className="text-xs text-gray-500 mt-1">Acesso completo a todas as funcionalidades</div>
+              </button>
+
+              <button
+                onClick={() => handleUpdateRole('gerente')}
+                className={`w-full text-left px-4 py-3 rounded-lg border-2 transition-all ${
+                  selectedUserForRole.roles[0]?.name === 'gerente'
+                    ? 'border-purple-500 bg-purple-50'
+                    : 'border-gray-200 hover:border-purple-300 hover:bg-purple-50'
+                }`}
+              >
+                <div className="font-semibold text-gray-900">Gerente</div>
+                <div className="text-xs text-gray-500 mt-1">Acesso a disparo de mensagens, listas de contatos e configurações</div>
+              </button>
+
+              <button
+                onClick={() => handleUpdateRole('user')}
+                className={`w-full text-left px-4 py-3 rounded-lg border-2 transition-all ${
+                  selectedUserForRole.roles[0]?.name === 'user'
+                    ? 'border-green-500 bg-green-50'
+                    : 'border-gray-200 hover:border-green-300 hover:bg-green-50'
+                }`}
+              >
+                <div className="font-semibold text-gray-900">Usuário</div>
+                <div className="text-xs text-gray-500 mt-1">Acesso básico ao sistema de atendimento</div>
+              </button>
             </div>
           </div>
         </div>

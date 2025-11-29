@@ -33,7 +33,7 @@ export class UserController {
    */
   createUser = async (request: FastifyRequest, reply: FastifyReply) => {
     try {
-      const data = request.body as { email: string; password: string; name: string; role?: 'admin' | 'user' };
+      const data = request.body as { email: string; password: string; name: string; role?: 'admin' | 'user' | 'gerente' };
       
       // Validação básica
       if (!data.email || !data.password || !data.name) {
@@ -206,11 +206,11 @@ export class UserController {
    * Atualiza role do usuário (admin ou user)
    */
   updateUserRole = async (
-    request: FastifyRequest<{ Params: { userId: string }; Body: { role: 'admin' | 'user' } }>,
+    request: FastifyRequest<{ Params: { userId: string }; Body: { role: 'admin' | 'user' | 'gerente' } }>,
     reply: FastifyReply
   ) => {
     const { userId } = request.params;
-    const { role } = request.body as { role: 'admin' | 'user' };
+    const { role } = request.body as { role: 'admin' | 'user' | 'gerente' };
 
     await this.userService.updateUserRole(userId, role);
 

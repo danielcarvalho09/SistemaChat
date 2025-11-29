@@ -616,6 +616,8 @@ export class MessageService {
         
         userDepartmentId = sortedDepartments[0].departmentId;
         logger.info(`[MessageService] 📍 Found department for connection user: ${userDepartmentId} (user: ${connection.user?.name || 'N/A'}, primary: ${sortedDepartments[0].department.isPrimary})`);
+      } else {
+        logger.warn(`[MessageService] ⚠️ Connection ${connectionId} user (${connection?.user?.name || 'N/A'}) has no departments assigned. Conversation will be created without department.`);
       }
 
       if (!conversation) {
@@ -645,13 +647,16 @@ export class MessageService {
         logger.info(`✅ New conversation created: ${conversation.id} in department: ${userDepartmentId || 'None'} (status: waiting, user: ${connection.user?.name || 'N/A'})`);
       } else {
         // ✅ ATUALIZAR: Se conversa existe mas não tem setor, atribuir do usuário da conexão
-        if (!conversation.departmentId && userDepartmentId) {
-          logger.info(`[MessageService] 📍 Updating conversation ${conversation.id}: assigning department ${userDepartmentId} from connection user`);
+        // OU se o setor mudou (usuário foi movido para outro setor)
+        if (userDepartmentId && (!conversation.departmentId || conversation.departmentId !== userDepartmentId)) {
+          logger.info(`[MessageService] 📍 Updating conversation ${conversation.id}: assigning/updating department ${userDepartmentId} from connection user`);
           await this.prisma.conversation.update({
             where: { id: conversation.id },
             data: { departmentId: userDepartmentId },
           });
           conversation.departmentId = userDepartmentId; // Atualizar objeto em memória
+        } else if (!userDepartmentId && !conversation.departmentId) {
+          logger.warn(`[MessageService] ⚠️ Conversation ${conversation.id} has no department and connection user has no departments assigned.`);
         }
       }
 

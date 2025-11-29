@@ -82,7 +82,7 @@ export class UserService {
     email: string;
     password: string;
     name: string;
-    role?: 'admin' | 'user';
+    role?: 'admin' | 'user' | 'gerente';
   }): Promise<UserResponse> {
     try {
       logger.info(`Creating user: ${data.email} with role ${data.role || 'user'}`);
@@ -286,7 +286,7 @@ export class UserService {
   /**
    * Atualiza role do usuário (troca entre admin e user)
    */
-  async updateUserRole(userId: string, roleName: 'admin' | 'user'): Promise<void> {
+  async updateUserRole(userId: string, roleName: 'admin' | 'user' | 'gerente'): Promise<void> {
     // Buscar role pelo nome
     const newRole = await this.prisma.role.findUnique({
       where: { name: roleName },
