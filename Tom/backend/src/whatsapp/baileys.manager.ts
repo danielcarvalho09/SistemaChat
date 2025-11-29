@@ -2199,6 +2199,12 @@ class BaileysManager {
       } else if (messageType === 'image') {
         const { url, caption } = content as { url: string; caption?: string };
         
+        logger.info(`[Baileys] 🖼️ Starting image message processing:`, {
+          url,
+          caption: caption || 'none',
+          urlType: url?.startsWith('http://') || url?.startsWith('https://') ? 'absolute' : 'relative',
+        });
+        
         // ✅ Converter URL relativa para absoluta se necessário
         let imageUrl = url;
         let imageBuffer: Buffer | null = null;
@@ -2261,13 +2267,25 @@ class BaileysManager {
           messageContent = caption && caption.trim() 
             ? { image: imageBuffer, caption }
             : { image: imageBuffer };
-          logger.info(`[Baileys] ✅ Using image buffer (size: ${imageBuffer.length} bytes)`);
+          logger.info(`[Baileys] ✅ Using image buffer (size: ${imageBuffer.length} bytes, caption: ${caption ? 'yes' : 'no'})`);
         } else {
           // ✅ Usar URL pública (deve ser absoluta e acessível)
+          logger.info(`[Baileys] 📤 Preparing to send image with URL: ${imageUrl}`);
+          logger.info(`[Baileys] 📤 URL is absolute: ${imageUrl.startsWith('http://') || imageUrl.startsWith('https://')}`);
+          
+          try {
+            // Verificar se a URL é acessível antes de enviar
+            const urlObj = new URL(imageUrl);
+            logger.info(`[Baileys] ✅ URL is valid: ${urlObj.href}`);
+          } catch (urlError: any) {
+            logger.error(`[Baileys] ❌ Invalid URL format: ${imageUrl}`, urlError);
+            throw new Error(`Invalid image URL format: ${imageUrl}`);
+          }
+          
           messageContent = caption && caption.trim() 
             ? { image: { url: imageUrl }, caption }
             : { image: { url: imageUrl } };
-          logger.info(`[Baileys] ✅ Using image URL: ${imageUrl}`);
+          logger.info(`[Baileys] ✅ Using image URL (caption: ${caption ? 'yes' : 'no'}): ${imageUrl}`);
         }
       } else if (messageType === 'audio') {
         const { url } = content as { url: string };

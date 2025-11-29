@@ -329,8 +329,11 @@ export class UploadController {
             const filepath = path.join(this.uploadsDir, uniqueName);
             savedPath = filepath;
             fs.writeFileSync(filepath, buffer, { mode: 0o600 });
-            fileUrl = `/secure-uploads/${uniqueName}`;
-            logger.info('[UploadController] ✅ File saved to local storage');
+            
+            // ✅ Converter URL relativa para absoluta desde o início
+            const baseUrl = process.env.API_BASE_URL || process.env.RAILWAY_PUBLIC_DOMAIN || 'http://localhost:3000';
+            fileUrl = `${baseUrl}/secure-uploads/${uniqueName}`;
+            logger.info('[UploadController] ✅ File saved to local storage with absolute URL:', fileUrl);
           }
         } else {
           logger.info('[UploadController] 📤 Uploading to local storage (Supabase not configured)...');
@@ -343,8 +346,11 @@ export class UploadController {
           }
           
           fs.writeFileSync(filepath, buffer, { mode: 0o600 });
-          fileUrl = `/secure-uploads/${uniqueName}`;
-          logger.info('[UploadController] ✅ File saved to local storage');
+          
+          // ✅ Converter URL relativa para absoluta desde o início
+          const baseUrl = process.env.API_BASE_URL || process.env.RAILWAY_PUBLIC_DOMAIN || 'http://localhost:3000';
+          fileUrl = `${baseUrl}/secure-uploads/${uniqueName}`;
+          logger.info('[UploadController] ✅ File saved to local storage with absolute URL:', fileUrl);
         }
       } catch (uploadError: any) {
         logger.error('[UploadController] ❌ Error during file upload/save:', uploadError);
