@@ -443,7 +443,7 @@ export class ConversationService {
       include: { department: true },
     });
 
-    const targetDepartmentId = toUserDepartment?.departmentId || toDepartmentId || conversation.departmentId;
+    const targetDepartmentId = toUserDepartment?.departmentId || conversation.departmentId;
 
     // Criar registro de transferência
     await this.prisma.conversationTransfer.create({
