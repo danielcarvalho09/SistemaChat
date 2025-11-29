@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react';
-import { X, Building, User, ChevronLeft } from 'lucide-react';
+import { X, Building, User, ChevronDown } from 'lucide-react';
 import { Button } from '../ui/button';
-import { Input } from '../ui/input';
 import { api } from '../../lib/axios';
 
 interface TransferModalProps {
@@ -28,8 +27,7 @@ export function TransferModal({ conversationId, onClose, onTransfer }: TransferM
   const [users, setUsers] = useState<User[]>([]);
   const [selectedDepartmentId, setSelectedDepartmentId] = useState('');
   const [selectedUserId, setSelectedUserId] = useState('');
-  const [step, setStep] = useState<'department' | 'user'>('department');
-  const [reason, setReason] = useState('');
+  const [showUserDropdown, setShowUserDropdown] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [isLoadingUsers, setIsLoadingUsers] = useState(false);
 
@@ -38,10 +36,15 @@ export function TransferModal({ conversationId, onClose, onTransfer }: TransferM
   }, []);
 
   useEffect(() => {
-    if (selectedDepartmentId && step === 'user') {
+    if (selectedDepartmentId) {
       fetchDepartmentUsers(selectedDepartmentId);
+      setShowUserDropdown(true);
+    } else {
+      setUsers([]);
+      setSelectedUserId('');
+      setShowUserDropdown(false);
     }
-  }, [selectedDepartmentId, step]);
+  }, [selectedDepartmentId]);
 
   const fetchDepartments = async () => {
     try {
@@ -65,19 +68,6 @@ export function TransferModal({ conversationId, onClose, onTransfer }: TransferM
     }
   };
 
-  const handleDepartmentSelect = () => {
-    if (!selectedDepartmentId) {
-      alert('Por favor, selecione um departamento.');
-      return;
-    }
-    setStep('user');
-  };
-
-  const handleBack = () => {
-    setStep('department');
-    setSelectedUserId('');
-  };
-
   const handleTransfer = async () => {
     // Validar se usuário foi selecionado
     if (!selectedUserId) {
@@ -86,12 +76,9 @@ export function TransferModal({ conversationId, onClose, onTransfer }: TransferM
     }
 
     // Montar body com usuário específico
-    const body: any = {
+    const body = {
       toUserId: selectedUserId,
     };
-    if (reason) {
-      body.reason = reason;
-    }
 
     console.log('📤 Body que será enviado:', body);
 
@@ -121,16 +108,7 @@ export function TransferModal({ conversationId, onClose, onTransfer }: TransferM
       <div className="bg-white rounded-lg shadow-xl w-full max-w-md mx-4">
         {/* Header */}
         <div className="flex items-center justify-between p-4 border-b border-gray-200">
-          <div className="flex items-center gap-2">
-            {step === 'user' && (
-              <Button variant="ghost" size="sm" onClick={handleBack}>
-                <ChevronLeft className="w-5 h-5" />
-              </Button>
-            )}
-            <h2 className="text-lg font-semibold">
-              {step === 'department' ? 'Transferir Conversa' : 'Selecione o Usuário'}
-            </h2>
-          </div>
+          <h2 className="text-lg font-semibold">Transferir Conversa</h2>
           <Button variant="ghost" size="sm" onClick={onClose}>
             <X className="w-5 h-5" />
           </Button>
@@ -138,69 +116,54 @@ export function TransferModal({ conversationId, onClose, onTransfer }: TransferM
 
         {/* Content */}
         <div className="p-4 space-y-4">
-          {step === 'department' ? (
-            <>
-              {/* Info */}
-              <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
-                <div className="flex items-start gap-2">
-                  <Building className="w-5 h-5 text-blue-600 mt-0.5" />
-                  <div>
-                    <p className="text-sm font-medium text-blue-900">Selecione o Setor</p>
-                    <p className="text-xs text-blue-700 mt-1">
-                      Primeiro selecione o setor, depois escolha o usuário específico para transferir.
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              {/* Department Selection */}
+          {/* Info */}
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+            <div className="flex items-start gap-2">
+              <Building className="w-5 h-5 text-blue-600 mt-0.5" />
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Setor
-                </label>
-                <select
-                  value={selectedDepartmentId}
-                  onChange={(e) => setSelectedDepartmentId(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500"
-                >
-                  <option value="">Selecione um setor...</option>
-                  {departments.map((dept) => (
-                    <option key={dept.id} value={dept.id}>
-                      {dept.name}
-                    </option>
-                  ))}
-                </select>
+                <p className="text-sm font-medium text-blue-900">Selecione o Setor e Usuário</p>
+                <p className="text-xs text-blue-700 mt-1">
+                  Selecione o setor e depois escolha o usuário específico para transferir.
+                </p>
               </div>
-            </>
-          ) : (
-            <>
-              {/* Info */}
-              <div className="bg-green-50 border border-green-200 rounded-lg p-3">
-                <div className="flex items-start gap-2">
-                  <User className="w-5 h-5 text-green-600 mt-0.5" />
-                  <div>
-                    <p className="text-sm font-medium text-green-900">Selecione o Usuário</p>
-                    <p className="text-xs text-green-700 mt-1">
-                      A conversa será transferida apenas para o usuário selecionado e ficará visível para ele e administradores.
-                    </p>
-                  </div>
-                </div>
-              </div>
+            </div>
+          </div>
 
-              {/* User Selection */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Usuário do Setor
-                </label>
-                {isLoadingUsers ? (
-                  <div className="text-center py-4 text-gray-500">Carregando usuários...</div>
-                ) : users.length === 0 ? (
-                  <div className="text-center py-4 text-gray-500">Nenhum usuário encontrado neste setor.</div>
-                ) : (
+          {/* Department Selection */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Setor
+            </label>
+            <select
+              value={selectedDepartmentId}
+              onChange={(e) => setSelectedDepartmentId(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500"
+            >
+              <option value="">Selecione um setor...</option>
+              {departments.map((dept) => (
+                <option key={dept.id} value={dept.id}>
+                  {dept.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* User Selection - Aparece quando setor é selecionado */}
+          {showUserDropdown && selectedDepartmentId && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Usuário do Setor
+              </label>
+              {isLoadingUsers ? (
+                <div className="text-center py-4 text-gray-500">Carregando usuários...</div>
+              ) : users.length === 0 ? (
+                <div className="text-center py-4 text-gray-500">Nenhum usuário encontrado neste setor.</div>
+              ) : (
+                <div className="relative">
                   <select
                     value={selectedUserId}
                     onChange={(e) => setSelectedUserId(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 appearance-none bg-white"
                   >
                     <option value="">Selecione um usuário...</option>
                     {users.map((user) => (
@@ -209,22 +172,10 @@ export function TransferModal({ conversationId, onClose, onTransfer }: TransferM
                       </option>
                     ))}
                   </select>
-                )}
-              </div>
-
-              {/* Reason */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Motivo (opcional)
-                </label>
-                <Input
-                  type="text"
-                  placeholder="Digite o motivo da transferência..."
-                  value={reason}
-                  onChange={(e) => setReason(e.target.value)}
-                />
-              </div>
-            </>
+                  <ChevronDown className="absolute right-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400 pointer-events-none" />
+                </div>
+              )}
+            </div>
           )}
         </div>
 
@@ -233,23 +184,13 @@ export function TransferModal({ conversationId, onClose, onTransfer }: TransferM
           <Button variant="outline" onClick={onClose} className="flex-1">
             Cancelar
           </Button>
-          {step === 'department' ? (
-            <Button
-              onClick={handleDepartmentSelect}
-              disabled={!selectedDepartmentId}
-              className="flex-1 bg-[#008069] hover:bg-[#006d5b]"
-            >
-              Próximo
-            </Button>
-          ) : (
-            <Button
-              onClick={handleTransfer}
-              disabled={isLoading || !selectedUserId}
-              className="flex-1 bg-[#008069] hover:bg-[#006d5b]"
-            >
-              {isLoading ? 'Transferindo...' : 'Transferir'}
-            </Button>
-          )}
+          <Button
+            onClick={handleTransfer}
+            disabled={isLoading || !selectedUserId}
+            className="flex-1 bg-[#008069] hover:bg-[#006d5b]"
+          >
+            {isLoading ? 'Transferindo...' : 'Transferir'}
+          </Button>
         </div>
       </div>
     </div>

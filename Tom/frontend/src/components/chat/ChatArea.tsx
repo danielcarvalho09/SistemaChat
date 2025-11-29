@@ -247,17 +247,20 @@ export function ChatArea({ conversationId, onToggleDetails }: ChatAreaProps) {
         </div>
       </div>
 
-      {/* Messages Area */}
-      <div className="flex-1 overflow-y-auto p-4 whatsapp-bg-dark">
-        {/* Observation Card */}
-        {conversation?.internalNotes && (
+      {/* Observation Card - Logo abaixo do header */}
+      {conversation?.internalNotes && (
+        <div className="px-4 pt-3 pb-2 bg-[#0b141a] border-b border-[#2a3942]">
           <ObservationCard 
             observation={conversation.internalNotes}
             conversationId={conversationId}
             onUpdate={() => fetchConversations()}
             isHighlighted={highlightObservation}
           />
-        )}
+        </div>
+      )}
+
+      {/* Messages Area */}
+      <div className="flex-1 overflow-y-auto p-4 whatsapp-bg-dark">
         <MessageList
           messages={messages[conversationId] || []}
           onReply={(message) => setReplyingTo(message)}
