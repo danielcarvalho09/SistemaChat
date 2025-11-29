@@ -3189,7 +3189,8 @@ class BaileysManager {
     const client = this.clients.get(connectionId);
     if (!client) return;
 
-    // Heartbeat robusto a cada 45 segundos (mais frequente para manter conexão viva)
+    // Heartbeat robusto a cada 30 segundos (mais frequente para manter conexão viva e evitar timeout)
+    // Reduzido de 45s para 30s para garantir que WhatsApp sempre considere conexão ativa
     client.heartbeatInterval = setInterval(async () => {
       const currentClient = this.clients.get(connectionId);
       if (!currentClient) {
