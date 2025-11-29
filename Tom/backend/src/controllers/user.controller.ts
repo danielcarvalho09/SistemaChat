@@ -79,9 +79,13 @@ export class UserController {
       }
       
       if (error.message?.includes('Role') && error.message?.includes('not found')) {
+        // Extrair nome da role da mensagem de erro se possível
+        const roleMatch = error.message.match(/Role '(\w+)'/);
+        const roleName = roleMatch ? roleMatch[1] : 'specified';
+        
         return reply.status(400).send({
           success: false,
-          message: `Role "${data.role || 'user'}" not found. Please run the database migration to create all roles.`,
+          message: `Role "${roleName}" not found. Please run the database migration to create all roles.`,
           details: 'The required roles (admin/user/gerente) are not set up in the database.',
           action: 'Administrator should run the SQL migration: MIGRACAO_GERENTE_SUPABASE.sql',
         });
