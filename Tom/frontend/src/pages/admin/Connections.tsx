@@ -519,36 +519,37 @@ export function Connections() {
 
   return (
     <div className="flex flex-col h-screen bg-gray-50">
-      {/* Header */}
-      <div className="bg-white border-b border-gray-200 px-6 py-4">
-        <div className="flex items-center justify-between">
+      {/* Header - Responsivo */}
+      <div className="bg-white border-b border-gray-200 px-4 sm:px-6 py-4">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">Conexões WhatsApp</h1>
-            <p className="text-sm text-gray-500 mt-1">
+            <h1 className="text-xl sm:text-2xl font-bold text-gray-900">Conexões WhatsApp</h1>
+            <p className="text-xs sm:text-sm text-gray-500 mt-1">
               Gerencie suas conexões com o WhatsApp Business
             </p>
           </div>
           <Button 
-            className="bg-[#008069] hover:bg-[#006d5b]"
+            className="bg-[#008069] hover:bg-[#006d5b] w-full sm:w-auto"
             onClick={() => setShowAddModal(true)}
           >
             <Plus className="w-4 h-4 mr-2" />
-            Nova Conexão
+            <span className="hidden sm:inline">Nova Conexão</span>
+            <span className="sm:hidden">Nova</span>
           </Button>
         </div>
       </div>
 
-      {/* Content */}
-      <div className="flex-1 overflow-auto p-6">
+      {/* Content - Responsivo */}
+      <div className="flex-1 overflow-auto p-4 sm:p-6">
         {isLoading ? (
           <div className="flex items-center justify-center h-64">
             <div className="text-gray-500">Carregando...</div>
           </div>
         ) : connections.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-64">
+          <div className="flex flex-col items-center justify-center h-64 px-4">
             <div className="text-4xl mb-4">📱</div>
-            <div className="text-gray-500 mb-2">Nenhuma conexão configurada</div>
-            <p className="text-sm text-gray-400 mb-4">
+            <div className="text-gray-500 mb-2 text-center">Nenhuma conexão configurada</div>
+            <p className="text-sm text-gray-400 mb-4 text-center max-w-md">
               Adicione uma nova conexão para começar a usar o WhatsApp
             </p>
             <Button 
@@ -560,27 +561,27 @@ export function Connections() {
             </Button>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-6">
             {connections.map((connection) => (
               <div
                 key={connection.id}
-                className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 hover:shadow-md transition-shadow"
+                className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 sm:p-6 hover:shadow-md transition-shadow"
               >
-                {/* Header */}
-                <div className="flex items-start justify-between mb-4">
-                  <div className="flex items-center gap-3">
-                    <div className="w-12 h-12 rounded-full bg-gradient-to-br from-green-400 to-green-600 flex items-center justify-center text-white">
-                      <Smartphone className="w-6 h-6" />
+                {/* Header - Responsivo */}
+                <div className="flex items-start justify-between mb-3 sm:mb-4">
+                  <div className="flex items-center gap-2 sm:gap-3 flex-1 min-w-0">
+                    <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-gradient-to-br from-green-400 to-green-600 flex items-center justify-center text-white flex-shrink-0">
+                      <Smartphone className="w-5 h-5 sm:w-6 sm:h-6" />
                     </div>
-                    <div>
-                      <h3 className="text-lg font-semibold text-gray-900">{connection.name}</h3>
-                      <p className="text-sm text-gray-500">WhatsApp Business</p>
+                    <div className="min-w-0 flex-1">
+                      <h3 className="text-base sm:text-lg font-semibold text-gray-900 truncate">{connection.name}</h3>
+                      <p className="text-xs sm:text-sm text-gray-500 truncate">{connection.phoneNumber || 'WhatsApp Business'}</p>
                     </div>
                   </div>
                 </div>
 
                 {/* Status */}
-                <div className="mb-4">
+                <div className="mb-3 sm:mb-4">
                   <span
                     className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusColor(
                       connection.status
@@ -590,44 +591,48 @@ export function Connections() {
                   </span>
                 </div>
 
-                {/* Actions */}
-                <div className="flex gap-2 pt-4 border-t border-gray-100">
+                {/* Actions - Responsivo e Touch-Friendly */}
+                <div className="flex flex-wrap gap-2 pt-3 sm:pt-4 border-t border-gray-100">
                   {connection.status === 'disconnected' ? (
                     <Button
                       variant="outline"
                       size="sm"
                       onClick={() => handleConnect(connection.id)}
                       disabled={connectingConnections.current.has(connection.id) || connection.status === 'connecting'}
-                      className="flex-1"
+                      className="flex-1 min-w-[120px] h-9 sm:h-8 touch-manipulation"
                     >
-                      <QrCode className="w-4 h-4 mr-2" />
-                      {(connectingConnections.current.has(connection.id) || connection.status === 'connecting') ? 'Conectando...' : 'Conectar'}
+                      <QrCode className="w-4 h-4 mr-1 sm:mr-2" />
+                      <span className="text-xs sm:text-sm">
+                        {(connectingConnections.current.has(connection.id) || connection.status === 'connecting') ? 'Conectando...' : 'Conectar'}
+                      </span>
                     </Button>
                   ) : connection.status === 'connecting' ? (
                     <Button
                       variant="outline"
                       size="sm"
                       onClick={() => handleCancelConnection(connection.id)}
-                      className="flex-1 bg-red-50 hover:bg-red-100 text-red-700 border-red-300"
+                      className="flex-1 min-w-[120px] h-9 sm:h-8 bg-red-50 hover:bg-red-100 text-red-700 border-red-300 touch-manipulation"
                     >
-                      <Power className="w-4 h-4 mr-2" />
-                      Cancelar
+                      <Power className="w-4 h-4 mr-1 sm:mr-2" />
+                      <span className="text-xs sm:text-sm">Cancelar</span>
                     </Button>
                   ) : (
                     <Button
                       variant="outline"
                       size="sm"
                       onClick={() => handleDisconnect(connection.id)}
-                      className="flex-1"
+                      className="flex-1 min-w-[120px] h-9 sm:h-8 touch-manipulation"
                     >
-                      <Power className="w-4 h-4 mr-2" />
-                      Desconectar
+                      <Power className="w-4 h-4 mr-1 sm:mr-2" />
+                      <span className="text-xs sm:text-sm">Desconectar</span>
                     </Button>
                   )}
                   <Button
                     variant="outline"
                     size="sm"
                     onClick={() => handleEditClick(connection)}
+                    className="h-9 sm:h-8 w-9 sm:w-8 p-0 touch-manipulation"
+                    title="Editar"
                   >
                     <Edit className="w-4 h-4" />
                   </Button>
@@ -635,6 +640,8 @@ export function Connections() {
                     variant="outline"
                     size="sm"
                     onClick={() => fetchConnections()}
+                    className="h-9 sm:h-8 w-9 sm:w-8 p-0 touch-manipulation"
+                    title="Atualizar"
                   >
                     <RefreshCw className="w-4 h-4" />
                   </Button>
@@ -642,6 +649,8 @@ export function Connections() {
                     variant="outline"
                     size="sm"
                     onClick={() => handleDelete(connection.id)}
+                    className="h-9 sm:h-8 w-9 sm:w-8 p-0 touch-manipulation"
+                    title="Excluir"
                   >
                     <Trash2 className="w-4 h-4 text-red-500" />
                   </Button>
@@ -652,16 +661,17 @@ export function Connections() {
         )}
       </div>
 
-      {/* Add Connection Modal */}
+      {/* Add Connection Modal - Responsivo */}
       {showAddModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className="bg-white rounded-lg shadow-xl p-6 max-w-md w-full mx-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="bg-white rounded-lg shadow-xl p-4 sm:p-6 max-w-md w-full max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-bold">Nova Conexão WhatsApp</h2>
+              <h2 className="text-lg sm:text-xl font-bold">Nova Conexão WhatsApp</h2>
               <Button
                 variant="ghost"
                 size="sm"
                 onClick={() => setShowAddModal(false)}
+                className="touch-manipulation"
               >
                 <X className="w-5 h-5" />
               </Button>
@@ -679,6 +689,7 @@ export function Connections() {
                   onChange={(e) =>
                     setNewConnection({ ...newConnection, name: e.target.value })
                   }
+                  className="text-base sm:text-sm min-h-[44px] touch-manipulation"
                 />
               </div>
               
@@ -687,12 +698,14 @@ export function Connections() {
                   Número de Telefone
                 </label>
                 <Input
-                  type="text"
+                  type="tel"
                   placeholder="Ex: 5516992009906"
                   value={newConnection.phoneNumber}
                   onChange={(e) =>
                     setNewConnection({ ...newConnection, phoneNumber: e.target.value })
                   }
+                  className="text-base sm:text-sm min-h-[44px] touch-manipulation"
+                  inputMode="numeric"
                 />
                 <p className="text-xs text-gray-500 mt-1">
                   Apenas números (com código do país). Ex: 5516992009906
@@ -726,17 +739,17 @@ export function Connections() {
               </p>
             </div>
 
-            <div className="flex gap-2 mt-6">
+            <div className="flex flex-col sm:flex-row gap-2 mt-6">
               <Button
                 variant="outline"
                 onClick={() => setShowAddModal(false)}
-                className="flex-1"
+                className="flex-1 touch-manipulation"
               >
                 Cancelar
               </Button>
               <Button
                 onClick={handleAddConnection}
-                className="flex-1 bg-[#008069] hover:bg-[#006d5b]"
+                className="flex-1 bg-[#008069] hover:bg-[#006d5b] touch-manipulation"
               >
                 Adicionar
               </Button>
@@ -745,22 +758,23 @@ export function Connections() {
         </div>
       )}
 
-      {/* QR Code Modal */}
+      {/* QR Code Modal - Responsivo */}
       {showQRModal && selectedConnection && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className="bg-white rounded-lg shadow-xl p-6 max-w-md mx-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="bg-white rounded-lg shadow-xl p-4 sm:p-6 max-w-md w-full max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-bold">Escaneie o QR Code</h2>
+              <h2 className="text-lg sm:text-xl font-bold">Escaneie o QR Code</h2>
               <Button
                 variant="ghost"
                 size="sm"
                 onClick={() => setShowQRModal(false)}
+                className="touch-manipulation"
               >
                 <X className="w-5 h-5" />
               </Button>
             </div>
             
-            <div className="bg-white p-4 rounded-lg border-2 border-gray-200 mb-4 flex items-center justify-center">
+            <div className="bg-white p-2 sm:p-4 rounded-lg border-2 border-gray-200 mb-4 flex items-center justify-center">
               {/* ✅ Verificar se conexão ainda está em status que precisa de QR */}
               {(() => {
                 const connection = connections.find(c => c.id === selectedConnection.id);
@@ -785,7 +799,7 @@ export function Connections() {
                     <img
                       src={selectedConnection.qrCode}
                       alt="QR Code"
-                      className="w-64 h-64"
+                      className="w-full max-w-[256px] h-auto aspect-square"
                       onError={(e) => {
                         console.error('❌ Erro ao carregar imagem do QR Code');
                         // ✅ Prevenir recarregamento automático - esconder imagem e não tentar novamente
@@ -803,21 +817,21 @@ export function Connections() {
                 
                 // Se não tem QR code ainda, mostrar loading
                 return (
-                  <div className="w-64 h-64 flex items-center justify-center text-gray-400">
+                  <div className="w-full max-w-[256px] aspect-square flex items-center justify-center text-gray-400">
                     <div className="text-center">
                       <div className="text-4xl mb-2">⏳</div>
-                      <p>Gerando QR Code...</p>
+                      <p className="text-sm">Gerando QR Code...</p>
                     </div>
                   </div>
                 );
               })()}
             </div>
             
-            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
-              <p className="text-sm text-blue-900 font-medium mb-2">
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 sm:p-4 mb-4">
+              <p className="text-xs sm:text-sm text-blue-900 font-medium mb-2">
                 📱 Como conectar:
               </p>
-              <ol className="text-sm text-blue-800 space-y-1 list-decimal list-inside">
+              <ol className="text-xs sm:text-sm text-blue-800 space-y-1 list-decimal list-inside">
                 <li>Abra o WhatsApp no seu celular</li>
                 <li>Toque em Menu (⋮) ou Configurações</li>
                 <li>Toque em "Aparelhos conectados"</li>
@@ -826,7 +840,7 @@ export function Connections() {
               </ol>
             </div>
 
-            <div className="flex items-center justify-center gap-2 text-sm text-gray-600">
+            <div className="flex items-center justify-center gap-2 text-xs sm:text-sm text-gray-600">
               <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
               Aguardando escaneamento...
             </div>
@@ -834,16 +848,17 @@ export function Connections() {
         </div>
       )}
 
-      {/* Edit Connection Modal */}
+      {/* Edit Connection Modal - Responsivo */}
       {showEditModal && selectedConnection && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className="bg-white rounded-lg shadow-xl p-6 max-w-md w-full mx-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="bg-white rounded-lg shadow-xl p-4 sm:p-6 max-w-md w-full max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-bold">Editar Conexão</h2>
+              <h2 className="text-lg sm:text-xl font-bold">Editar Conexão</h2>
               <Button
                 variant="ghost"
                 size="sm"
                 onClick={() => setShowEditModal(false)}
+                className="touch-manipulation"
               >
                 <X className="w-5 h-5" />
               </Button>
@@ -861,6 +876,7 @@ export function Connections() {
                   onChange={(e) =>
                     setEditConnection({ ...editConnection, name: e.target.value })
                   }
+                  className="text-base sm:text-sm min-h-[44px] touch-manipulation"
                 />
               </div>
               
@@ -887,17 +903,17 @@ export function Connections() {
               </div>
             </div>
 
-            <div className="flex gap-2 mt-6">
+            <div className="flex flex-col sm:flex-row gap-2 mt-6">
               <Button
                 variant="outline"
                 onClick={() => setShowEditModal(false)}
-                className="flex-1"
+                className="flex-1 touch-manipulation"
               >
                 Cancelar
               </Button>
               <Button
                 onClick={handleUpdateConnection}
-                className="flex-1 bg-[#008069] hover:bg-[#006d5b]"
+                className="flex-1 bg-[#008069] hover:bg-[#006d5b] touch-manipulation"
               >
                 Salvar
               </Button>
