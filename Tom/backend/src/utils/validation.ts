@@ -6,8 +6,10 @@ export function validate<T extends z.ZodType>(schema: T, data: unknown): z.infer
     return schema.parse(data);
   } catch (error) {
     if (error instanceof z.ZodError) {
-      const messages = error.errors.map(err => `${err.path.join('.')}: ${err.message}`).join(', ');
-      throw new AppError(`Validation error: ${messages}`, 400);
+      // Preservar os erros do Zod para que possam ser usados no controller
+      const zodError = error as z.ZodError;
+      (zodError as any).statusCode = 400;
+      throw zodError; // Lançar o erro do Zod diretamente para preservar detalhes
     }
     throw error;
   }

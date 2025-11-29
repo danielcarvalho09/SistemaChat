@@ -59,47 +59,83 @@ export const updateConversationNotesSchema = z.object({
 
 // ==================== VALIDADORES DE MENSAGEM ====================
 
+// Schema simplificado e robusto para envio de mensagens
 export const sendMessageSchema = z.object({
-  content: z.string().max(4096).optional().default(''),
+  content: z
+    .union([z.string(), z.null(), z.undefined()])
+    .transform((val) => {
+      if (val === null || val === undefined) return '';
+      return String(val);
+    })
+    .pipe(z.string().max(4096))
+    .default(''),
+  
   messageType: z
-    .enum(['text', 'image', 'video', 'audio', 'document', 'location'])
+    .union([z.enum(['text', 'image', 'video', 'audio', 'document', 'location']), z.undefined()])
     .default('text'),
-  mediaUrl: z.string().refine(
-    (url) => {
-      // Aceitar URLs absolutas (http://, https://) ou relativas (começando com /)
-      if (!url) return true; // optional
-      try {
-        // Se começar com /, é URL relativa - aceitar
+  
+  mediaUrl: z
+    .union([z.string(), z.null(), z.undefined()])
+    .transform((val) => {
+      if (!val || val === null || val === '') return undefined;
+      const url = String(val).trim();
+      return url === '' ? undefined : url;
+    })
+    .pipe(z.string().optional())
+    .refine(
+      (url) => {
+        if (!url || url.trim() === '') return true;
+        // Aceitar URLs relativas (começam com /)
         if (url.startsWith('/')) return true;
-        // Caso contrário, validar como URL absoluta
-        new URL(url);
-        return true;
-      } catch {
-        return false;
-      }
-    },
-    { message: 'Invalid media URL format' }
-  ).optional(),
-  quotedMessageId: z.string().uuid('Invalid quotedMessageId').optional(),
-}).refine(
-  (data) => {
-    const content = data.content || '';
-    // Se for mensagem de texto, content é obrigatório (não pode ser vazio)
-    if (data.messageType === 'text') {
-      return content.trim().length > 0;
+        // Validar URLs absolutas
+        try {
+          new URL(url);
+          return true;
+        } catch {
+          return false;
+        }
+      },
+      { message: 'Invalid media URL format' }
+    )
+    .optional(),
+  
+  quotedMessageId: z
+    .union([z.string().uuid(), z.null(), z.undefined()])
+    .transform((val) => {
+      if (!val || val === null || val === '') return undefined;
+      return val;
+    })
+    .optional(),
+}).superRefine((data, ctx) => {
+  const content = (data.content || '').trim();
+  const messageType = data.messageType || 'text';
+  const mediaUrl = data.mediaUrl;
+  
+  // Se for mensagem de texto, content é obrigatório
+  if (messageType === 'text') {
+    if (content.length === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Message content is required for text messages',
+        path: ['content'],
+      });
+      return;
     }
-    // Para mensagens com mídia, content pode ser vazio (sem caption)
-    // Mas se não houver mediaUrl, precisa ter content
-    if (!data.mediaUrl) {
-      return content.trim().length > 0;
-    }
-    return true;
-  },
-  {
-    message: 'Message content is required for text messages or when no media is provided',
-    path: ['content'],
   }
-);
+  
+  // Para mensagens com mídia, precisa ter mediaUrl OU content
+  if (messageType !== 'text') {
+    const hasMedia = mediaUrl && mediaUrl.trim() !== '';
+    if (!hasMedia && content.length === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Message must have either mediaUrl or content',
+        path: ['content'],
+      });
+      return;
+    }
+  }
+});
 
 // ==================== VALIDADORES DE DEPARTAMENTO ====================
 

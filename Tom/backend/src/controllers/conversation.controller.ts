@@ -247,23 +247,64 @@ export class ConversationController {
       
       let data;
       try {
+        // Passar o body diretamente - o schema vai lidar com undefined/null
+        logger.info('[sendMessage] Request body before validation:', JSON.stringify(request.body));
+        
         data = validate(sendMessageSchema, request.body);
-        logger.info('[sendMessage] Validated data:', { 
+        
+        logger.info('[sendMessage] ✅ Validation successful:', { 
           conversationId, 
           userId: request.user!.userId, 
-          content: data.content, 
+          content: data.content?.substring(0, 50) + (data.content && data.content.length > 50 ? '...' : ''),
+          contentLength: data.content?.length || 0,
           messageType: data.messageType, 
-          mediaUrl: data.mediaUrl,
           hasMediaUrl: !!data.mediaUrl,
+          mediaUrl: data.mediaUrl?.substring(0, 100) || 'none',
+          hasQuotedMessage: !!data.quotedMessageId,
         });
       } catch (validationError: any) {
-        logger.error('[sendMessage] Validation failed:', {
-          error: validationError?.message || validationError,
-          errors: validationError?.errors || validationError,
-          body: request.body,
+        // Importar ZodError para verificar tipo
+        const { ZodError } = await import('zod');
+        
+        const errorDetails = {
+          errorMessage: validationError?.message || 'Unknown validation error',
+          errorName: validationError?.name,
+          rawBody: request.body,
+          bodyType: typeof request.body,
+          bodyKeys: request.body ? Object.keys(request.body) : [],
           conversationId,
+        };
+        
+        logger.error('[sendMessage] ❌ Validation failed:', errorDetails);
+        
+        // Se for ZodError, extrair detalhes específicos
+        if (validationError instanceof ZodError || (validationError?.issues && Array.isArray(validationError.issues))) {
+          const zodErrors = (validationError.issues || []).map((err: any) => ({
+            field: err.path?.join('.') || 'unknown',
+            message: err.message || 'Validation error',
+            code: err.code || 'custom_error',
+          }));
+          
+          logger.error('[sendMessage] ❌ Zod validation errors:', zodErrors);
+          logger.error('[sendMessage] ❌ Full Zod error:', JSON.stringify(validationError, null, 2));
+          
+          return reply.status(400).send({
+            success: false,
+            statusCode: 400,
+            message: 'Validation failed',
+            errors: zodErrors,
+            receivedBody: request.body,
+          });
+        }
+        
+        // Retornar erro genérico de validação
+        return reply.status(400).send({
+          success: false,
+          statusCode: 400,
+          message: validationError?.message || 'Validation failed',
+          error: errorDetails.errorMessage,
+          receivedBody: request.body,
         });
-        throw validationError;
       }
       
       const userId = request.user!.userId;
@@ -272,8 +313,10 @@ export class ConversationController {
       const message = await this.messageService.sendMessage({
         ...data,
         conversationId,
-        content: data.content || '', // Garantir que content seja sempre string (não undefined)
-        messageType: data.messageType as MessageType | undefined,
+        content: data.content || '', // Garantir que content seja sempre string
+        messageType: (data.messageType || 'text') as MessageType,
+        mediaUrl: data.mediaUrl || undefined,
+        quotedMessageId: data.quotedMessageId || undefined,
       }, userId, userRoles);
 
       // WebSocket event já foi emitido no service
