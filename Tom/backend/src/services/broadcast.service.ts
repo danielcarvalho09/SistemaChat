@@ -1,6 +1,7 @@
 import { getPrismaClient } from '../config/database.js';
 import { AppError } from '../middlewares/error.middleware.js';
 import { baileysManager } from '../whatsapp/baileys.manager.js';
+import { logger } from '../config/logger.js';
 
 interface BroadcastData {
   userId: string;
@@ -122,8 +123,22 @@ export class BroadcastService {
         }
 
         try {
-          // Formatar número para WhatsApp
-          const phoneNumber = contact.phone.replace(/\D/g, '');
+          // ✅ Formatar número para WhatsApp (já deve estar normalizado com 55)
+          let phoneNumber = contact.phone.replace(/\D/g, '');
+          
+          // ✅ GARANTIR que número começa com 55 (Brasil)
+          // Se não começar com 55, pode ser número sem código do país - adicionar
+          if (!phoneNumber.startsWith('55')) {
+            // Se tem 10 ou 11 dígitos, é número brasileiro sem código - adicionar 55
+            if (phoneNumber.length === 10 || phoneNumber.length === 11) {
+              phoneNumber = `55${phoneNumber}`;
+              logger.info(`[Broadcast] ✅ Normalized phone number: added 55 prefix -> ${phoneNumber}`);
+            } else {
+              logger.error(`[Broadcast] ❌ Invalid phone number format: ${phoneNumber} (must start with 55 for Brazil)`);
+              throw new Error(`Número inválido: ${phoneNumber} (deve começar com 55 para Brasil)`);
+            }
+          }
+          
           const whatsappId = `${phoneNumber}@s.whatsapp.net`;
 
           // Buscar nome do contato

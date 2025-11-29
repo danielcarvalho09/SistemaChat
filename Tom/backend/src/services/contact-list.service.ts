@@ -97,23 +97,19 @@ export class ContactListService {
     });
   }
 
-  // Validar número de telefone
-  private validatePhoneNumber(phone: string): { isValid: boolean; reason?: string } {
+  // Validar e normalizar número de telefone brasileiro
+  // Números brasileiros devem começar com 55 (código do país)
+  private validatePhoneNumber(phone: string): { isValid: boolean; normalized?: string; reason?: string } {
     if (!phone || !phone.trim()) {
       return { isValid: false, reason: 'Número vazio' };
     }
 
     // Remover caracteres não numéricos para validação
-    const cleanPhone = phone.replace(/\D/g, '');
+    let cleanPhone = phone.replace(/\D/g, '');
 
-    // Verificar se tem pelo menos 10 dígitos (formato mínimo)
-    if (cleanPhone.length < 10) {
-      return { isValid: false, reason: 'Muito curto (mínimo 10 dígitos)' };
-    }
-
-    // Verificar se tem mais de 15 dígitos (formato máximo internacional)
-    if (cleanPhone.length > 15) {
-      return { isValid: false, reason: 'Muito longo (máximo 15 dígitos)' };
+    // Verificar se tem apenas números após limpeza
+    if (!/^\d+$/.test(cleanPhone)) {
+      return { isValid: false, reason: 'Contém caracteres inválidos' };
     }
 
     // Verificar se começa com 0 (formato inválido)
@@ -121,12 +117,53 @@ export class ContactListService {
       return { isValid: false, reason: 'Não pode começar com 0' };
     }
 
-    // Verificar se tem apenas números após limpeza
-    if (!/^\d+$/.test(cleanPhone)) {
-      return { isValid: false, reason: 'Contém caracteres inválidos' };
+    // ✅ VALIDAÇÃO PARA NÚMEROS BRASILEIROS
+    // Números do Brasil devem começar com 55 (código do país)
+    
+    // Se não começa com 55, pode ser:
+    // 1. Número sem código do país (DDD + número) - adicionar 55
+    // 2. Número inválido
+    
+    if (!cleanPhone.startsWith('55')) {
+      // Tentar normalizar: adicionar 55 se for número brasileiro válido
+      // Formato brasileiro sem código: DDD (2 dígitos) + número (8 ou 9 dígitos)
+      // Exemplos válidos: 11987654321 (11 DDD + 987654321), 1198765432 (11 DDD + 98765432)
+      
+      // Verificar se parece com número brasileiro (10 ou 11 dígitos sem código do país)
+      if (cleanPhone.length === 10 || cleanPhone.length === 11) {
+        // Adicionar código do país 55
+        cleanPhone = `55${cleanPhone}`;
+      } else {
+        return { isValid: false, reason: 'Número inválido. Números brasileiros devem ter 10 ou 11 dígitos (DDD + número) ou começar com 55' };
+      }
     }
 
-    return { isValid: true };
+    // Após normalizar, validar formato completo
+    // Formato esperado: 55 + DDD (2 dígitos) + número (8 ou 9 dígitos)
+    // Total: 12 ou 13 dígitos (55 + 2 + 8/9)
+    
+    if (cleanPhone.length < 12) {
+      return { isValid: false, reason: 'Número muito curto. Formato esperado: 55 + DDD (2 dígitos) + número (8 ou 9 dígitos)' };
+    }
+
+    if (cleanPhone.length > 13) {
+      return { isValid: false, reason: 'Número muito longo. Formato esperado: 55 + DDD (2 dígitos) + número (8 ou 9 dígitos)' };
+    }
+
+    // Verificar se realmente começa com 55 (Brasil)
+    if (!cleanPhone.startsWith('55')) {
+      return { isValid: false, reason: 'Número deve começar com 55 (código do Brasil)' };
+    }
+
+    // Verificar formato do DDD (deve estar entre 11 e 99)
+    const ddd = cleanPhone.substring(2, 4);
+    const dddNum = parseInt(ddd, 10);
+    
+    if (isNaN(dddNum) || dddNum < 11 || dddNum > 99) {
+      return { isValid: false, reason: `DDD inválido: ${ddd}. DDD brasileiro deve estar entre 11 e 99` };
+    }
+
+    return { isValid: true, normalized: cleanPhone };
   }
 
   // Adicionar contatos à lista
@@ -150,8 +187,12 @@ export class ContactListService {
       }
 
       const validation = this.validatePhoneNumber(contact.phone);
-      if (validation.isValid) {
-        validContacts.push(contact);
+      if (validation.isValid && validation.normalized) {
+        // ✅ Usar número normalizado (com 55)
+        validContacts.push({
+          ...contact,
+          phone: validation.normalized, // Número normalizado com código do país
+        });
       } else {
         invalidContacts.push({ ...contact, reason: validation.reason || 'Inválido' });
       }
@@ -165,11 +206,12 @@ export class ContactListService {
     }
 
     // Criar contatos válidos
+    // ✅ Os números já estão normalizados e validados (com 55)
     const created = await this.prisma.listContact.createMany({
       data: validContacts.map(c => ({
         listId,
         name: c.name,
-        phone: c.phone.replace(/\D/g, ''), // Remover caracteres não numéricos
+        phone: c.phone, // Já está normalizado (com 55) e sem caracteres não numéricos
       })),
       skipDuplicates: true,
     });

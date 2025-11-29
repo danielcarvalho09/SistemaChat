@@ -2,6 +2,7 @@ import { FastifyInstance } from 'fastify';
 import { AIService } from '../services/ai.service.js';
 import { authenticate } from '../middlewares/auth.middleware.js';
 import { requireRole } from '../middlewares/authorization.middleware.js';
+import { logger } from '../config/logger.js';
 
 export async function aiRoutes(app: FastifyInstance) {
   const aiService = new AIService();
@@ -38,19 +39,84 @@ export async function aiRoutes(app: FastifyInstance) {
       preHandler: [authenticate, requireRole(['admin'])],
     },
     async (request, reply) => {
-      const data = request.body as {
-        name: string;
-        apiKey: string;
-        model: string;
-        instructions: string;
-        temperature?: number;
-        maxTokens?: number;
-        memoryContext?: number;
-        memoryCacheDays?: number;
-      };
+      try {
+        const data = request.body as {
+          name: string;
+          apiKey: string;
+          model: string;
+          instructions: string;
+          temperature?: number;
+          maxTokens?: number;
+          memoryContext?: number;
+          memoryCacheDays?: number;
+        };
 
-      const assistant = await aiService.createAssistant(data);
-      return reply.status(201).send(assistant);
+        // ✅ Validação dos campos obrigatórios
+        if (!data.name || !data.name.trim()) {
+          return reply.status(400).send({
+            success: false,
+            message: 'Nome do assistente é obrigatório',
+          });
+        }
+
+        if (!data.apiKey || !data.apiKey.trim()) {
+          return reply.status(400).send({
+            success: false,
+            message: 'API Key é obrigatória',
+          });
+        }
+
+        if (!data.model || !data.model.trim()) {
+          return reply.status(400).send({
+            success: false,
+            message: 'Modelo é obrigatório',
+          });
+        }
+
+        if (!data.instructions || !data.instructions.trim()) {
+          return reply.status(400).send({
+            success: false,
+            message: 'Instruções são obrigatórias',
+          });
+        }
+
+        logger.info(`[AI Routes] 📝 Creating assistant: ${data.name}`);
+        logger.debug(`[AI Routes] 📝 Request data:`, {
+          name: data.name,
+          model: data.model,
+          hasApiKey: !!data.apiKey,
+          apiKeyLength: data.apiKey?.length || 0,
+          instructionsLength: data.instructions?.length || 0,
+          temperature: data.temperature,
+          maxTokens: data.maxTokens,
+          memoryContext: data.memoryContext,
+          memoryCacheDays: data.memoryCacheDays,
+        });
+
+        const assistant = await aiService.createAssistant(data);
+        
+        logger.info(`[AI Routes] ✅ Assistant created successfully: ${assistant.id}`);
+        
+        return reply.status(201).send({
+          success: true,
+          message: 'Assistente criado com sucesso',
+          data: assistant,
+        });
+      } catch (error: any) {
+        logger.error('[AI Routes] ❌ Error creating assistant:', error);
+        logger.error('[AI Routes] ❌ Error stack:', error?.stack);
+        
+        // Retornar erro mais específico
+        const errorMessage = error?.message || 'Erro ao criar assistente';
+        const statusCode = error?.message?.includes('already exists') ? 409 : 
+                          error?.message?.includes('Invalid OpenAI API Key') ? 400 : 500;
+        
+        return reply.status(statusCode).send({
+          success: false,
+          message: errorMessage,
+          error: process.env.NODE_ENV === 'development' ? error?.stack : undefined,
+        });
+      }
     }
   );
 

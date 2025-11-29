@@ -13,32 +13,57 @@ export class AIService {
    * Criptografa a API Key
    */
   private encrypt(text: string): string {
-    const iv = crypto.randomBytes(16);
-    const cipher = crypto.createCipheriv(
-      this.ALGORITHM,
-      Buffer.from(this.ENCRYPTION_KEY.padEnd(32, '0').slice(0, 32)),
-      iv
-    );
-    let encrypted = cipher.update(text, 'utf8', 'hex');
-    encrypted += cipher.final('hex');
-    return iv.toString('hex') + ':' + encrypted;
+    try {
+      if (!text || !text.trim()) {
+        throw new Error('Text to encrypt cannot be empty');
+      }
+
+      // Validar chave de criptografia
+      if (!this.ENCRYPTION_KEY || this.ENCRYPTION_KEY.length < 16) {
+        logger.warn(`[AI Service] ⚠️ Encryption key is too short or missing. Using default key.`);
+      }
+
+      const iv = crypto.randomBytes(16);
+      const key = Buffer.from(this.ENCRYPTION_KEY.padEnd(32, '0').slice(0, 32));
+      const cipher = crypto.createCipheriv(this.ALGORITHM, key, iv);
+      
+      let encrypted = cipher.update(text, 'utf8', 'hex');
+      encrypted += cipher.final('hex');
+      
+      return iv.toString('hex') + ':' + encrypted;
+    } catch (error: any) {
+      logger.error('[AI Service] ❌ Error encrypting text:', error);
+      throw new Error(`Encryption failed: ${error?.message || 'Unknown error'}`);
+    }
   }
 
   /**
    * Descriptografa a API Key
    */
   private decrypt(text: string): string {
-    const parts = text.split(':');
-    const iv = Buffer.from(parts[0], 'hex');
-    const encryptedText = parts[1];
-    const decipher = crypto.createDecipheriv(
-      this.ALGORITHM,
-      Buffer.from(this.ENCRYPTION_KEY.padEnd(32, '0').slice(0, 32)),
-      iv
-    );
-    let decrypted = decipher.update(encryptedText, 'hex', 'utf8');
-    decrypted += decipher.final('utf8');
-    return decrypted;
+    try {
+      if (!text || !text.trim()) {
+        throw new Error('Text to decrypt cannot be empty');
+      }
+
+      const parts = text.split(':');
+      if (parts.length !== 2) {
+        throw new Error('Invalid encrypted text format');
+      }
+
+      const iv = Buffer.from(parts[0], 'hex');
+      const encryptedText = parts[1];
+      const key = Buffer.from(this.ENCRYPTION_KEY.padEnd(32, '0').slice(0, 32));
+      const decipher = crypto.createDecipheriv(this.ALGORITHM, key, iv);
+      
+      let decrypted = decipher.update(encryptedText, 'hex', 'utf8');
+      decrypted += decipher.final('utf8');
+      
+      return decrypted;
+    } catch (error: any) {
+      logger.error('[AI Service] ❌ Error decrypting text:', error);
+      throw new Error(`Decryption failed: ${error?.message || 'Unknown error'}`);
+    }
   }
 
   /**
@@ -55,35 +80,77 @@ export class AIService {
     memoryCacheDays?: number;
   }) {
     try {
-      logger.info(`[AI] Creating assistant: ${data.name}`);
+      logger.info(`[AI Service] 🤖 Creating assistant: ${data.name}`);
+      logger.debug(`[AI Service] 📝 Input data:`, {
+        name: data.name,
+        model: data.model,
+        hasApiKey: !!data.apiKey,
+        apiKeyPrefix: data.apiKey?.substring(0, 10) + '...',
+        instructionsLength: data.instructions?.length || 0,
+        temperature: data.temperature,
+        maxTokens: data.maxTokens,
+        memoryContext: data.memoryContext,
+        memoryCacheDays: data.memoryCacheDays,
+      });
+
+      // ✅ Validação dos campos obrigatórios
+      if (!data.name || !data.name.trim()) {
+        throw new Error('Nome do assistente é obrigatório');
+      }
+
+      if (!data.apiKey || !data.apiKey.trim()) {
+        throw new Error('API Key é obrigatória');
+      }
+
+      if (!data.model || !data.model.trim()) {
+        throw new Error('Modelo é obrigatório');
+      }
+
+      if (!data.instructions || !data.instructions.trim()) {
+        throw new Error('Instruções são obrigatórias');
+      }
 
       // Verificar se nome já existe
+      logger.debug(`[AI Service] 🔍 Checking if assistant name "${data.name}" already exists...`);
       const existing = await this.prisma.aIAssistant.findUnique({
         where: { name: data.name },
       });
 
       if (existing) {
+        logger.warn(`[AI Service] ⚠️ Assistant with name "${data.name}" already exists`);
         throw new Error(`Assistant with name "${data.name}" already exists`);
       }
 
       // Testar API Key
+      logger.debug(`[AI Service] 🔑 Testing OpenAI API Key...`);
       try {
         const openai = new OpenAI({ apiKey: data.apiKey });
-        await openai.models.list();
-      } catch (error) {
-        throw new Error('Invalid OpenAI API Key');
+        const models = await openai.models.list();
+        logger.info(`[AI Service] ✅ API Key is valid. Available models: ${models.data.length}`);
+      } catch (error: any) {
+        logger.error(`[AI Service] ❌ Invalid OpenAI API Key:`, error?.message || error);
+        throw new Error(`Invalid OpenAI API Key: ${error?.message || 'Failed to authenticate'}`);
       }
 
       // Criptografar API Key
-      const encryptedApiKey = this.encrypt(data.apiKey);
+      logger.debug(`[AI Service] 🔐 Encrypting API Key...`);
+      let encryptedApiKey: string;
+      try {
+        encryptedApiKey = this.encrypt(data.apiKey);
+        logger.debug(`[AI Service] ✅ API Key encrypted successfully`);
+      } catch (error: any) {
+        logger.error(`[AI Service] ❌ Error encrypting API Key:`, error);
+        throw new Error(`Error encrypting API Key: ${error?.message || 'Encryption failed'}`);
+      }
 
       // Criar assistente
+      logger.debug(`[AI Service] 💾 Creating assistant in database...`);
       const assistant = await this.prisma.aIAssistant.create({
         data: {
-          name: data.name,
+          name: data.name.trim(),
           apiKey: encryptedApiKey,
-          model: data.model,
-          instructions: data.instructions,
+          model: data.model.trim(),
+          instructions: data.instructions.trim(),
           temperature: data.temperature ?? 0.7,
           maxTokens: data.maxTokens ?? 500,
           memoryContext: data.memoryContext ?? 20,
@@ -91,13 +158,18 @@ export class AIService {
         },
       });
 
-      logger.info(`[AI] ✅ Assistant created: ${assistant.id}`);
+      logger.info(`[AI Service] ✅ Assistant created successfully: ${assistant.id} (${assistant.name})`);
 
       // Não retornar API Key
       const { apiKey, ...result } = assistant;
       return result;
-    } catch (error) {
-      logger.error('[AI] Error creating assistant:', error);
+    } catch (error: any) {
+      logger.error('[AI Service] ❌ Error creating assistant:', error);
+      logger.error('[AI Service] ❌ Error details:', {
+        message: error?.message,
+        stack: error?.stack,
+        name: error?.name,
+      });
       throw error;
     }
   }
