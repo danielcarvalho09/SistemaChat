@@ -87,7 +87,7 @@ export function MessageModal({ conversation, onClose, onMessageSent }: MessageMo
 
         // Enviar mensagem com mídia
         await api.post(`/conversations/${conversation.id}/messages`, {
-          content: message.trim() || selectedFile.name,
+          content: message.trim() || '', // Não usar selectedFile.name como fallback
           messageType,
           mediaUrl,
         });

@@ -85,7 +85,7 @@ export function ChatArea({ conversationId, onToggleDetails }: ChatAreaProps) {
 
         // Enviar mensagem com mídia via API (user/sender resolvido pelo backend)
         await api.post(`/conversations/${conversationId}/messages`, {
-          content: content || file.name,
+          content: content || '', // Não usar file.name como fallback
           messageType,
           mediaUrl,
           quotedMessageId: replyingTo?.id || undefined,

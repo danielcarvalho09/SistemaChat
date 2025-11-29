@@ -1362,7 +1362,8 @@ class BaileysManager {
         // Media Messages conforme documentação
         else if (message?.imageMessage) {
           // proto.IMessage.imageMessage
-          messageText = message.imageMessage.caption || '[Imagem]';
+          // Só usar caption se existir, caso contrário deixar vazio (sem adicionar '[Imagem]')
+          messageText = message.imageMessage.caption || '';
           messageType = 'image';
           
           // Baixar imagem usando downloadMediaMessage conforme documentação
@@ -1459,7 +1460,8 @@ class BaileysManager {
           }
         } else if (message?.videoMessage) {
           // proto.IMessage.videoMessage
-          messageText = message.videoMessage.caption || '[Vídeo]';
+          // Só usar caption se existir, caso contrário deixar vazio (sem adicionar '[Vídeo]')
+          messageText = message.videoMessage.caption || '';
           messageType = 'video';
           
           // Baixar vídeo conforme documentação
@@ -1506,7 +1508,8 @@ class BaileysManager {
           }
         } else if (message?.documentMessage) {
           // proto.IMessage.documentMessage
-          messageText = message.documentMessage.fileName || '[Documento]';
+          // Não usar fileName como caption - documentos não devem ter caption a menos que venha do WhatsApp
+          messageText = message.documentMessage.caption || '';
           messageType = 'document';
           
           // Baixar documento conforme documentação
@@ -2166,7 +2169,10 @@ class BaileysManager {
         messageContent = { text: content as string };
       } else if (messageType === 'image') {
         const { url, caption } = content as { url: string; caption?: string };
-        messageContent = { image: { url }, caption: caption || '' };
+        // Só passar caption se houver conteúdo real
+        messageContent = caption && caption.trim() 
+          ? { image: { url }, caption }
+          : { image: { url } };
       } else if (messageType === 'audio') {
         const { url } = content as { url: string };
         // ✅ Converter URL relativa para absoluta se necessário
@@ -2315,10 +2321,18 @@ class BaileysManager {
         }
       } else if (messageType === 'video') {
         const { url, caption } = content as { url: string; caption?: string };
-        messageContent = { video: { url }, caption: caption || '' };
+        // Só passar caption se houver conteúdo real
+        messageContent = caption && caption.trim()
+          ? { video: { url }, caption }
+          : { video: { url } };
       } else if (messageType === 'document') {
         const { url, caption } = content as { url: string; caption?: string };
-        messageContent = { document: { url }, fileName: caption || 'document' };
+        // Para documentos, extrair nome do arquivo da URL ou usar padrão, mas não usar caption como fileName
+        const fileName = url.split('/').pop()?.split('?')[0] || 'document';
+        // Só passar caption se houver conteúdo real
+        messageContent = caption && caption.trim()
+          ? { document: { url }, fileName, caption }
+          : { document: { url }, fileName };
       }
 
       logger.info(`[Baileys] Attempting to send message to ${jid}, type: ${messageType}`);
@@ -2600,27 +2614,26 @@ class BaileysManager {
       // Construir conteúdo baseado no tipo de mídia
       switch (mediaType) {
         case 'image':
-          messageContent = {
-            image: { url: mediaUrl },
-            caption: message,
-          };
+          // Só passar caption se houver conteúdo real
+          messageContent = message && message.trim()
+            ? { image: { url: mediaUrl }, caption: message }
+            : { image: { url: mediaUrl } };
           break;
 
         case 'video':
-          messageContent = {
-            video: { url: mediaUrl },
-            caption: message,
-          };
+          // Só passar caption se houver conteúdo real
+          messageContent = message && message.trim()
+            ? { video: { url: mediaUrl }, caption: message }
+            : { video: { url: mediaUrl } };
           break;
 
         case 'document':
           // Extrair nome do arquivo da URL ou usar padrão
           const fileName = mediaUrl.split('/').pop() || 'document.pdf';
-          messageContent = {
-            document: { url: mediaUrl },
-            fileName: fileName,
-            caption: message,
-          };
+          // Só passar caption se houver conteúdo real
+          messageContent = message && message.trim()
+            ? { document: { url: mediaUrl }, fileName, caption: message }
+            : { document: { url: mediaUrl }, fileName };
           break;
 
         default:

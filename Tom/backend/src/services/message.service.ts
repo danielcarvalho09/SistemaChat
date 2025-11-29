@@ -164,8 +164,9 @@ export class MessageService {
     // Se estiver 'transferred', NÃO alterar conexão aqui. O fluxo correto é aceitar a conversa pela rota específica.
 
     // Formatar mensagem com nome do usuário em negrito (WhatsApp usa *texto* para negrito)
+    // Só formatar se houver conteúdo, caso contrário deixar vazio (sem caption)
     const userName = user?.name || 'Atendente';
-    const formattedContent = `*${userName}:*\n${content}`;
+    const formattedContent = content && content.trim() ? `*${userName}:*\n${content}` : '';
 
     // Verificar se a conexão está ativa
     const isConnectionActive = baileysManager.isConnectionActive(conversation.connectionId);
@@ -298,10 +299,14 @@ export class MessageService {
           logger.info(`📤 [BACKGROUND] Text message sent, externalId: ${externalId || 'none'}`);
         } else if (mediaUrl) {
           logger.info(`📤 [BACKGROUND] Sending media message: type=${messageType}, url=${mediaUrl}`);
+          // Só passar caption se houver conteúdo, caso contrário enviar sem caption
+          const mediaContent = formattedContent && formattedContent.trim() 
+            ? { url: mediaUrl, caption: formattedContent }
+            : { url: mediaUrl };
           externalId = await baileysManager.sendMessage(
             conversation.connectionId,
             conversation.contact.phoneNumber,
-            { url: mediaUrl, caption: formattedContent },
+            mediaContent,
             messageType as 'image' | 'audio' | 'video' | 'document',
             quotedForSend ? { quotedMessage: quotedForSend } : undefined
           );
