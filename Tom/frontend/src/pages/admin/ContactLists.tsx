@@ -234,9 +234,8 @@ export function ContactLists() {
     formData.append('file', importFile);
 
     try {
-      const response = await api.post(`/contact-lists/${selectedList.id}/import`, formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      });
+      // NÃO definir Content-Type manualmente - deixar o navegador definir com boundary
+      const response = await api.post(`/contact-lists/${selectedList.id}/import`, formData);
       
       if (invalid.length > 0) {
         toast.success(`${response.data.message}. ${invalid.length} número(s) inválido(s) foram ignorados.`);

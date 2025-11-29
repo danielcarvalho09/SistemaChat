@@ -63,11 +63,8 @@ export function MessageModal({ conversation, onClose, onMessageSent }: MessageMo
         const formData = new FormData();
         formData.append('file', selectedFile);
 
-        const uploadResponse = await api.post('/upload', formData, {
-          headers: {
-            'Content-Type': 'multipart/form-data',
-          },
-        });
+        // NÃO definir Content-Type manualmente - deixar o navegador definir com boundary
+        const uploadResponse = await api.post('/upload', formData);
 
         if (!uploadResponse.data?.success) {
           throw new Error(uploadResponse.data?.message || 'Erro ao fazer upload do arquivo');
