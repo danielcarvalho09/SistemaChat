@@ -17,7 +17,7 @@ import path from 'path';
 import { logger } from '../config/logger.js';
 import { getSocketServer } from '../websocket/socket.server.js';
 import { getPrismaClient } from '../config/database.js';
-// Criptografia removida - estava impedindo reconexão
+
 
 export class ClientCreationInProgressError extends Error {
   constructor(connectionId: string) {
@@ -82,21 +82,18 @@ type IncomingRetryItem = {
   lastAttempt: Date;
 };
 
-/**
- * Gerenciador de conexões Baileys
- * Baseado 100% na documentação oficial: https://baileys.wiki/docs/intro/
- */
+
 class BaileysManager {
   private clients: Map<string, BaileysClient> = new Map();
   private prisma = getPrismaClient();
-  private reconnectionLocks: Map<string, { locked: boolean; lockedAt: Date }> = new Map(); // Previne reconexões simultâneas com timestamp
-  private syncRetryQueue: Map<string, IncomingRetryItem> = new Map(); // Fila de retry para sincronização
-  private readonly MAX_RECONNECT_ATTEMPTS = 20; // Aumentado para 20 tentativas (mais persistente)
+  private reconnectionLocks: Map<string, { locked: boolean; lockedAt: Date }> = new Map(); 
+  private syncRetryQueue: Map<string, IncomingRetryItem> = new Map(); 
+  private readonly MAX_RECONNECT_ATTEMPTS = 5; 
   private readonly QR_RESET_DELAY_MS = 2000;
-  private readonly LOCK_TIMEOUT_MS = 180000; // 3 minutos (aumentado para conexões mais lentas) - timeout para locks presos
+  private readonly LOCK_TIMEOUT_MS = 180000; 
   private circuitBreaker: Map<string, { failures: number; lastFailure: Date; state: 'closed' | 'open' | 'half-open' }> = new Map();
-  private readonly CIRCUIT_BREAKER_THRESHOLD = 5; // Abrir circuit após 5 falhas consecutivas
-  private readonly CIRCUIT_BREAKER_TIMEOUT = 60000; // 1 minuto antes de tentar novamente
+  private readonly CIRCUIT_BREAKER_THRESHOLD = 5; 
+  private readonly CIRCUIT_BREAKER_TIMEOUT = 60000; 
 
   /**
    * Cria um novo cliente Baileys para uma conexão
@@ -263,13 +260,7 @@ class BaileysManager {
       // Iniciar heartbeat ativo
       this.startActiveHeartbeat(connectionId);
       
-      // ❌ SINCRONIZAÇÃO PERIÓDICA DESABILITADA
-      // Sincronização automática estava interferindo no recebimento de mensagens em tempo real
-      // Sincronização agora só ocorre quando:
-      // 1. Reconexão (após desconexão)
-      // 2. Detecção de gaps
-      // 3. Solicitação manual via API
-      // this.startPeriodicSync(connectionId);
+      
 
       logger.info(`[Baileys] ✅ Client created successfully: ${connectionId}`);
       

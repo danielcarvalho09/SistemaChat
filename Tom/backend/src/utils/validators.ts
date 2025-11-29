@@ -9,11 +9,8 @@ export const registerSchema = z.object({
     .min(8, 'Password must be at least 8 characters')
     .regex(/[A-Z]/, 'Password must contain at least one uppercase letter')
     .regex(/[a-z]/, 'Password must contain at least one lowercase letter')
-    .regex(/[0-9]/, 'Password must contain at least one number')
-    .regex(
-      /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/,
-      'Password must contain at least one special character'
-    ),
+    .regex(/[0-9]/, 'Password must contain at least one number'),
+    
   name: z.string().min(2, 'Name must be at least 2 characters'),
 });
 
@@ -30,7 +27,6 @@ export const refreshTokenSchema = z.object({
 
 export const createConnectionSchema = z.object({
   name: z.string().min(3, 'Connection name must be at least 3 characters'),
-  phoneNumber: z.string().regex(/^\d+$/, 'Phone number must contain only digits').min(10, 'Phone number must be at least 10 digits'),
   departmentIds: z.array(z.string().uuid()).optional(),
   isMatriz: z.boolean().optional(),
 });
@@ -69,13 +65,30 @@ export const updateConversationNotesSchema = z.object({
 // ==================== VALIDADORES DE MENSAGEM ====================
 
 export const sendMessageSchema = z.object({
-  content: z.string().min(1, 'Message content is required').max(4096),
+  content: z.string().max(4096),
   messageType: z
     .enum(['text', 'image', 'video', 'audio', 'document', 'location'])
     .default('text'),
   mediaUrl: z.string().url('Invalid media URL').optional(),
   quotedMessageId: z.string().uuid('Invalid quotedMessageId').optional(),
-});
+}).refine(
+  (data) => {
+    // Se for mensagem de texto, content é obrigatório (não pode ser vazio)
+    if (data.messageType === 'text') {
+      return data.content && data.content.trim().length > 0;
+    }
+    // Para mensagens com mídia, content pode ser vazio (sem caption)
+    // Mas se não houver mediaUrl, precisa ter content
+    if (!data.mediaUrl) {
+      return data.content && data.content.trim().length > 0;
+    }
+    return true;
+  },
+  {
+    message: 'Message content is required for text messages or when no media is provided',
+    path: ['content'],
+  }
+);
 
 // ==================== VALIDADORES DE DEPARTAMENTO ====================
 
