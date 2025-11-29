@@ -143,13 +143,18 @@ export class UserController {
     request: FastifyRequest<{ Params: { userId: string } }>,
     reply: FastifyReply
   ) => {
-    const { userId } = request.params;
-    await this.userService.deactivateUser(userId);
+    try {
+      const { userId } = request.params;
+      await this.userService.deactivateUser(userId);
 
-    return reply.status(200).send({
-      success: true,
-      message: 'User deactivated successfully',
-    });
+      return reply.status(200).send({
+        success: true,
+        message: 'User deactivated successfully',
+      });
+    } catch (error: any) {
+      // Re-throw para o middleware de erro tratar
+      throw error;
+    }
   };
 
   /**

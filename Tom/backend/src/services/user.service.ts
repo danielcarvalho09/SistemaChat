@@ -188,6 +188,50 @@ export class UserService {
    * Desativa usuário (soft delete)
    */
   async deactivateUser(userId: string): Promise<void> {
+    // Verificar se o usuário existe
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      include: {
+        roles: {
+          include: {
+            role: true,
+          },
+        },
+      },
+    });
+
+    if (!user) {
+      throw new NotFoundError('User not found');
+    }
+
+    // Verificar se o usuário já está desativado
+    if (!user.isActive) {
+      logger.warn(`User ${userId} is already deactivated`);
+      return; // Não precisa fazer nada se já está desativado
+    }
+
+    // Verificar se é o último admin ativo
+    const isAdmin = user.roles.some(ur => ur.role.name === 'admin');
+    if (isAdmin) {
+      const activeAdminCount = await this.prisma.user.count({
+        where: {
+          isActive: true,
+          roles: {
+            some: {
+              role: {
+                name: 'admin',
+              },
+            },
+          },
+        },
+      });
+
+      if (activeAdminCount <= 1) {
+        throw new ConflictError('Cannot deactivate the last active admin user');
+      }
+    }
+
+    // Desativar usuário
     await this.prisma.user.update({
       where: { id: userId },
       data: { isActive: false, status: 'offline' },
@@ -201,7 +245,7 @@ export class UserService {
     // Invalidar cache
     await cacheDel(`user:${userId}`);
 
-    logger.info(`User deactivated: ${userId}`);
+    logger.info(`User deactivated: ${userId} (${user.email})`);
   }
 
   /**

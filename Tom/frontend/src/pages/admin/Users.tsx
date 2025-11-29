@@ -78,8 +78,13 @@ export function Users() {
     try {
       await api.delete(`/users/${userId}`);
       fetchUsers();
-    } catch (error) {
+      // Mostrar mensagem de sucesso (opcional)
+      alert('Usuário excluído com sucesso!');
+    } catch (error: any) {
       console.error('Erro ao excluir usuário:', error);
+      // Mostrar mensagem de erro ao usuário
+      const errorMessage = error?.response?.data?.message || error?.message || 'Erro ao excluir usuário';
+      alert(`Erro: ${errorMessage}`);
     }
   };
 
