@@ -183,15 +183,12 @@ class BaileysManager {
       // Verificar se tem credenciais salvas (reconexão vs nova conexão)
       const connectionData = await this.prisma.whatsAppConnection.findUnique({
         where: { id: connectionId },
-        select: { authData: true, lastDisconnectReason: true },
+        select: { authData: true },
       });
       const hasCredentials = connectionData?.authData ? true : false;
       
       logger.info(`[Baileys] 📋 Informações da conexão:`);
       logger.info(`[Baileys]    - Tem credenciais: ${hasCredentials ? 'SIM' : 'NÃO'}`);
-      if (connectionData?.lastDisconnectReason) {
-        logger.info(`[Baileys]    - Último motivo de desconexão: ${connectionData.lastDisconnectReason}`);
-      }
       
       const client: BaileysClient = {
         id: connectionId,
@@ -794,7 +791,6 @@ class BaileysManager {
           where: { id: connectionId },
           data: {
             lastDisconnectAt: disconnectAt,
-            lastDisconnectReason: `${disconnectReason}: ${reasonDescription}`,
             status: 'disconnected',
           },
         });
@@ -841,7 +837,6 @@ class BaileysManager {
           logger.warn(`[Baileys] 🚫 Circuit breaker OPEN for ${connectionId} - too many failures, waiting before retry`);
           await this.updateConnectionStatus(connectionId, 'disconnected', {
             lastDisconnectAt: disconnectAt,
-            lastDisconnectReason: `${disconnectReason}: ${reasonDescription}`,
           });
           this.emitStatus(connectionId, 'disconnected');
           
@@ -2220,7 +2215,8 @@ class BaileysManager {
           filename = urlParts[urlParts.length - 1]?.split('?')[0] || null;
         }
         
-        // ✅ Tentar ler arquivo localmente para enviar como buffer (mais eficiente)
+        // ✅ EXEMPLO DA INTERNET: Tentar ler arquivo localmente primeiro (mais eficiente e confiável)
+        // Padrão usado: fs.readFileSync() e passar buffer diretamente para sendMessage
         if (filename) {
           // Tentar primeiro em secure-uploads (diretório usado pelo upload controller)
           const secureUploadsDir = path.join(process.cwd(), 'secure-uploads');
@@ -2230,27 +2226,57 @@ class BaileysManager {
           const uploadsDir = path.join(process.cwd(), 'uploads');
           const uploadsPath = path.join(uploadsDir, filename);
           
+          logger.info(`[Baileys] 🔍 Looking for image file: ${filename}`);
+          logger.info(`[Baileys] 🔍 Checking secure-uploads: ${secureUploadsPath}`);
+          logger.info(`[Baileys] 🔍 Checking uploads: ${uploadsPath}`);
+          
           if (fs.existsSync(secureUploadsPath)) {
             try {
               imageBuffer = fs.readFileSync(secureUploadsPath);
               logger.info(`[Baileys] ✅ Image file found locally in secure-uploads: ${filename} (${imageBuffer.length} bytes)`);
-            } catch (fileError) {
-              logger.error(`[Baileys] ❌ Failed to read image file from secure-uploads:`, fileError);
+              
+              // ✅ VALIDAÇÃO: Verificar se buffer não está vazio
+              if (imageBuffer.length === 0) {
+                logger.error(`[Baileys] ❌ Image buffer is EMPTY! File: ${secureUploadsPath}`);
+                imageBuffer = null;
+              } else {
+                logger.info(`[Baileys] ✅ Image buffer is valid (${imageBuffer.length} bytes)`);
+              }
+            } catch (fileError: any) {
+              logger.error(`[Baileys] ❌ Failed to read image file from secure-uploads:`, {
+                error: fileError?.message,
+                stack: fileError?.stack,
+                path: secureUploadsPath,
+              });
               imageBuffer = null;
             }
           } else if (fs.existsSync(uploadsPath)) {
             try {
               imageBuffer = fs.readFileSync(uploadsPath);
               logger.info(`[Baileys] ✅ Image file found locally in uploads: ${filename} (${imageBuffer.length} bytes)`);
-            } catch (fileError) {
-              logger.error(`[Baileys] ❌ Failed to read image file from uploads:`, fileError);
+              
+              // ✅ VALIDAÇÃO: Verificar se buffer não está vazio
+              if (imageBuffer.length === 0) {
+                logger.error(`[Baileys] ❌ Image buffer is EMPTY! File: ${uploadsPath}`);
+                imageBuffer = null;
+              } else {
+                logger.info(`[Baileys] ✅ Image buffer is valid (${imageBuffer.length} bytes)`);
+              }
+            } catch (fileError: any) {
+              logger.error(`[Baileys] ❌ Failed to read image file from uploads:`, {
+                error: fileError?.message,
+                stack: fileError?.stack,
+                path: uploadsPath,
+              });
               imageBuffer = null;
             }
           } else {
             logger.warn(`[Baileys] ⚠️ Image file not found locally: ${filename}`);
+            logger.warn(`[Baileys] ⚠️ Secure-uploads path doesn't exist: ${secureUploadsPath}`);
+            logger.warn(`[Baileys] ⚠️ Uploads path doesn't exist: ${uploadsPath}`);
           }
           
-          // ✅ Converter URL relativa para absoluta (necessário para Baileys baixar)
+          // ✅ Converter URL relativa para absoluta (fallback se arquivo não for encontrado)
           if (!imageUrl.startsWith('http://') && !imageUrl.startsWith('https://')) {
             const baseUrl = process.env.API_BASE_URL || process.env.RAILWAY_PUBLIC_DOMAIN || 'http://localhost:3000';
             imageUrl = imageUrl.startsWith('/') 
@@ -2260,18 +2286,25 @@ class BaileysManager {
           }
         }
         
-        // ✅ Estratégia: Tentar buffer primeiro (mais eficiente), senão usar URL pública
-        // Baseado na documentação do Baileys: https://baileys.wiki/docs/sending-messages/
-        if (imageBuffer) {
-          // ✅ Enviar como buffer (mais eficiente e confiável)
+        // ✅ EXEMPLO DA INTERNET: Enviar como buffer diretamente (igual ao exemplo)
+        // Padrão do exemplo: { image: fs.readFileSync(caminhoImagem), caption: 'texto' }
+        if (imageBuffer && imageBuffer.length > 0) {
+          // ✅ VALIDAÇÃO FINAL: Verificar que o buffer não está vazio antes de enviar
+          if (imageBuffer.length === 0) {
+            logger.error(`[Baileys] ❌ Image buffer is EMPTY before sending! Cannot send empty image.`);
+            throw new Error('Image buffer is empty - cannot send image');
+          }
+          
+          // ✅ Enviar como buffer (exatamente como o exemplo da internet)
+          // Exemplo: await sock.sendMessage(destinatario, { image: fs.readFileSync(caminhoImagem), caption: 'texto' })
           messageContent = caption && caption.trim() 
             ? { image: imageBuffer, caption }
             : { image: imageBuffer };
-          logger.info(`[Baileys] ✅ Using image buffer (size: ${imageBuffer.length} bytes, caption: ${caption ? 'yes' : 'no'})`);
+          logger.info(`[Baileys] ✅ Using image buffer (exactly like internet example - fs.readFileSync pattern): ${imageBuffer.length} bytes`);
         } else {
-          // ✅ Usar URL pública (deve ser absoluta e acessível)
+          // ✅ Fallback: Usar URL pública (deve ser absoluta e acessível)
+          logger.warn(`[Baileys] ⚠️ Image file not found locally, using URL fallback: ${imageUrl}`);
           logger.info(`[Baileys] 📤 Preparing to send image with URL: ${imageUrl}`);
-          logger.info(`[Baileys] 📤 URL is absolute: ${imageUrl.startsWith('http://') || imageUrl.startsWith('https://')}`);
           
           try {
             // Verificar se a URL é acessível antes de enviar
