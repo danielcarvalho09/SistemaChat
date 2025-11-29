@@ -145,8 +145,22 @@ class BaileysManager {
 
       // Carregar ou criar auth state do banco de dados
       logger.info(`[Baileys] 🔑 Carregando credenciais do banco para ${connectionId}...`);
-      const { state, saveCreds } = await this.usePostgreSQLAuthState(connectionId);
+      const { state, saveCreds, hasValidCredentials } = await this.usePostgreSQLAuthState(connectionId);
+      
+      // ✅ VERIFICAR SE TEM CREDENCIAIS VÁLIDAS (não apenas se existe authData)
+      // Credenciais válidas = tem creds.me.id (já conectou antes)
+      const hasCredentials = hasValidCredentials;
+      
       logger.info(`[Baileys] ✅ Credenciais carregadas para ${connectionId}`);
+      logger.info(`[Baileys] 📋 Informações da conexão:`);
+      logger.info(`[Baileys]    - Tem credenciais VÁLIDAS: ${hasCredentials ? 'SIM ✅' : 'NÃO ❌'}`);
+      
+      if (hasCredentials) {
+        logger.info(`[Baileys] 💡 Reconexão sem QR code: Usando credenciais salvas`);
+        logger.info(`[Baileys] 💡 Baileys deve conectar automaticamente sem gerar QR code`);
+      } else {
+        logger.info(`[Baileys] 💡 Nova conexão: QR code será gerado após escanear`);
+      }
 
       // Criar socket Baileys conforme documentação
       const socket = makeWASocket({
@@ -179,22 +193,12 @@ class BaileysManager {
           return undefined;
         },
       });
-
-      // Verificar se tem credenciais salvas (reconexão vs nova conexão)
-      const connectionData = await this.prisma.whatsAppConnection.findUnique({
-        where: { id: connectionId },
-        select: { authData: true },
-      });
-      const hasCredentials = connectionData?.authData ? true : false;
-      
-      logger.info(`[Baileys] 📋 Informações da conexão:`);
-      logger.info(`[Baileys]    - Tem credenciais: ${hasCredentials ? 'SIM' : 'NÃO'}`);
       
       const client: BaileysClient = {
         id: connectionId,
         socket,
         status: 'connecting',
-        hasCredentials,
+        hasCredentials, // ✅ Usar valor correto das credenciais válidas
         reconnectAttempts: 0,
         isReconnecting: false,
       };
@@ -424,6 +428,19 @@ class BaileysManager {
       }
     };
 
+    // ✅ VERIFICAR SE AS CREDENCIAIS SÃO VÁLIDAS (têm me.id)
+    // Credenciais válidas = já conectou antes, pode reconectar sem QR code
+    const hasValidCredentials = !!(creds && creds.me && creds.me.id);
+    
+    if (hasValidCredentials) {
+      const meId = creds.me?.id || 'N/A';
+      logger.info(`[Baileys] ✅ Credenciais válidas detectadas para ${connectionId} (me.id: ${meId})`);
+      logger.info(`[Baileys] 💡 Reconexão sem QR code será possível`);
+    } else {
+      logger.info(`[Baileys] ⚠️ Credenciais não válidas ou novas para ${connectionId}`);
+      logger.info(`[Baileys] 💡 QR code será necessário`);
+    }
+
     return {
       state: {
         creds,
@@ -449,6 +466,7 @@ class BaileysManager {
         },
       } as AuthenticationState,
       saveCreds,
+      hasValidCredentials, // ✅ Retornar flag indicando se credenciais são válidas
     };
   }
 
@@ -469,7 +487,24 @@ class BaileysManager {
     if (qr) {
       client.qrCode = qr;
       client.status = 'qr';
-      logger.info(`[Baileys] QR Code generated for ${connectionId}`);
+      logger.warn(`[Baileys] ⚠️ ========== QR CODE GERADO ==========`);
+      logger.warn(`[Baileys] 🔗 Connection ID: ${connectionId}`);
+      logger.warn(`[Baileys] 🔑 Tem credenciais salvas: ${client.hasCredentials ? 'SIM' : 'NÃO'}`);
+      
+      // ⚠️ AVISO: Se tem credenciais mas ainda gerou QR, pode ser que:
+      // 1. As credenciais estão inválidas/corrompidas
+      // 2. O WhatsApp invalidou a sessão
+      // 3. As credenciais não foram carregadas corretamente
+      if (client.hasCredentials) {
+        logger.error(`[Baileys] ❌ PROBLEMA: Tem credenciais salvas mas QR code foi gerado!`);
+        logger.error(`[Baileys] 💡 Isso indica que as credenciais podem estar inválidas ou corrompidas`);
+        logger.error(`[Baileys] 💡 Verifique se authData no banco está correto`);
+        logger.error(`[Baileys] 💡 Após escanear o QR, as credenciais serão atualizadas`);
+      } else {
+        logger.info(`[Baileys] ✅ QR code gerado (conexão nova - sem credenciais)`);
+      }
+      
+      logger.info(`[Baileys] 📱 QR Code generated for ${connectionId}`);
       await this.emitQRCode(connectionId, qr);
       return;
     }
@@ -750,7 +785,7 @@ class BaileysManager {
       // Marcar cliente como desconectado imediatamente para parar heartbeats/presence
       client.status = 'disconnected';
       
-      // ✅ LOGS DETALHADOS PARA RAILWAY
+      // ✅ LOGS DETALHADOS PARA RAILWAY + CONTEXTO ADICIONAL
       logger.error(`[Baileys] ❌ ========== DESCONEXÃO DETECTADA ==========`);
       logger.error(`[Baileys] 📅 Timestamp: ${disconnectAt.toISOString()}`);
       logger.error(`[Baileys] 🔗 Connection ID: ${connectionId}`);
@@ -758,6 +793,18 @@ class BaileysManager {
       logger.error(`[Baileys] 🔍 Motivo: ${disconnectReason}`);
       logger.error(`[Baileys] 📝 Descrição: ${reasonDescription}`);
       logger.error(`[Baileys] 💬 Mensagem de Erro: ${errorMessage}`);
+      logger.error(`[Baileys] 🔄 Tem credenciais salvas: ${client.hasCredentials ? 'SIM' : 'NÃO'}`);
+      logger.error(`[Baileys] 📱 Número: ${client.socket?.user?.id || 'N/A'}`);
+      logger.error(`[Baileys] ⏰ Último heartbeat: ${client.lastHeartbeat ? client.lastHeartbeat.toISOString() : 'Nunca'}`);
+      logger.error(`[Baileys] 📥 Última mensagem recebida: ${client.lastMessageReceived ? client.lastMessageReceived.toISOString() : 'Nunca'}`);
+      
+      // ✅ VERIFICAR SE É DESCONEXÃO RELACIONADA A FALTA DE ATIVIDADE
+      if (statusCode === DisconnectReason.timedOut) {
+        logger.error(`[Baileys] ⚠️ ATENÇÃO: Desconexão por TIMEOUT detectada!`);
+        logger.error(`[Baileys] 💡 A conexão Baileys deveria continuar ativa mesmo sem clientes WebSocket conectados`);
+        logger.error(`[Baileys] 💡 Isso pode indicar que o Railway está matando o processo ou há timeout no Baileys`);
+        logger.error(`[Baileys] 💡 Verifique os logs do Railway para ver se o processo foi encerrado`);
+      }
       logger.error(`[Baileys] 🔢 DisconnectReason.restartRequired = ${DisconnectReason.restartRequired}`);
       logger.error(`[Baileys] 🔢 DisconnectReason.loggedOut = ${DisconnectReason.loggedOut}`);
       logger.error(`[Baileys] 🔢 DisconnectReason.badSession = ${DisconnectReason.badSession}`);
@@ -3599,22 +3646,47 @@ class BaileysManager {
       };
     }
 
-    // ✅ CRÍTICO: Verificar credenciais ANTES de qualquer operação
+    // ✅ CRÍTICO: Verificar credenciais VÁLIDAS ANTES de qualquer operação
     // Isso garante que sabemos se devemos usar credenciais existentes ou gerar QR code
     const connection = await this.prisma.whatsAppConnection.findUnique({
       where: { id: connectionId },
       select: { authData: true, status: true },
     });
 
-    const hasCredentialsInDB = connection && connection.authData !== null && connection.authData !== '';
+    // ✅ Verificar não apenas se existe authData, mas se as credenciais são VÁLIDAS
+    let hasValidCredentialsInDB = false;
+    if (connection && connection.authData && connection.authData !== null && connection.authData !== '') {
+      try {
+        const authDataString = connection.authData as string;
+        if (authDataString.trim() !== '') {
+          try {
+            const authData = JSON.parse(authDataString, BufferJSON.reviver);
+            // ✅ Credenciais válidas = têm creds.me.id (já conectou antes)
+            hasValidCredentialsInDB = !!(authData.creds && authData.creds.me && authData.creds.me.id);
+            
+            if (hasValidCredentialsInDB) {
+              const meId = authData.creds.me.id;
+              logger.info(`[Baileys] ✅ Credenciais VÁLIDAS encontradas para ${connectionId} (me.id: ${meId})`);
+            } else {
+              logger.warn(`[Baileys] ⚠️ AuthData existe mas credenciais são INVÁLIDAS para ${connectionId} (sem creds.me.id)`);
+            }
+          } catch (parseError) {
+            logger.warn(`[Baileys] ⚠️ Não foi possível parsear authData para ${connectionId}`, parseError);
+          }
+        }
+      } catch (error) {
+        logger.warn(`[Baileys] ⚠️ Erro ao verificar credenciais para ${connectionId}:`, error);
+      }
+    }
     
     logger.info(`[Baileys] 🔁 Manual reconnect requested for ${connectionId}`);
-    logger.info(`[Baileys] 📋 Credentials in DB: ${hasCredentialsInDB ? 'YES ✅' : 'NO ❌'}`);
+    logger.info(`[Baileys] 📋 Credenciais VÁLIDAS no banco: ${hasValidCredentialsInDB ? 'SIM ✅' : 'NÃO ❌'}`);
     
-    if (!hasCredentialsInDB) {
-      logger.warn(`[Baileys] ⚠️ No credentials found in DB for ${connectionId} - will generate new QR code`);
+    if (!hasValidCredentialsInDB) {
+      logger.warn(`[Baileys] ⚠️ Sem credenciais válidas para ${connectionId} - QR code será gerado`);
     } else {
-      logger.info(`[Baileys] ✅ Credentials found in DB for ${connectionId} - will reconnect with existing credentials`);
+      logger.info(`[Baileys] ✅ Com credenciais válidas para ${connectionId} - reconexão SEM QR code`);
+      logger.info(`[Baileys] 💡 Baileys deve conectar automaticamente usando credenciais salvas`);
     }
 
     // Verificar se há lock de reconexão ativo
@@ -3655,7 +3727,7 @@ class BaileysManager {
         throw error;
       }
       
-      return hasCredentialsInDB
+      return hasValidCredentialsInDB
         ? {
             status: 'reconnecting',
             message: 'Reconectando com credenciais existentes...',
@@ -3681,7 +3753,7 @@ class BaileysManager {
     this.reconnectionLocks.delete(connectionId);
 
     logger.info(`[Baileys] 🔁 Manual reconnect initiated for ${connectionId}`);
-    logger.info(`[Baileys] 📋 Will ${hasCredentialsInDB ? 'reconnect with existing credentials' : 'generate new QR code'}`);
+    logger.info(`[Baileys] 📋 Will ${hasValidCredentialsInDB ? 'reconnect with existing credentials (NO QR CODE)' : 'generate new QR code'}`);
     
     // ✅ IMPORTANTE: Remover cliente atual SEM fazer logout
     // Isso preserva as credenciais no banco de dados
@@ -3703,15 +3775,15 @@ class BaileysManager {
       throw error;
     }
 
-    return hasCredentialsInDB
-      ? {
+    return hasValidCredentialsInDB
+        ? {
       status: 'reconnecting',
-          message: 'Reconectando com credenciais existentes...',
+          message: 'Reconectando com credenciais existentes (sem QR code)...',
         }
-      : {
+        : {
           status: 'awaiting_qr',
           message: 'Aguardando QR code...',
-    };
+        };
   }
 
   /**
