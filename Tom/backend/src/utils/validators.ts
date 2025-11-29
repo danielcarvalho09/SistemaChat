@@ -65,7 +65,7 @@ export const updateConversationNotesSchema = z.object({
 // ==================== VALIDADORES DE MENSAGEM ====================
 
 export const sendMessageSchema = z.object({
-  content: z.string().max(4096),
+  content: z.string().max(4096).optional().default(''),
   messageType: z
     .enum(['text', 'image', 'video', 'audio', 'document', 'location'])
     .default('text'),
@@ -88,14 +88,15 @@ export const sendMessageSchema = z.object({
   quotedMessageId: z.string().uuid('Invalid quotedMessageId').optional(),
 }).refine(
   (data) => {
+    const content = data.content || '';
     // Se for mensagem de texto, content é obrigatório (não pode ser vazio)
     if (data.messageType === 'text') {
-      return data.content && data.content.trim().length > 0;
+      return content.trim().length > 0;
     }
     // Para mensagens com mídia, content pode ser vazio (sem caption)
     // Mas se não houver mediaUrl, precisa ter content
     if (!data.mediaUrl) {
-      return data.content && data.content.trim().length > 0;
+      return content.trim().length > 0;
     }
     return true;
   },

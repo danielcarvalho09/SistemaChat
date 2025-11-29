@@ -241,11 +241,12 @@ export class ConversationController {
   ) => {
     try {
       const { conversationId } = request.params;
+      console.log('[sendMessage] Raw request body:', JSON.stringify(request.body));
       const data = validate(sendMessageSchema, request.body);
       const userId = request.user!.userId;
       const userRoles = request.user!.roles;
 
-      console.log('[sendMessage] Request:', { conversationId, userId, userRoles, content: data.content });
+      console.log('[sendMessage] Validated data:', { conversationId, userId, userRoles, content: data.content, messageType: data.messageType, mediaUrl: data.mediaUrl });
 
       const message = await this.messageService.sendMessage({
         ...data,
