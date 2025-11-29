@@ -234,11 +234,26 @@ class BaileysManager {
       // Event: Sincronização de histórico (mensagens antigas)
       // Baseado em: https://baileys.wiki/docs/socket/history-sync
       socket.ev.on('messaging-history.set', async ({ chats, contacts, messages, syncType }) => {
-        logger.info(`[Baileys] 📚 History sync received for ${connectionId}:`);
-        logger.info(`  - Messages: ${messages?.length || 0}`);
-        logger.info(`  - Chats: ${chats?.length || 0}`);
-        logger.info(`  - Contacts: ${contacts?.length || 0}`);
-        logger.info(`  - Sync Type: ${syncType || 'unknown'}`);
+        logger.info(`[Baileys] 📚 ========== HISTORY SYNC RECEIVED ==========`);
+        logger.info(`[Baileys] 📚 Connection: ${connectionId}`);
+        logger.info(`[Baileys] 📚 Messages: ${messages?.length || 0}`);
+        logger.info(`[Baileys] 📚 Chats: ${chats?.length || 0}`);
+        logger.info(`[Baileys] 📚 Contacts: ${contacts?.length || 0}`);
+        logger.info(`[Baileys] 📚 Sync Type: ${syncType || 'unknown'}`);
+        
+        // ✅ Log do período de sincronização esperado
+        const connection = await this.prisma.whatsAppConnection.findUnique({
+          where: { id: connectionId },
+          select: { lastDisconnectAt: true, firstConnectedAt: true },
+        });
+        
+        if (connection?.lastDisconnectAt) {
+          const syncWindowMinutes = (Date.now() - connection.lastDisconnectAt.getTime()) / 1000 / 60;
+          logger.info(`[Baileys] 📅 Sync window: desde ${connection.lastDisconnectAt.toISOString()} (${syncWindowMinutes.toFixed(1)} minutos atrás)`);
+          logger.info(`[Baileys] 🔍 Filtrando mensagens anteriores a ${connection.lastDisconnectAt.toISOString()}`);
+        }
+        
+        logger.info(`[Baileys] 📚 ==========================================`);
         
         // Armazenar chats e contacts conforme documentação
         if (chats && chats.length > 0) {
@@ -249,12 +264,16 @@ class BaileysManager {
           await this.handleHistoryContacts(connectionId, contacts);
         }
         
-          // Processar mensagens do histórico
+        // Processar mensagens do histórico
         if (messages && messages.length > 0) {
+          logger.info(`[Baileys] 📨 Processando ${messages.length} mensagens do histórico...`);
           await this.handleIncomingMessages(connectionId, {
             messages,
             type: 'history',
           });
+          logger.info(`[Baileys] ✅ Mensagens do histórico processadas`);
+        } else {
+          logger.info(`[Baileys] ℹ️ Nenhuma mensagem no histórico recebido`);
         }
       });
 
@@ -596,10 +615,12 @@ class BaileysManager {
 
       // ✅ SINCRONIZAÇÃO: Apenas se for RECONEXÃO (não primeira conexão) E tiver lastDisconnectAt
       if (!wasFirstConnection && lastDisconnectAt) {
+        const timeSinceDisconnect = (Date.now() - lastDisconnectAt.getTime()) / 1000 / 60; // minutos
         logger.info(`[Baileys] 🔄 Reconexão detectada - sincronizando desde ${lastDisconnectAt.toISOString()}`);
-        logger.info(`[Baileys] 📊 Período de sincronização: ${lastDisconnectAt.toISOString()} até agora`);
+        logger.info(`[Baileys] 📊 Período de sincronização: ${lastDisconnectAt.toISOString()} até agora (${timeSinceDisconnect.toFixed(1)} minutos offline)`);
         
         // Sincronização após conexão estabilizar
+        // ✅ Aumentar timeout para conexões instáveis e múltiplas tentativas
         setTimeout(async () => {
           try {
             const currentClient = this.clients.get(connectionId);
@@ -609,13 +630,33 @@ class BaileysManager {
             }
             
             // Sincronizar todas conversas ativas desde lastDisconnectAt
-            logger.info(`[Baileys] 🔄 Iniciando sincronização de mensagens perdidas...`);
-            await this.syncAllActiveConversations(connectionId, 50);
-            logger.info(`[Baileys] ✅ Sincronização concluída`);
+            logger.info(`[Baileys] 🔄 Iniciando sincronização de mensagens perdidas (após 10s de estabilização)...`);
+            logger.info(`[Baileys] 📅 Buscando mensagens desde: ${lastDisconnectAt.toISOString()}`);
+            
+            const syncedCount = await this.syncAllActiveConversations(connectionId, 50);
+            logger.info(`[Baileys] ✅ Sincronização concluída - ${syncedCount} conversas processadas`);
+            
+            // ✅ Segunda tentativa após mais tempo para garantir que todas as mensagens foram recebidas
+            if (timeSinceDisconnect > 5) { // Se esteve offline por mais de 5 minutos
+              logger.info(`[Baileys] 🔄 Período offline longo (${timeSinceDisconnect.toFixed(1)} min) - agendando segunda sincronização...`);
+              setTimeout(async () => {
+                try {
+                  const retryClient = this.clients.get(connectionId);
+                  if (retryClient && retryClient.status === 'connected') {
+                    logger.info(`[Baileys] 🔄 Executando segunda sincronização (60s após reconexão)...`);
+                    const retrySyncedCount = await this.syncAllActiveConversations(connectionId, 50);
+                    logger.info(`[Baileys] ✅ Segunda sincronização concluída - ${retrySyncedCount} conversas processadas`);
+                  }
+                } catch (retryError) {
+                  logger.error(`[Baileys] ❌ Erro na segunda sincronização:`, retryError);
+                }
+              }, 50000); // 50s após primeira sincronização (total ~60s após reconexão)
+            }
           } catch (syncError) {
             logger.error(`[Baileys] ❌ Erro na sincronização:`, syncError);
+            logger.error(`[Baileys] Stack trace:`, (syncError as Error)?.stack);
           }
-        }, 5000); // Aguardar 5s para conexão estabilizar
+        }, 10000); // ✅ Aumentar para 10s para conexão estabilizar melhor
       } else if (wasFirstConnection) {
         logger.info(`[Baileys] ℹ️ Primeira conexão - nenhuma sincronização necessária`);
       } else {
@@ -3727,31 +3768,47 @@ class BaileysManager {
 
       const jid = phoneNumber.includes('@') ? phoneNumber : `${phoneNumber}@s.whatsapp.net`;
       
-      logger.info(`[Baileys] 🔄 ROBUST sync requested for ${phoneNumber} on ${connectionId} (limit: ${limit})`);
+      // ✅ Log do período de sincronização esperado
+      if (client.lastSyncFrom) {
+        const syncWindowMinutes = (Date.now() - client.lastSyncFrom.getTime()) / 1000 / 60;
+        logger.info(`[Baileys] 🔄 SYNC requested for ${phoneNumber} on ${connectionId}`);
+        logger.info(`[Baileys] 📅 Sync window: desde ${client.lastSyncFrom.toISOString()} (${syncWindowMinutes.toFixed(1)} minutos atrás)`);
+      } else {
+        logger.info(`[Baileys] 🔄 SYNC requested for ${phoneNumber} on ${connectionId} (sem janela de tempo - sincronização geral)`);
+      }
 
       try {
         // ESTRATÉGIA ROBUSTA DE SINCRONIZAÇÃO:
         // Usa presence updates múltiplos para forçar WhatsApp a enviar mensagens pendentes
         
-        logger.info(`[Baileys] Starting robust sync for ${phoneNumber}...`);
+        logger.info(`[Baileys] 🚀 Starting robust sync for ${phoneNumber}...`);
         
         // Método 1: Marcar presença disponível
         await client.socket.sendPresenceUpdate('available', jid);
-        await new Promise(resolve => setTimeout(resolve, 200));
+        await new Promise(resolve => setTimeout(resolve, 300));
         
         // Método 2: Simular digitação (ativa sincronização mais agressiva do WhatsApp)
         await client.socket.sendPresenceUpdate('composing', jid);
-        await new Promise(resolve => setTimeout(resolve, 800));
+        await new Promise(resolve => setTimeout(resolve, 1000)); // ✅ Aumentar tempo para dar mais chance
         
         // Método 3: Pausar digitação
         await client.socket.sendPresenceUpdate('paused', jid);
-        await new Promise(resolve => setTimeout(resolve, 200));
+        await new Promise(resolve => setTimeout(resolve, 300));
         
         // Método 4: Marcar disponível novamente (ciclo completo)
         await client.socket.sendPresenceUpdate('available', jid);
+        await new Promise(resolve => setTimeout(resolve, 200));
         
-        logger.info(`[Baileys] ✅ ROBUST sync triggers sent for ${phoneNumber}`);
-        logger.info(`[Baileys] WhatsApp will send missing messages via events (processed by handleIncomingMessages)`);
+        // ✅ Método 5: Repetir ciclo uma vez mais para maior confiabilidade
+        await client.socket.sendPresenceUpdate('composing', jid);
+        await new Promise(resolve => setTimeout(resolve, 500));
+        await client.socket.sendPresenceUpdate('paused', jid);
+        await new Promise(resolve => setTimeout(resolve, 200));
+        await client.socket.sendPresenceUpdate('available', jid);
+        
+        logger.info(`[Baileys] ✅ ROBUST sync triggers sent for ${phoneNumber} (2 ciclos completos)`);
+        logger.info(`[Baileys] 📨 WhatsApp should send missing messages via events (processed by handleIncomingMessages)`);
+        logger.info(`[Baileys] ⏳ Monitor logs for 'messaging-history.set' or 'messages.upsert' events`);
         
         // A sincronização real acontece via eventos que são capturados
         // por handleIncomingMessages() quando o WhatsApp responde aos presence updates
