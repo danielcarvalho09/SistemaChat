@@ -433,33 +433,42 @@ export class ConversationService {
       }
     }
 
+    // NOVA LÓGICA: Transferência agora é APENAS para usuário específico
+    // Primeiro seleciona o setor, depois o usuário do setor
+    if (!toUserId) {
+      throw new Error('toUserId is required. Transfer must be to a specific user.');
+    }
+
+    // Buscar departamento do usuário de destino para definir departmentId
+    const toUserDepartment = await this.prisma.userDepartmentAccess.findFirst({
+      where: { userId: toUserId },
+      include: { department: true },
+    });
+
+    const targetDepartmentId = toUserDepartment?.departmentId || toDepartmentId || conversation.departmentId;
+
     // Criar registro de transferência
     await this.prisma.conversationTransfer.create({
       data: {
         conversationId,
         fromUserId,
         toUserId,
-        toDepartmentId,
+        toDepartmentId: targetDepartmentId,
         reason,
       },
     });
 
-    // NOVA LÓGICA: Ao transferir para setor, não atribui a ninguém específico
-    // A conexão só muda quando alguém aceitar a conversa
+    // Atualizar conversa: atribuir ao usuário específico e definir status como transferred
+    // A conversa ficará visível APENAS para o usuário selecionado e administradores
     const updateData: any = {
       status: 'transferred',
-      departmentId: toDepartmentId || conversation.departmentId,
-      assignedUserId: null, // Remove atribuição para que todos do setor vejam
+      departmentId: targetDepartmentId,
+      assignedUserId: toUserId, // Atribuir diretamente ao usuário selecionado
     };
 
-    // Se transferir para usuário específico, atribui diretamente
-    if (toUserId) {
-      updateData.assignedUserId = toUserId;
-    }
-
     // NÃO mudar a conexão na transferência
-    // A conexão só será alterada quando alguém aceitar a conversa
-    logger.info(`🔄 Conversation ${conversationId} will keep connection ${conversation.connectionId} until accepted`);
+    // A conexão só será alterada quando o usuário aceitar a conversa
+    logger.info(`🔄 Conversation ${conversationId} will keep connection ${conversation.connectionId} until accepted by user ${toUserId}`);
 
     // Atualizar conversa
     await this.prisma.conversation.update({
@@ -467,7 +476,7 @@ export class ConversationService {
       data: updateData,
     });
 
-    logger.info(`✅ Conversation ${conversationId} transferred from ${fromUserId} to ${toDepartmentId ? `department ${toDepartmentId}` : `user ${toUserId}`}`);
+    logger.info(`✅ Conversation ${conversationId} transferred from ${fromUserId} to user ${toUserId} (department: ${targetDepartmentId})`);
   }
 
   /**

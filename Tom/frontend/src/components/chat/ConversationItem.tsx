@@ -57,6 +57,11 @@ export function ConversationItem({ conversation, isSelected, onClick, onAccept }
     
     setIsAccepting(true);
     try {
+      // Se conversa foi transferida e tem observação, marcar para destacar
+      if (conversation.status === 'transferred' && conversation.internalNotes) {
+        localStorage.setItem(`transferred_${conversation.id}`, 'true');
+      }
+      
       await api.patch(`/conversations/${conversation.id}/accept`, {});
       if (onAccept) {
         onAccept(conversation.id);

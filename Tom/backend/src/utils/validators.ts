@@ -45,14 +45,9 @@ export const acceptConversationSchema = z.object({
 });
 
 export const transferConversationSchema = z.object({
-  toUserId: z.string().optional(),
-  toDepartmentId: z.string().min(1, 'Department ID is required').optional(),
-  toConnectionId: z.string().optional(),
+  toUserId: z.string().uuid('Invalid user ID').min(1, 'User ID is required'), // Agora obrigatório
   reason: z.string().max(200, 'Reason must be at most 200 characters').optional(),
-}).refine(
-  (data) => data.toUserId || data.toDepartmentId || data.toConnectionId,
-  'Either toUserId, toDepartmentId or toConnectionId must be provided'
-);
+});
 
 export const updateConversationStatusSchema = z.object({
   status: z.enum(['waiting', 'transferred', 'in_progress', 'resolved', 'closed']),

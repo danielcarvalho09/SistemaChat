@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
-import { MoreVertical, Phone, Video, Search, ArrowRightLeft, Archive, Trash2, Clock, CheckCircle2 } from 'lucide-react';
+import { MoreVertical, Phone, Video, Search, ArrowRightLeft, Archive, Trash2, Clock, CheckCircle2, FileText } from 'lucide-react';
 import { Button } from '../ui/button';
 import { useConversationStore } from '../../store/conversationStore';
 import { MessageList } from './MessageList';
 import { MessageInput } from './MessageInput';
 import { TransferModal } from './TransferModal';
 import { ConversationTagMenu } from '../tags/ConversationTagMenu';
+import { ObservationModal } from './ObservationModal';
+import { ObservationCard } from './ObservationCard';
 import './whatsapp-bg.css';
 import type { Message } from '../../types';
 import api from '../../lib/axios';
@@ -20,9 +22,25 @@ export function ChatArea({ conversationId, onToggleDetails }: ChatAreaProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [showMenu, setShowMenu] = useState(false);
   const [showTransferModal, setShowTransferModal] = useState(false);
+  const [showObservationModal, setShowObservationModal] = useState(false);
   const [replyingTo, setReplyingTo] = useState<Message | null>(null);
+  const [highlightObservation, setHighlightObservation] = useState(false);
 
   const conversation = conversations.find((c) => c.id === conversationId);
+
+  // Detectar quando conversa transferida é aceita e destacar observação
+  useEffect(() => {
+    if (conversation?.status === 'in_progress' && conversation?.internalNotes) {
+      // Verificar se foi recentemente transferida e aceita
+      const wasTransferred = localStorage.getItem(`transferred_${conversationId}`);
+      if (wasTransferred) {
+        setHighlightObservation(true);
+        localStorage.removeItem(`transferred_${conversationId}`);
+        // Remover destaque após 5 segundos
+        setTimeout(() => setHighlightObservation(false), 5000);
+      }
+    }
+  }, [conversation, conversationId]);
 
   useEffect(() => {
     if (conversationId) {
@@ -131,6 +149,15 @@ export function ChatArea({ conversationId, onToggleDetails }: ChatAreaProps) {
             conversationId={conversationId}
             onTagsChange={() => fetchConversations()}
           />
+          <Button 
+            variant="ghost" 
+            size="sm" 
+            className="hover:bg-[#2a3942]"
+            onClick={() => setShowObservationModal(true)}
+            title="Adicionar observação"
+          >
+            <FileText className="w-5 h-5 text-gray-400" />
+          </Button>
           <Button variant="ghost" size="sm" className="hover:bg-[#2a3942]">
             <Search className="w-5 h-5 text-gray-400" />
           </Button>
@@ -222,6 +249,15 @@ export function ChatArea({ conversationId, onToggleDetails }: ChatAreaProps) {
 
       {/* Messages Area */}
       <div className="flex-1 overflow-y-auto p-4 whatsapp-bg-dark">
+        {/* Observation Card */}
+        {conversation?.internalNotes && (
+          <ObservationCard 
+            observation={conversation.internalNotes}
+            conversationId={conversationId}
+            onUpdate={() => fetchConversations()}
+            isHighlighted={highlightObservation}
+          />
+        )}
         <MessageList
           messages={messages[conversationId] || []}
           onReply={(message) => setReplyingTo(message)}
@@ -250,6 +286,20 @@ export function ChatArea({ conversationId, onToggleDetails }: ChatAreaProps) {
           onTransfer={() => {
             setShowTransferModal(false);
             // Recarregar lista de conversas e mensagens
+            fetchConversations();
+            fetchMessages(conversationId);
+          }}
+        />
+      )}
+
+      {/* Observation Modal */}
+      {showObservationModal && (
+        <ObservationModal
+          conversationId={conversationId}
+          currentObservation={conversation?.internalNotes || ''}
+          onClose={() => setShowObservationModal(false)}
+          onSave={() => {
+            setShowObservationModal(false);
             fetchConversations();
             fetchMessages(conversationId);
           }}
