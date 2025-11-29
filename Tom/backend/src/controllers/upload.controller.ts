@@ -58,17 +58,34 @@ export class UploadController {
     return sanitized;
   }
 
-  private async detectMime(buffer: Buffer): Promise<{ isValid: boolean; mime?: string; error?: string }> {
-    const fileType = await fileTypeFromBuffer(buffer);
-    if (!fileType) {
-      return { isValid: false, error: 'Could not determine file type' };
-    }
+  private async detectMime(buffer: Buffer, filename?: string): Promise<{ isValid: boolean; mime?: string; error?: string }> {
+    try {
+      const fileType = await fileTypeFromBuffer(buffer);
+      
+      if (!fileType) {
+        // Fallback: tentar detectar pelo nome do arquivo se fornecido
+        if (filename) {
+          const ext = path.extname(filename).toLowerCase();
+          const mimeFromExt = this.getMimeTypeFromExtension(ext);
+          
+          if (mimeFromExt && mimeFromExt !== 'application/octet-stream' && ALLOWED_MIME_TYPES.has(mimeFromExt)) {
+            logger.warn(`[UploadController] Could not detect MIME from buffer, using extension fallback: ${mimeFromExt}`);
+            return { isValid: true, mime: mimeFromExt };
+          }
+        }
+        
+        return { isValid: false, error: 'Could not determine file type' };
+      }
 
-    if (!ALLOWED_MIME_TYPES.has(fileType.mime)) {
-      return { isValid: false, error: `File type ${fileType.mime} is not allowed` };
-    }
+      if (!ALLOWED_MIME_TYPES.has(fileType.mime)) {
+        return { isValid: false, error: `File type ${fileType.mime} is not allowed` };
+      }
 
-    return { isValid: true, mime: fileType.mime };
+      return { isValid: true, mime: fileType.mime };
+    } catch (error) {
+      logger.error('[UploadController] Error detecting MIME:', error);
+      return { isValid: false, error: 'Error detecting file type' };
+    }
   }
 
   private hasMaliciousContent(buffer: Buffer): boolean {
@@ -106,16 +123,21 @@ export class UploadController {
     let savedPath: string | null = null;
 
     try {
+      logger.info('[UploadController] Starting file upload...');
       const data = await request.file();
       if (!data) {
+        logger.warn('[UploadController] No file uploaded');
         return reply.status(400).send({ success: false, message: 'No file uploaded' });
       }
+
+      logger.info(`[UploadController] File received: ${data.filename}, mimetype: ${data.mimetype}`);
 
       const chunks: Buffer[] = [];
       let total = 0;
       for await (const chunk of data.file) {
         total += chunk.length;
         if (total > MAX_FILE_SIZE) {
+          logger.warn(`[UploadController] File size exceeds limit: ${total} bytes`);
           return reply.status(413).send({
             success: false,
             message: `File size exceeds maximum allowed (${MAX_FILE_SIZE / 1024 / 1024}MB)`,
@@ -124,9 +146,14 @@ export class UploadController {
         chunks.push(chunk);
       }
 
+      logger.info(`[UploadController] File read complete: ${total} bytes`);
       const buffer = Buffer.concat(chunks);
-      const typeCheck = await this.detectMime(buffer);
+      
+      const typeCheck = await this.detectMime(buffer, data.filename);
+      logger.info(`[UploadController] MIME detection result:`, { isValid: typeCheck.isValid, mime: typeCheck.mime, error: typeCheck.error });
+      
       if (!typeCheck.isValid) {
+        logger.warn(`[UploadController] Invalid file type: ${typeCheck.error}`);
         return reply.status(415).send({ success: false, message: typeCheck.error || 'Invalid file type' });
       }
 
@@ -198,8 +225,21 @@ export class UploadController {
       if (savedPath && fs.existsSync(savedPath)) {
         fs.unlinkSync(savedPath);
       }
-      logger.error('Error uploading file:', error);
-      return reply.status(500).send({ success: false, message: 'Error uploading file' });
+      
+      logger.error('[UploadController] Error uploading file:', error);
+      logger.error('[UploadController] Error stack:', error instanceof Error ? error.stack : 'No stack trace');
+      logger.error('[UploadController] Error details:', {
+        message: error instanceof Error ? error.message : String(error),
+        name: error instanceof Error ? error.name : 'Unknown',
+        userId: request.user?.userId,
+        ip: request.ip,
+      });
+      
+      return reply.status(500).send({ 
+        success: false, 
+        message: 'Error uploading file',
+        error: process.env.NODE_ENV === 'development' ? (error instanceof Error ? error.message : String(error)) : undefined
+      });
     }
   };
 

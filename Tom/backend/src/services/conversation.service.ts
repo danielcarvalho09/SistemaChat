@@ -611,7 +611,7 @@ export class ConversationService {
   /**
    * Formata resposta da conversa
    */
-  private formatConversationResponse(conversation: any): ConversationResponse {
+  public formatConversationResponse(conversation: any): ConversationResponse {
     try {
       const lastMessage = conversation.messages?.[0] || null;
       const quoted = lastMessage?.quotedMessage || null;

@@ -806,24 +806,51 @@ export class MessageService {
         
         // Só emitir new_conversation se for realmente uma conversa nova
         if (isNewConversation) {
-          // Buscar conversa completa com todos os dados
+          // Buscar conversa completa com todos os dados formatados
           const fullConversation = await this.prisma.conversation.findUnique({
             where: { id: conversation.id },
             include: {
               contact: true,
               connection: true,
               department: true,
-              assignedUser: true,
+              assignedUser: {
+                include: {
+                  roles: {
+                    include: { role: true },
+                  },
+                },
+              },
+              messages: {
+                orderBy: { timestamp: 'desc' },
+                take: 1,
+                include: {
+                  quotedMessage: {
+                    include: {
+                      sender: true,
+                    },
+                  },
+                },
+              },
             },
           });
 
           if (fullConversation) {
-            // Emitir nova conversa para todos os usuários
-            socketServer.getIO().emit('new_conversation', fullConversation);
-            logger.info(`[MessageService] 🆕 New conversation event emitted: ${conversation.id}`);
+            // Formatar conversa usando o mesmo formato da listagem
+            const { ConversationService } = await import('./conversation.service.js');
+            const conversationService = new ConversationService();
+            const formattedConversation = (conversationService as any).formatConversationResponse(fullConversation);
+            
+            // Emitir nova conversa formatada para todos os usuários
+            socketServer.getIO().emit('new_conversation', formattedConversation);
+            logger.info(`[MessageService] 🆕 New conversation event emitted: ${conversation.id} with department: ${fullConversation.department?.name || 'None'}`);
           }
         } else {
-          logger.info(`Existing conversation, skipping new_conversation event`);
+          // Conversa existente - emitir evento de atualização para que o frontend atualize a lista
+          socketServer.emitConversationUpdate(conversation.id, { 
+            lastMessageAt: new Date(),
+            unreadCount: conversation.unreadCount,
+          });
+          logger.info(`Existing conversation updated, emitted conversation:update event`);
         }
       } catch (socketError) {
         logger.error('Error emitting socket event:', socketError);
