@@ -2239,134 +2239,34 @@ class BaileysManager {
       if (messageType === 'text') {
         messageContent = { text: content as string };
       } else if (messageType === 'image') {
+        // ✅ IMPLEMENTAÇÃO SIMPLES E DIRETA BASEADA NA DOCUMENTAÇÃO DO BAILEYS
+        // Documentação: https://baileys.wiki/docs/sending-messages/
+        // Formato oficial: { image: Buffer | { url: string }, caption?: string }
+        
         const { url, caption } = content as { url: string; caption?: string };
         
-        logger.info(`[Baileys] 🖼️ Starting image message processing:`, {
-          url,
-          caption: caption || 'none',
-          urlType: url?.startsWith('http://') || url?.startsWith('https://') ? 'absolute' : 'relative',
-        });
+        if (!url) {
+          throw new Error('Image URL is required');
+        }
         
-        // ✅ Converter URL relativa para absoluta se necessário
+        logger.info(`[Baileys] 🖼️ Sending image from URL: ${url}`);
+        
+        // Converter URL relativa para absoluta
         let imageUrl = url;
-        let imageBuffer: Buffer | null = null;
-        let filename: string | null = null;
-        
-        // Extrair filename da URL
         if (!imageUrl.startsWith('http://') && !imageUrl.startsWith('https://')) {
-          // URL relativa - extrair filename
-          filename = imageUrl.split('/').pop()?.split('?')[0] || null;
-        } else {
-          // URL absoluta - extrair filename
-          const urlParts = imageUrl.split('/');
-          filename = urlParts[urlParts.length - 1]?.split('?')[0] || null;
+          const baseUrl = process.env.API_BASE_URL || process.env.RAILWAY_PUBLIC_DOMAIN || 'http://localhost:3000';
+          imageUrl = imageUrl.startsWith('/') 
+            ? `${baseUrl}${imageUrl}` 
+            : `${baseUrl}/${imageUrl}`;
         }
         
-        // ✅ EXEMPLO DA INTERNET: Tentar ler arquivo localmente primeiro (mais eficiente e confiável)
-        // Padrão usado: fs.readFileSync() e passar buffer diretamente para sendMessage
-        if (filename) {
-          // Tentar primeiro em secure-uploads (diretório usado pelo upload controller)
-          const secureUploadsDir = path.join(process.cwd(), 'secure-uploads');
-          const secureUploadsPath = path.join(secureUploadsDir, filename);
-          
-          // Tentar também em uploads (fallback)
-          const uploadsDir = path.join(process.cwd(), 'uploads');
-          const uploadsPath = path.join(uploadsDir, filename);
-          
-          logger.info(`[Baileys] 🔍 Looking for image file: ${filename}`);
-          logger.info(`[Baileys] 🔍 Checking secure-uploads: ${secureUploadsPath}`);
-          logger.info(`[Baileys] 🔍 Checking uploads: ${uploadsPath}`);
-          
-          if (fs.existsSync(secureUploadsPath)) {
-            try {
-              imageBuffer = fs.readFileSync(secureUploadsPath);
-              logger.info(`[Baileys] ✅ Image file found locally in secure-uploads: ${filename} (${imageBuffer.length} bytes)`);
-              
-              // ✅ VALIDAÇÃO: Verificar se buffer não está vazio
-              if (imageBuffer.length === 0) {
-                logger.error(`[Baileys] ❌ Image buffer is EMPTY! File: ${secureUploadsPath}`);
-                imageBuffer = null;
-              } else {
-                logger.info(`[Baileys] ✅ Image buffer is valid (${imageBuffer.length} bytes)`);
-              }
-            } catch (fileError: any) {
-              logger.error(`[Baileys] ❌ Failed to read image file from secure-uploads:`, {
-                error: fileError?.message,
-                stack: fileError?.stack,
-                path: secureUploadsPath,
-              });
-              imageBuffer = null;
-            }
-          } else if (fs.existsSync(uploadsPath)) {
-            try {
-              imageBuffer = fs.readFileSync(uploadsPath);
-              logger.info(`[Baileys] ✅ Image file found locally in uploads: ${filename} (${imageBuffer.length} bytes)`);
-              
-              // ✅ VALIDAÇÃO: Verificar se buffer não está vazio
-              if (imageBuffer.length === 0) {
-                logger.error(`[Baileys] ❌ Image buffer is EMPTY! File: ${uploadsPath}`);
-                imageBuffer = null;
-              } else {
-                logger.info(`[Baileys] ✅ Image buffer is valid (${imageBuffer.length} bytes)`);
-              }
-            } catch (fileError: any) {
-              logger.error(`[Baileys] ❌ Failed to read image file from uploads:`, {
-                error: fileError?.message,
-                stack: fileError?.stack,
-                path: uploadsPath,
-              });
-              imageBuffer = null;
-            }
-          } else {
-            logger.warn(`[Baileys] ⚠️ Image file not found locally: ${filename}`);
-            logger.warn(`[Baileys] ⚠️ Secure-uploads path doesn't exist: ${secureUploadsPath}`);
-            logger.warn(`[Baileys] ⚠️ Uploads path doesn't exist: ${uploadsPath}`);
-          }
-          
-          // ✅ Converter URL relativa para absoluta (fallback se arquivo não for encontrado)
-          if (!imageUrl.startsWith('http://') && !imageUrl.startsWith('https://')) {
-            const baseUrl = process.env.API_BASE_URL || process.env.RAILWAY_PUBLIC_DOMAIN || 'http://localhost:3000';
-            imageUrl = imageUrl.startsWith('/') 
-              ? `${baseUrl}${imageUrl}` 
-              : `${baseUrl}/${imageUrl}`;
-            logger.info(`[Baileys] Converted relative image URL to absolute: ${imageUrl}`);
-          }
-        }
+        // ✅ Enviar usando URL (formato recomendado pela documentação)
+        // Documentação: https://baileys.wiki/docs/sending-messages/
+        messageContent = caption && caption.trim() 
+          ? { image: { url: imageUrl }, caption }
+          : { image: { url: imageUrl } };
         
-        // ✅ EXEMPLO DA INTERNET: Enviar como buffer diretamente (igual ao exemplo)
-        // Padrão do exemplo: { image: fs.readFileSync(caminhoImagem), caption: 'texto' }
-        if (imageBuffer && imageBuffer.length > 0) {
-          // ✅ VALIDAÇÃO FINAL: Verificar que o buffer não está vazio antes de enviar
-          if (imageBuffer.length === 0) {
-            logger.error(`[Baileys] ❌ Image buffer is EMPTY before sending! Cannot send empty image.`);
-            throw new Error('Image buffer is empty - cannot send image');
-          }
-          
-          // ✅ Enviar como buffer (exatamente como o exemplo da internet)
-          // Exemplo: await sock.sendMessage(destinatario, { image: fs.readFileSync(caminhoImagem), caption: 'texto' })
-          messageContent = caption && caption.trim() 
-            ? { image: imageBuffer, caption }
-            : { image: imageBuffer };
-          logger.info(`[Baileys] ✅ Using image buffer (exactly like internet example - fs.readFileSync pattern): ${imageBuffer.length} bytes`);
-        } else {
-          // ✅ Fallback: Usar URL pública (deve ser absoluta e acessível)
-          logger.warn(`[Baileys] ⚠️ Image file not found locally, using URL fallback: ${imageUrl}`);
-          logger.info(`[Baileys] 📤 Preparing to send image with URL: ${imageUrl}`);
-          
-          try {
-            // Verificar se a URL é acessível antes de enviar
-            const urlObj = new URL(imageUrl);
-            logger.info(`[Baileys] ✅ URL is valid: ${urlObj.href}`);
-          } catch (urlError: any) {
-            logger.error(`[Baileys] ❌ Invalid URL format: ${imageUrl}`, urlError);
-            throw new Error(`Invalid image URL format: ${imageUrl}`);
-          }
-          
-          messageContent = caption && caption.trim() 
-            ? { image: { url: imageUrl }, caption }
-            : { image: { url: imageUrl } };
-          logger.info(`[Baileys] ✅ Using image URL (caption: ${caption ? 'yes' : 'no'}): ${imageUrl}`);
-        }
+        logger.info(`[Baileys] ✅ Image message prepared with URL: ${imageUrl}`);
       } else if (messageType === 'audio') {
         const { url } = content as { url: string };
         // ✅ Converter URL relativa para absoluta se necessário
