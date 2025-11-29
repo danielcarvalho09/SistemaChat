@@ -17,6 +17,7 @@ import path from 'path';
 import { logger } from '../config/logger.js';
 import { getSocketServer } from '../websocket/socket.server.js';
 import { getPrismaClient } from '../config/database.js';
+import { supabaseStorageService } from '../services/supabase-storage.service.js';
 
 
 export class ClientCreationInProgressError extends Error {
@@ -1384,12 +1385,9 @@ class BaileysManager {
                   : imageMimetype.includes('webp') ? '.webp' 
                   : '.jpg';
                 const filename = `image-${Date.now()}-${Math.random().toString(36).substring(7)}${imageExt}`;
-                const uploadsDir = path.join(process.cwd(), 'secure-uploads');
-                if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
-                fs.writeFileSync(path.join(uploadsDir, filename), imageBuffer);
-                // Usar /uploads/ para compatibilidade (a rota redireciona para secure-uploads)
-                imageMediaUrl = `/uploads/${filename}`;
-                logger.info(`[Baileys] ✅ Image saved: ${filename}`);
+                
+                // ✅ Fazer upload para Supabase Storage (com fallback local)
+                imageMediaUrl = await this.uploadMediaToStorage(imageBuffer, filename, imageMimetype);
               }
             }
           } catch (imageError) {
@@ -1432,12 +1430,9 @@ class BaileysManager {
                   : audioMimetype.includes('m4a') ? '.m4a' 
                   : '.ogg';
                 const filename = `audio-${Date.now()}-${Math.random().toString(36).substring(7)}${audioExt}`;
-                const uploadsDir = path.join(process.cwd(), 'secure-uploads');
-                if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
-                fs.writeFileSync(path.join(uploadsDir, filename), audioBuffer);
-                // Usar /uploads/ para compatibilidade (a rota redireciona para secure-uploads)
-                audioMediaUrl = `/uploads/${filename}`;
-                logger.info(`[Baileys] ✅ Audio saved: ${filename}`);
+                
+                // ✅ Fazer upload para Supabase Storage (com fallback local)
+                audioMediaUrl = await this.uploadMediaToStorage(audioBuffer, filename, audioMimetype);
               }
             }
           } catch (audioError) {
@@ -1480,12 +1475,9 @@ class BaileysManager {
                   : videoMimetype.includes('webm') ? '.webm' 
                   : '.mp4';
                 const filename = `video-${Date.now()}-${Math.random().toString(36).substring(7)}${videoExt}`;
-                const uploadsDir = path.join(process.cwd(), 'secure-uploads');
-                if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
-                fs.writeFileSync(path.join(uploadsDir, filename), videoBuffer);
-                // Usar /uploads/ para compatibilidade (a rota redireciona para secure-uploads)
-                videoMediaUrl = `/uploads/${filename}`;
-                logger.info(`[Baileys] ✅ Video saved: ${filename}`);
+                
+                // ✅ Fazer upload para Supabase Storage (com fallback local)
+                videoMediaUrl = await this.uploadMediaToStorage(videoBuffer, filename, videoMimetype);
               }
             }
           } catch (videoError) {
@@ -1526,12 +1518,9 @@ class BaileysManager {
                 const docMimetype = message.documentMessage?.mimetype || 'application/octet-stream';
                 const docFileName = message.documentMessage?.fileName || 'document';
                 const filename = `doc-${Date.now()}-${docFileName}`;
-                const uploadsDir = path.join(process.cwd(), 'secure-uploads');
-                if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
-                fs.writeFileSync(path.join(uploadsDir, filename), docBuffer);
-                // Usar /uploads/ para compatibilidade (a rota redireciona para secure-uploads)
-                documentMediaUrl = `/uploads/${filename}`;
-                logger.info(`[Baileys] ✅ Document saved: ${filename}`);
+                
+                // ✅ Fazer upload para Supabase Storage (com fallback local)
+                documentMediaUrl = await this.uploadMediaToStorage(docBuffer, filename, docMimetype);
               }
             }
           } catch (docError) {
@@ -4241,16 +4230,25 @@ class BaileysManager {
         return null;
       }
 
-      logger.info(`[Baileys] Attempting to download media for message ${externalId}`);
+      logger.info(`[Baileys] Attempting to download media for message ${externalId} from ${remoteJid}`);
 
-      // LIMITAÇÃO: Baileys não permite baixar mídia de mensagens antigas facilmente
-      // A mensagem precisa estar no cache ou ser recebida novamente
-      // Por enquanto, retornar null e informar que não é possível
+      // ⚠️ LIMITAÇÃO: O Baileys não fornece uma API direta para baixar mídia de mensagens antigas
+      // As mídias do WhatsApp expiram após 7 dias e não podem ser mais baixadas
+      // Para mídias recentes que ainda estão no cache, o download acontece automaticamente
+      // quando a mensagem é recebida (handleIncomingMessages)
       
-      logger.warn('[Baileys] Media re-download not available - message may be too old or not in cache');
+      // ✅ A solução recomendada é:
+      // 1. Fazer upload para Supabase Storage quando a mídia é recebida (já implementado)
+      // 2. Quando redownload é solicitado, verificar se já está no Supabase
+      // 3. Se não estiver, a mídia provavelmente expirou e não pode ser recuperada
+      
+      logger.warn(`[Baileys] ⚠️ Media re-download not directly supported by Baileys`);
+      logger.warn(`[Baileys] ⚠️ Mídias do WhatsApp expiram após 7 dias e não podem ser baixadas novamente`);
+      logger.warn(`[Baileys] 💡 Recomendação: Fazer upload para Supabase Storage quando a mídia é recebida`);
+      
       return null;
     } catch (error) {
-      logger.error('[Baileys] Error downloading media:', error);
+      logger.error('[Baileys] ❌ Exception downloading media:', error);
       return null;
     }
   }

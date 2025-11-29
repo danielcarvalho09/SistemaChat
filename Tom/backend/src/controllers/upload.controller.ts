@@ -7,6 +7,7 @@ import { logger } from '../config/logger.js';
 import { baileysManager } from '../whatsapp/baileys.manager.js';
 import { getPrismaClient } from '../config/database.js';
 import { getAllowedMimeTypes } from '../utils/file-validation.js';
+import { supabaseStorageService } from '../services/supabase-storage.service.js';
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
 const ALLOWED_MIME_TYPES = new Set(getAllowedMimeTypes());
@@ -141,14 +142,41 @@ export class UploadController {
       }
 
       const uniqueName = `${Date.now()}_${crypto.randomBytes(12).toString('hex')}${ext}`;
-      const filepath = path.join(this.uploadsDir, uniqueName);
-      savedPath = filepath;
+      
+      // ✅ Tentar fazer upload para Supabase Storage primeiro
+      let fileUrl: string;
+      
+      if (supabaseStorageService.isConfigured()) {
+        logger.info('📤 Uploading to Supabase Storage...');
+        const supabaseUrl = await supabaseStorageService.uploadFile(
+          buffer,
+          uniqueName,
+          typeCheck.mime || 'application/octet-stream'
+        );
 
-      fs.writeFileSync(filepath, buffer, { mode: 0o600 });
+        if (supabaseUrl) {
+          fileUrl = supabaseUrl;
+          logger.info('✅ File uploaded to Supabase Storage successfully');
+        } else {
+          // Fallback para armazenamento local se Supabase falhar
+          logger.warn('⚠️ Supabase upload failed, falling back to local storage');
+          const filepath = path.join(this.uploadsDir, uniqueName);
+          savedPath = filepath;
+          fs.writeFileSync(filepath, buffer, { mode: 0o600 });
+          fileUrl = `/secure-uploads/${uniqueName}`;
+        }
+      } else {
+        // Usar armazenamento local se Supabase não estiver configurado
+        logger.info('📤 Uploading to local storage...');
+        const filepath = path.join(this.uploadsDir, uniqueName);
+        savedPath = filepath;
+        fs.writeFileSync(filepath, buffer, { mode: 0o600 });
+        fileUrl = `/secure-uploads/${uniqueName}`;
+      }
 
       const response = {
         filename: uniqueName,
-        url: `/secure-uploads/${uniqueName}`,
+        url: fileUrl,
         mimetype: typeCheck.mime,
         size: total,
         hash: crypto.createHash('sha256').update(buffer).digest('hex'),
@@ -158,6 +186,7 @@ export class UploadController {
         ...response,
         userId: request.user?.userId,
         ip: request.ip,
+        storage: supabaseStorageService.isConfigured() ? 'supabase' : 'local',
       });
 
       return reply.status(200).send({
@@ -194,18 +223,76 @@ export class UploadController {
         return reply.status(400).send({ success: false, message: 'Mensagem não possui mídia' });
       }
 
-      const existingFilename = message.mediaUrl.split('/').pop();
-      if (existingFilename) {
-        const existingPath = path.join(this.uploadsDir, this.sanitizeFileName(existingFilename));
-        if (fs.existsSync(existingPath)) {
+      // ✅ Verificar se a URL já é do Supabase e o arquivo existe
+      const isSupabaseUrl = message.mediaUrl.includes('supabase.co') || message.mediaUrl.includes('storage.supabase');
+      if (isSupabaseUrl && supabaseStorageService.isConfigured()) {
+        // Se já está no Supabase, verificar se o arquivo existe
+        const filename = message.mediaUrl.split('/').pop()?.split('?')[0];
+        if (filename) {
+          logger.info(`Media already in Supabase: ${filename}`);
           return reply.status(200).send({
             success: true,
-            message: 'Arquivo já existe',
+            message: 'Mídia já está disponível no Supabase',
             data: { url: message.mediaUrl },
           });
         }
       }
 
+      // ✅ Verificar se arquivo existe localmente
+      const existingFilename = message.mediaUrl.split('/').pop()?.split('?')[0];
+      if (existingFilename && !isSupabaseUrl) {
+        const existingPath = path.join(this.uploadsDir, this.sanitizeFileName(existingFilename));
+        if (fs.existsSync(existingPath)) {
+          // Se existe localmente mas não está no Supabase, fazer upload para Supabase
+          if (supabaseStorageService.isConfigured()) {
+            try {
+              logger.info(`File exists locally, uploading to Supabase: ${existingFilename}`);
+              const buffer = fs.readFileSync(existingPath);
+              
+              // Detectar mimetype
+              const ext = path.extname(existingFilename);
+              const mimetype = this.getMimeTypeFromExtension(ext);
+              
+              const supabaseUrl = await supabaseStorageService.uploadFile(
+                buffer,
+                existingFilename,
+                mimetype
+              );
+
+              if (supabaseUrl) {
+                // Atualizar mensagem com URL do Supabase
+                await prisma.message.update({
+                  where: { id: message.id },
+                  data: { mediaUrl: supabaseUrl },
+                });
+
+                logger.info('Media uploaded to Supabase from local file', {
+                  messageId: message.id,
+                  filename: existingFilename,
+                });
+
+                return reply.status(200).send({
+                  success: true,
+                  message: 'Mídia migrada para Supabase com sucesso',
+                  data: { url: supabaseUrl },
+                });
+              }
+            } catch (uploadError) {
+              logger.error('Error uploading to Supabase:', uploadError);
+              // Continuar com resposta local se upload falhar
+            }
+          }
+
+          return reply.status(200).send({
+            success: true,
+            message: 'Arquivo já existe localmente',
+            data: { url: message.mediaUrl },
+          });
+        }
+      }
+
+      // ✅ Tentar baixar do WhatsApp
+      logger.info(`Attempting to re-download media from WhatsApp: ${message.externalId}`);
       const buffer = await baileysManager.downloadMedia(
         message.conversation.connectionId,
         message.externalId,
@@ -215,21 +302,53 @@ export class UploadController {
       if (!buffer) {
         return reply.status(400).send({
           success: false,
-          message: 'Não foi possível baixar a mídia. Ela pode não estar mais disponível.',
+          message: 'Não foi possível baixar a mídia. Ela pode ter expirado (mídias do WhatsApp expiram após 7 dias) ou não estar mais disponível no WhatsApp.',
         });
       }
 
-      const ext = path.extname(message.mediaUrl) || '';
-      const filename = `${Date.now()}_redownload${ext}`;
-      const filepath = path.join(this.uploadsDir, filename);
-      fs.writeFileSync(filepath, buffer, { mode: 0o600 });
+      // ✅ Determinar extensão e mimetype
+      const ext = path.extname(message.mediaUrl) || this.getExtensionFromMimeType(message.messageType) || '';
+      const mimetype = this.getMimeTypeFromExtension(ext) || 'application/octet-stream';
+      const filename = `${Date.now()}_${crypto.randomBytes(8).toString('hex')}${ext}`;
 
-      const newUrl = `/secure-uploads/${filename}`;
-      await prisma.message.update({ where: { id: message.id }, data: { mediaUrl: newUrl } });
+      // ✅ Upload para Supabase Storage (prioridade) ou armazenamento local
+      let newUrl: string;
 
-      logger.info('Media re-downloaded', {
+      if (supabaseStorageService.isConfigured()) {
+        logger.info('Uploading re-downloaded media to Supabase Storage...');
+        const supabaseUrl = await supabaseStorageService.uploadFile(
+          buffer,
+          filename,
+          mimetype
+        );
+
+        if (supabaseUrl) {
+          newUrl = supabaseUrl;
+          logger.info('✅ Media uploaded to Supabase Storage successfully');
+        } else {
+          // Fallback para armazenamento local
+          logger.warn('⚠️ Supabase upload failed, falling back to local storage');
+          const filepath = path.join(this.uploadsDir, filename);
+          fs.writeFileSync(filepath, buffer, { mode: 0o600 });
+          newUrl = `/secure-uploads/${filename}`;
+        }
+      } else {
+        // Armazenamento local
+        const filepath = path.join(this.uploadsDir, filename);
+        fs.writeFileSync(filepath, buffer, { mode: 0o600 });
+        newUrl = `/secure-uploads/${filename}`;
+      }
+
+      // ✅ Atualizar mensagem com nova URL
+      await prisma.message.update({
+        where: { id: message.id },
+        data: { mediaUrl: newUrl },
+      });
+
+      logger.info('Media re-downloaded successfully', {
         messageId: message.id,
         filename,
+        storage: supabaseStorageService.isConfigured() ? 'supabase' : 'local',
       });
 
       return reply.status(200).send({
@@ -239,7 +358,46 @@ export class UploadController {
       });
     } catch (error) {
       logger.error('Error re-downloading media:', error);
-      return reply.status(500).send({ success: false, message: 'Error re-downloading media' });
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      return reply.status(500).send({
+        success: false,
+        message: `Erro ao baixar mídia: ${errorMessage}`,
+      });
     }
   };
+
+  /**
+   * Helper para obter mimetype a partir da extensão
+   */
+  private getMimeTypeFromExtension(ext: string): string {
+    const mimeTypes: Record<string, string> = {
+      '.jpg': 'image/jpeg',
+      '.jpeg': 'image/jpeg',
+      '.png': 'image/png',
+      '.gif': 'image/gif',
+      '.webp': 'image/webp',
+      '.mp4': 'video/mp4',
+      '.webm': 'video/webm',
+      '.mp3': 'audio/mpeg',
+      '.ogg': 'audio/ogg',
+      '.wav': 'audio/wav',
+      '.pdf': 'application/pdf',
+      '.doc': 'application/msword',
+      '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    };
+    return mimeTypes[ext.toLowerCase()] || 'application/octet-stream';
+  }
+
+  /**
+   * Helper para obter extensão a partir do tipo de mensagem
+   */
+  private getExtensionFromMimeType(messageType: string): string {
+    const extensions: Record<string, string> = {
+      image: '.jpg',
+      video: '.mp4',
+      audio: '.ogg',
+      document: '.pdf',
+    };
+    return extensions[messageType] || '';
+  }
 }

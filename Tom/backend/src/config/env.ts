@@ -49,6 +49,13 @@ const envSchema = z.object({
   UPLOAD_PATH: z.string().default('./uploads'),
   ALLOWED_FILE_TYPES: z.string().default('image/jpeg,image/png,image/gif,video/mp4,application/pdf'),
 
+  // Supabase Storage (opcional - extraído automaticamente da DATABASE_URL se não fornecido)
+  // SUPABASE_URL será extraído da DATABASE_URL se não configurado
+  SUPABASE_URL: z.string().url().optional(),
+  // SUPABASE_SERVICE_ROLE_KEY ou SUPABASE_ANON_KEY (opcional - para acesso ao Storage)
+  SUPABASE_SERVICE_ROLE_KEY: z.string().optional(),
+  SUPABASE_ANON_KEY: z.string().optional(),
+
   // Encryption (AES-256)
   ENCRYPTION_KEY: z.string().min(64, 'ENCRYPTION_KEY must be 64 hex characters (32 bytes)'),
 });

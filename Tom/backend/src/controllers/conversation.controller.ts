@@ -235,12 +235,38 @@ export class ConversationController {
   ) => {
     try {
       const { conversationId } = request.params;
-      console.log('[sendMessage] Raw request body:', JSON.stringify(request.body));
-      const data = validate(sendMessageSchema, request.body);
+      logger.info('[sendMessage] Raw request body:', { 
+        body: request.body,
+        conversationId,
+        hasMediaUrl: !!request.body?.mediaUrl,
+        mediaUrl: request.body?.mediaUrl,
+        messageType: request.body?.messageType,
+        content: request.body?.content,
+      });
+      
+      let data;
+      try {
+        data = validate(sendMessageSchema, request.body);
+        logger.info('[sendMessage] Validated data:', { 
+          conversationId, 
+          userId: request.user!.userId, 
+          content: data.content, 
+          messageType: data.messageType, 
+          mediaUrl: data.mediaUrl,
+          hasMediaUrl: !!data.mediaUrl,
+        });
+      } catch (validationError: any) {
+        logger.error('[sendMessage] Validation failed:', {
+          error: validationError?.message || validationError,
+          errors: validationError?.errors || validationError,
+          body: request.body,
+          conversationId,
+        });
+        throw validationError;
+      }
+      
       const userId = request.user!.userId;
       const userRoles = request.user!.roles;
-
-      console.log('[sendMessage] Validated data:', { conversationId, userId, userRoles, content: data.content, messageType: data.messageType, mediaUrl: data.mediaUrl });
 
       const message = await this.messageService.sendMessage({
         ...data,
