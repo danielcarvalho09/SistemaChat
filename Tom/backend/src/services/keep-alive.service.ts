@@ -89,77 +89,117 @@ export class KeepAliveService {
   /**
    * Mantém conexões Baileys ativas independentemente do WebSocket
    * Garante que as conexões continuem funcionando mesmo sem clientes WebSocket conectados
+   * ✅ IMPORTANTE: Funciona completamente independente do frontend
    */
   private async keepBaileysConnectionsAlive(): Promise<void> {
     try {
       // Importar dinamicamente para evitar dependência circular
       const { baileysManager } = await import('../whatsapp/baileys.manager.js');
+      const { BufferJSON } = await import('@whiskeysockets/baileys');
       
-      // Obter todas as conexões ativas do banco que deveriam estar conectadas
       const prisma = getPrismaClient();
-      const activeConnections = await prisma.whatsAppConnection.findMany({
+      
+      // ✅ Buscar TODAS as conexões que têm credenciais válidas (podem estar desconectadas)
+      const allConnections = await prisma.whatsAppConnection.findMany({
         where: {
-          status: 'connected',
+          isActive: true,
+          authData: { not: null },
         },
         select: {
           id: true,
           phoneNumber: true,
           status: true,
+          authData: true,
         },
       });
 
-      if (activeConnections.length === 0) {
-        logger.debug('💓 No active Baileys connections to keep alive');
+      if (allConnections.length === 0) {
+        logger.debug('💓 No Baileys connections with credentials found');
         return;
       }
 
-      logger.debug(`💓 Keeping ${activeConnections.length} Baileys connection(s) alive...`);
+      logger.debug(`💓 Checking ${allConnections.length} Baileys connection(s) with credentials...`);
       
-      // Para cada conexão que deveria estar conectada, verificar se ainda está
-      for (const connection of activeConnections) {
+      // Para cada conexão com credenciais, verificar se precisa reconectar
+      for (const connection of allConnections) {
         try {
+          // ✅ Verificar se tem credenciais válidas (creds.me.id existe)
+          let hasValidCredentials = false;
+          if (connection.authData && typeof connection.authData === 'string' && connection.authData.trim() !== '') {
+            try {
+              const authData = JSON.parse(connection.authData, BufferJSON.reviver);
+              hasValidCredentials = !!(authData.creds && authData.creds.me && authData.creds.me.id);
+            } catch (parseError) {
+              logger.warn(`⚠️ Invalid authData format for connection ${connection.id}`);
+              continue; // Pular se não conseguir parsear
+            }
+          }
+
+          if (!hasValidCredentials) {
+            logger.debug(`⏭️ Connection ${connection.id} has no valid credentials, skipping`);
+            continue;
+          }
+
           const client = baileysManager.getClient(connection.id);
           
+          // ✅ Caso 1: Cliente não existe mas deveria estar conectado (tem credenciais)
           if (!client) {
-            logger.warn(`💔 Baileys connection ${connection.id} (${connection.phoneNumber}) should be connected but client not found - attempting reconnect...`);
-            // Tentar reconectar se deveria estar conectado mas não está
-            try {
-              // ✅ Usar manualReconnect que é público e trata o caso de não ter cliente
-              await baileysManager.manualReconnect(connection.id);
-              logger.info(`✅ Reconnected Baileys connection ${connection.id}`);
-            } catch (reconnectError) {
-              logger.error(`❌ Failed to reconnect Baileys connection ${connection.id}:`, reconnectError);
-            }
-          } else if (client.status !== 'connected') {
-            logger.warn(`💔 Baileys connection ${connection.id} (${connection.phoneNumber}) status is ${client.status} but should be connected`);
-            // Se tem credenciais mas não está conectado, tentar reconectar
-            if (client.hasCredentials) {
+            if (connection.status === 'connected' || connection.status === 'connecting') {
+              logger.warn(`💔 Baileys connection ${connection.id} (${connection.phoneNumber}) should be ${connection.status} but client not found - attempting reconnect...`);
               try {
-                // ✅ Usar manualReconnect que é público (attemptReconnection é privado)
                 await baileysManager.manualReconnect(connection.id);
-                logger.info(`🔄 Attempted reconnection for ${connection.id}`);
-              } catch (reconnectError) {
-                logger.error(`❌ Failed to attempt reconnection for ${connection.id}:`, reconnectError);
+                logger.info(`✅ Reconnection initiated for ${connection.id} (client not found)`);
+              } catch (reconnectError: any) {
+                logger.error(`❌ Failed to reconnect ${connection.id}:`, reconnectError?.message || reconnectError);
+              }
+            } else {
+              // Status é 'disconnected' mas tem credenciais válidas - tentar reconectar automaticamente
+              logger.info(`🔄 Connection ${connection.id} (${connection.phoneNumber}) is disconnected but has valid credentials - attempting auto-reconnect...`);
+              try {
+                await baileysManager.manualReconnect(connection.id);
+                logger.info(`✅ Auto-reconnection initiated for ${connection.id}`);
+              } catch (reconnectError: any) {
+                logger.error(`❌ Failed to auto-reconnect ${connection.id}:`, reconnectError?.message || reconnectError);
               }
             }
-          } else {
-            // Conexão está ativa e conectada - verificar se heartbeat está funcionando
+          } 
+          // ✅ Caso 2: Cliente existe mas não está conectado
+          else if (client.status !== 'connected') {
+            logger.warn(`💔 Baileys connection ${connection.id} (${connection.phoneNumber}) has client but status is ${client.status} - attempting reconnect...`);
+            if (client.hasCredentials || hasValidCredentials) {
+              try {
+                await baileysManager.manualReconnect(connection.id);
+                logger.info(`🔄 Reconnection attempted for ${connection.id}`);
+              } catch (reconnectError: any) {
+                logger.error(`❌ Failed to reconnect ${connection.id}:`, reconnectError?.message || reconnectError);
+              }
+            }
+          } 
+          // ✅ Caso 3: Conexão está ativa - verificar heartbeat
+          else {
             const secondsSinceHeartbeat = client.lastHeartbeat
               ? Math.floor((Date.now() - client.lastHeartbeat.getTime()) / 1000)
               : null;
             
             if (secondsSinceHeartbeat !== null && secondsSinceHeartbeat > 120) {
               logger.warn(`⚠️ Baileys connection ${connection.id} heartbeat is stale (${secondsSinceHeartbeat}s ago) - connection may be dead`);
+              // Tentar reconectar se heartbeat está muito antigo
+              try {
+                await baileysManager.manualReconnect(connection.id);
+                logger.info(`🔄 Reconnection attempted for ${connection.id} due to stale heartbeat`);
+              } catch (reconnectError: any) {
+                logger.error(`❌ Failed to reconnect ${connection.id} after stale heartbeat:`, reconnectError?.message || reconnectError);
+              }
             } else {
-              logger.debug(`✅ Baileys connection ${connection.id} is alive and healthy`);
+              logger.debug(`✅ Baileys connection ${connection.id} (${connection.phoneNumber}) is alive and healthy`);
             }
           }
-        } catch (connectionError) {
-          logger.error(`❌ Error checking Baileys connection ${connection.id}:`, connectionError);
+        } catch (connectionError: any) {
+          logger.error(`❌ Error checking Baileys connection ${connection.id}:`, connectionError?.message || connectionError);
         }
       }
-    } catch (error) {
-      logger.error('❌ Error in keepBaileysConnectionsAlive (non-fatal):', error);
+    } catch (error: any) {
+      logger.error('❌ Error in keepBaileysConnectionsAlive (non-fatal):', error?.message || error);
       // Não propagar erro - keep-alive não deve falhar por causa de Baileys
     }
   }

@@ -3600,31 +3600,64 @@ class BaileysManager {
    */
   async reconnectActiveConnections(): Promise<void> {
     try {
-      logger.info('[Baileys] 🔄 Reconnecting active connections...');
+      logger.info('[Baileys] 🔄 Reconnecting active connections (backend startup)...');
 
-      // Buscar TODAS as conexões que têm credenciais salvas (authData)
-      // Independente do status, pois quando o backend para, todas ficam 'disconnected'
-      const activeConnections = await this.prisma.whatsAppConnection.findMany({
+      // Buscar TODAS as conexões ativas que têm credenciais salvas (authData)
+      // ✅ Independente do status - quando o backend reinicia, todas ficam desconectadas
+      const connectionsToReconnect = await this.prisma.whatsAppConnection.findMany({
         where: {
-          NOT: {
-            authData: null,
-          },
+          isActive: true,
+          authData: { not: null },
+        },
+        select: {
+          id: true,
+          name: true,
+          phoneNumber: true,
+          status: true,
+          authData: true,
         },
       });
 
-      logger.info(`[Baileys] Found ${activeConnections.length} connections with saved credentials to reconnect`);
+      logger.info(`[Baileys] Found ${connectionsToReconnect.length} active connections with saved credentials to reconnect`);
 
-      for (const connection of activeConnections) {
+      if (connectionsToReconnect.length === 0) {
+        logger.info('[Baileys] No connections to reconnect');
+        return;
+      }
+
+      // ✅ Verificar credenciais válidas antes de reconectar
+      const connectionsWithValidCreds = connectionsToReconnect.filter(conn => {
+        if (!conn.authData || typeof conn.authData !== 'string' || conn.authData.trim() === '') {
+          return false;
+        }
+        
         try {
-          logger.info(`[Baileys] 🔌 Reconnecting ${connection.name} (${connection.id})...`);
+          const authData = JSON.parse(conn.authData, BufferJSON.reviver);
+          return !!(authData.creds && authData.creds.me && authData.creds.me.id);
+        } catch {
+          return false;
+        }
+      });
+
+      logger.info(`[Baileys] ${connectionsWithValidCreds.length} connections have valid credentials for reconnection`);
+
+      // ✅ Reconectar todas as conexões com credenciais válidas
+      for (const connection of connectionsWithValidCreds) {
+        try {
+          logger.info(`[Baileys] 🔌 Reconnecting ${connection.name} (${connection.phoneNumber}) - ID: ${connection.id}...`);
           logger.info(`[Baileys] 📊 Previous status: ${connection.status}`);
           
-          // Criar cliente (isso vai tentar reconectar automaticamente)
-          await this.createClient(connection.id);
+          // ✅ Usar manualReconnect para tentar reconectar sem gerar QR code
+          // Isso usa as credenciais salvas para reconectar automaticamente
+          const result = await this.manualReconnect(connection.id);
           
-          logger.info(`[Baileys] ✅ Client created for ${connection.name}`);
-        } catch (error) {
-          logger.error(`[Baileys] ❌ Failed to reconnect ${connection.id}:`, error);
+          if (result.status === 'already_connected' || result.status === 'connecting' || result.status === 'reconnecting') {
+            logger.info(`[Baileys] ✅ Reconnection initiated for ${connection.name} - status: ${result.status}`);
+          } else {
+            logger.warn(`[Baileys] ⚠️ Reconnection for ${connection.name} resulted in status: ${result.status}`);
+          }
+        } catch (error: any) {
+          logger.error(`[Baileys] ❌ Failed to reconnect ${connection.id} (${connection.name}):`, error?.message || error);
           
           // Marcar como desconectado em caso de erro
           await this.prisma.whatsAppConnection.update({
@@ -3632,11 +3665,14 @@ class BaileysManager {
             data: { status: 'disconnected' },
           }).catch(() => {});
         }
+        
+        // ✅ Aguardar um pouco entre reconexões para não sobrecarregar
+        await new Promise(resolve => setTimeout(resolve, 2000));
       }
 
       logger.info('[Baileys] ✅ Reconnection process completed');
-    } catch (error) {
-      logger.error('[Baileys] ❌ Error reconnecting active connections:', error);
+    } catch (error: any) {
+      logger.error('[Baileys] ❌ Error reconnecting active connections:', error?.message || error);
     }
   }
 
