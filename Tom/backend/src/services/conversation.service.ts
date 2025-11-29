@@ -306,7 +306,7 @@ export class ConversationService {
       throw new ConflictError('Conversation is not available for acceptance');
     }
 
-    // Buscar a conexão do usuário que está aceitando
+    // Buscar a conexão e departamento do usuário que está aceitando
     const userWithConnection = await this.prisma.user.findUnique({
       where: { id: userId },
       include: {
@@ -314,14 +314,41 @@ export class ConversationService {
           where: { isActive: true },
           take: 1,
         },
+          departmentAccess: {
+            include: {
+              department: true,
+            },
+            orderBy: { createdAt: 'asc' },
+          },
       },
     });
+
+    // ✅ Determinar departmentId: prioridade 1) fornecido, 2) departamento do usuário, 3) existente na conversa
+    let finalDepartmentId = departmentId;
+    
+    if (!finalDepartmentId && userWithConnection?.departmentAccess && userWithConnection.departmentAccess.length > 0) {
+      // Ordenar manualmente: departamento primário primeiro
+      const sortedDepartments = [...userWithConnection.departmentAccess].sort((a, b) => {
+        if (a.department.isPrimary && !b.department.isPrimary) return -1;
+        if (!a.department.isPrimary && b.department.isPrimary) return 1;
+        return 0;
+      });
+      
+      finalDepartmentId = sortedDepartments[0].departmentId;
+      logger.info(`✅ Using user's department for conversation: ${finalDepartmentId} (user: ${userId}, primary: ${sortedDepartments[0].department.isPrimary})`);
+    }
+    
+    // Fallback: usar o departamento atual da conversa se não tiver nenhum outro
+    if (!finalDepartmentId) {
+      finalDepartmentId = conversation.departmentId || undefined;
+      logger.info(`⚠️ No department specified or available for user, keeping conversation department: ${finalDepartmentId || 'None'}`);
+    }
 
     // Atualizar conversa
     const updateData: any = {
       status: 'in_progress',
       assignedUserId: userId,
-      departmentId: departmentId || conversation.departmentId,
+      departmentId: finalDepartmentId,
     };
 
     // LÓGICA CORRETA: Trocar conexão APENAS se a conversa foi TRANSFERIDA
@@ -437,13 +464,28 @@ export class ConversationService {
       throw new Error('toUserId is required. Transfer must be to a specific user.');
     }
 
-    // Buscar departamento do usuário de destino para definir departmentId
-    const toUserDepartment = await this.prisma.userDepartmentAccess.findFirst({
+    // ✅ Buscar departamento do usuário de destino: priorizar departamento primário
+    const toUserDepartments = await this.prisma.userDepartmentAccess.findMany({
       where: { userId: toUserId },
       include: { department: true },
+      orderBy: { createdAt: 'asc' },
     });
 
-    const targetDepartmentId = toUserDepartment?.departmentId || conversation.departmentId;
+    // Determinar departmentId: priorizar departamento primário do usuário de destino
+    let targetDepartmentId = conversation.departmentId;
+    if (toUserDepartments && toUserDepartments.length > 0) {
+      // Ordenar manualmente: departamento primário primeiro
+      const sortedDepartments = toUserDepartments.sort((a, b) => {
+        if (a.department.isPrimary && !b.department.isPrimary) return -1;
+        if (!a.department.isPrimary && b.department.isPrimary) return 1;
+        return 0;
+      });
+      
+      targetDepartmentId = sortedDepartments[0].departmentId;
+      logger.info(`✅ Transfer: Using department ${targetDepartmentId} from target user ${toUserId} (primary: ${sortedDepartments[0].department.isPrimary})`);
+    } else {
+      logger.warn(`⚠️ Transfer: User ${toUserId} has no departments, keeping current department ${conversation.departmentId || 'None'}`);
+    }
 
     // Criar registro de transferência
     await this.prisma.conversationTransfer.create({

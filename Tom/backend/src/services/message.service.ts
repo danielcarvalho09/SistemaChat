@@ -587,53 +587,72 @@ export class MessageService {
       // Flag para saber se é conversa nova
       const isNewConversation = !conversation;
 
-      if (!conversation) {
-        // Verificar se a conexão existe no banco
-        const connectionExists = await this.prisma.whatsAppConnection.findUnique({
-          where: { id: connectionId },
-        });
-
-        if (!connectionExists) {
-          logger.error(`Connection ${connectionId} not found in database. Cannot create conversation.`);
-          throw new Error(`Connection ${connectionId} not found`);
-        }
-
-        // Buscar o usuário dono da conexão e pegar seu primeiro setor (NOVA LÓGICA)
-        const connection = await this.prisma.whatsAppConnection.findUnique({
-          where: { id: connectionId },
-          include: {
-            user: {
-              include: {
-                departmentAccess: {
-                  include: { department: true },
-                  take: 1,
+      // ✅ Buscar o usuário dono da conexão e pegar seu departamento (para novas conversas ou atualização)
+      const connection = await this.prisma.whatsAppConnection.findUnique({
+        where: { id: connectionId },
+        include: {
+          user: {
+            include: {
+              departmentAccess: {
+                include: { 
+                  department: true 
                 },
+                orderBy: { createdAt: 'asc' },
               },
             },
           },
-        });
+        },
+      });
 
-        const departmentId = connection?.user?.departmentAccess?.[0]?.departmentId || null;
+      // ✅ Buscar departamento do usuário: priorizar departamento primário, senão pegar o primeiro
+      let userDepartmentId: string | null = null;
+      if (connection?.user?.departmentAccess && connection.user.departmentAccess.length > 0) {
+        // Ordenar manualmente: departamento primário primeiro
+        const sortedDepartments = [...connection.user.departmentAccess].sort((a, b) => {
+          if (a.department.isPrimary && !b.department.isPrimary) return -1;
+          if (!a.department.isPrimary && b.department.isPrimary) return 1;
+          return 0;
+        });
+        
+        userDepartmentId = sortedDepartments[0].departmentId;
+        logger.info(`[MessageService] 📍 Found department for connection user: ${userDepartmentId} (user: ${connection.user?.name || 'N/A'}, primary: ${sortedDepartments[0].department.isPrimary})`);
+      }
+
+      if (!conversation) {
+        // Verificar se a conexão existe no banco
+        if (!connection) {
+          logger.error(`Connection ${connectionId} not found in database. Cannot create conversation.`);
+          throw new Error(`Connection ${connectionId} not found`);
+        }
 
         // Buscar etapa padrão do Kanban
         const defaultStage = await this.prisma.kanbanStage.findFirst({
           where: { isDefault: true },
         });
 
-        // SEMPRE criar conversa como "Aguardando" (waiting)
-        // Usuário deve aceitar manualmente
+        // ✅ Criar conversa com setor do usuário da conexão
         conversation = await this.prisma.conversation.create({
           data: {
             contactId: contact.id,
             connectionId,
-            departmentId,
+            departmentId: userDepartmentId, // ✅ Atribuir setor do usuário da conexão
             assignedUserId: null, // Não atribuir automaticamente
             kanbanStageId: defaultStage?.id || null, // Atribuir etapa padrão
             status: 'waiting', // Sempre aguardando
             lastMessageAt: new Date(),
           },
         });
-        logger.info(`New conversation created: ${conversation.id} in department: ${departmentId || 'None'} (status: waiting)`);
+        logger.info(`✅ New conversation created: ${conversation.id} in department: ${userDepartmentId || 'None'} (status: waiting, user: ${connection.user?.name || 'N/A'})`);
+      } else {
+        // ✅ ATUALIZAR: Se conversa existe mas não tem setor, atribuir do usuário da conexão
+        if (!conversation.departmentId && userDepartmentId) {
+          logger.info(`[MessageService] 📍 Updating conversation ${conversation.id}: assigning department ${userDepartmentId} from connection user`);
+          await this.prisma.conversation.update({
+            where: { id: conversation.id },
+            data: { departmentId: userDepartmentId },
+          });
+          conversation.departmentId = userDepartmentId; // Atualizar objeto em memória
+        }
       }
 
       // 🔒 DEDUPLICAÇÃO FINAL: Verificar novamente por conversa específica

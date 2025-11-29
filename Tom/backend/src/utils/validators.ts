@@ -59,7 +59,7 @@ export const updateConversationNotesSchema = z.object({
 
 // ==================== VALIDADORES DE MENSAGEM ====================
 
-// Schema simplificado e robusto para envio de mensagens
+// Schema bem permissivo para envio de mensagens (regras de negócio ficam no service)
 export const sendMessageSchema = z.object({
   content: z
     .union([z.string(), z.null(), z.undefined()])
@@ -82,21 +82,6 @@ export const sendMessageSchema = z.object({
       return url === '' ? undefined : url;
     })
     .pipe(z.string().optional())
-    .refine(
-      (url) => {
-        if (!url || url.trim() === '') return true;
-        // Aceitar URLs relativas (começam com /)
-        if (url.startsWith('/')) return true;
-        // Validar URLs absolutas
-        try {
-          new URL(url);
-          return true;
-        } catch {
-          return false;
-        }
-      },
-      { message: 'Invalid media URL format' }
-    )
     .optional(),
   
   quotedMessageId: z
@@ -106,35 +91,6 @@ export const sendMessageSchema = z.object({
       return val;
     })
     .optional(),
-}).superRefine((data, ctx) => {
-  const content = (data.content || '').trim();
-  const messageType = data.messageType || 'text';
-  const mediaUrl = data.mediaUrl;
-  
-  // Se for mensagem de texto, content é obrigatório
-  if (messageType === 'text') {
-    if (content.length === 0) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: 'Message content is required for text messages',
-        path: ['content'],
-      });
-      return;
-    }
-  }
-  
-  // Para mensagens com mídia, precisa ter mediaUrl OU content
-  if (messageType !== 'text') {
-    const hasMedia = mediaUrl && mediaUrl.trim() !== '';
-    if (!hasMedia && content.length === 0) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: 'Message must have either mediaUrl or content',
-        path: ['content'],
-      });
-      return;
-    }
-  }
 });
 
 // ==================== VALIDADORES DE DEPARTAMENTO ====================
