@@ -69,7 +69,22 @@ export const sendMessageSchema = z.object({
   messageType: z
     .enum(['text', 'image', 'video', 'audio', 'document', 'location'])
     .default('text'),
-  mediaUrl: z.string().url('Invalid media URL').optional(),
+  mediaUrl: z.string().refine(
+    (url) => {
+      // Aceitar URLs absolutas (http://, https://) ou relativas (começando com /)
+      if (!url) return true; // optional
+      try {
+        // Se começar com /, é URL relativa - aceitar
+        if (url.startsWith('/')) return true;
+        // Caso contrário, validar como URL absoluta
+        new URL(url);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    { message: 'Invalid media URL format' }
+  ).optional(),
   quotedMessageId: z.string().uuid('Invalid quotedMessageId').optional(),
 }).refine(
   (data) => {
