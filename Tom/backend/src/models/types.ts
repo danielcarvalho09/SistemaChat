@@ -188,7 +188,7 @@ export enum MessageStatus {
 
 export interface SendMessageRequest {
   conversationId: string;
-  content: string;
+  content: string; // Pode ser string vazia para mensagens sem caption
   messageType?: MessageType;
   mediaUrl?: string;
   quotedMessageId?: string;

@@ -251,6 +251,7 @@ export class ConversationController {
       const message = await this.messageService.sendMessage({
         ...data,
         conversationId,
+        content: data.content || '', // Garantir que content seja sempre string (não undefined)
         messageType: data.messageType as MessageType | undefined,
       }, userId, userRoles);
 

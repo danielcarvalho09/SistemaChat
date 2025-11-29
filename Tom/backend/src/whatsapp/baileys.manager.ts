@@ -260,6 +260,9 @@ class BaileysManager {
       // Iniciar heartbeat ativo
       this.startActiveHeartbeat(connectionId);
       
+      // Sincronização periódica leve como backup (funciona independente do frontend)
+      this.startPeriodicSync(connectionId);
+      
       
 
       logger.info(`[Baileys] ✅ Client created successfully: ${connectionId}`);
@@ -3028,24 +3031,59 @@ class BaileysManager {
    * Roda a cada 2 minutos para garantir que nenhuma mensagem seja perdida
    */
   /**
-   * ❌ SINCRONIZAÇÃO PERIÓDICA DESABILITADA
+   * ✅ SINCRONIZAÇÃO PERIÓDICA HABILITADA (LEVE)
    * 
-   * A sincronização periódica automática estava interferindo no recebimento
-   * de mensagens em tempo real. Agora a sincronização só ocorre quando:
+   * Sincronização periódica leve a cada 5 minutos como backup.
+   * Não interfere no recebimento em tempo real via eventos do Baileys.
    * 
-   * 1. **Reconexão**: Após desconexão, sincroniza todas as conversas
-   * 2. **Detecção de Gaps**: Quando detecta lacunas temporais
-   * 3. **Solicitação Manual**: Via API endpoints
+   * Funciona independente do frontend estar aberto ou não.
    * 
-   * Mensagens em tempo real são recebidas via eventos do Baileys (handleIncomingMessages)
-   * e não precisam de sincronização periódica.
+   * Estratégia:
+   * 1. **Tempo Real**: Mensagens são recebidas via eventos do Baileys (handleIncomingMessages)
+   * 2. **Backup Periódico**: Sincronização leve a cada 5 minutos para garantir que nada seja perdido
+   * 3. **Reconexão**: Após desconexão, sincroniza todas as conversas
+   * 4. **Manual**: Via API endpoints quando necessário
    */
   private startPeriodicSync(connectionId: string): void {
-    // DESABILITADO: Sincronização periódica estava interferindo no recebimento de mensagens
-    // As mensagens em tempo real são recebidas via eventos do Baileys
-    // Sincronização só ocorre quando necessário (reconexão, gaps, manual)
-    logger.info(`[Baileys] ⏭️ Periodic sync DISABLED for ${connectionId} - messages received via real-time events`);
-    return;
+    const client = this.clients.get(connectionId);
+    if (!client) return;
+
+    // Limpar intervalo anterior se existir
+    if (client.syncInterval) {
+      clearInterval(client.syncInterval);
+    }
+
+    // Sincronização leve a cada 5 minutos (300000ms)
+    // Intervalo longo para não interferir com recebimento em tempo real
+    client.syncInterval = setInterval(async () => {
+      const currentClient = this.clients.get(connectionId);
+      if (!currentClient || currentClient.status !== 'connected') {
+        if (client.syncInterval) {
+          clearInterval(client.syncInterval);
+          client.syncInterval = undefined;
+        }
+        return;
+      }
+
+      try {
+        logger.info(`[Baileys] 🔄 Periodic sync (backup) for ${connectionId} - checking for missed messages...`);
+        
+        // Sincronização leve: apenas conversas ativas recentes (últimas 10)
+        // Limite baixo para não sobrecarregar
+        const syncedCount = await this.syncAllActiveConversations(connectionId, 10);
+        
+        if (syncedCount > 0) {
+          logger.info(`[Baileys] ✅ Periodic sync found ${syncedCount} conversations to sync for ${connectionId}`);
+        } else {
+          logger.debug(`[Baileys] ✅ Periodic sync: no missed messages for ${connectionId}`);
+        }
+      } catch (error) {
+        logger.warn(`[Baileys] ⚠️ Periodic sync error for ${connectionId}:`, error);
+        // Não parar sincronização por causa de um erro - continuar tentando
+      }
+    }, 300000); // 5 minutos (300000ms)
+
+    logger.info(`[Baileys] ✅ Periodic sync (backup) started for ${connectionId} - runs every 5 minutes`);
   }
 
   /**
