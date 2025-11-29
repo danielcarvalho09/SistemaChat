@@ -235,13 +235,14 @@ export class ConversationController {
   ) => {
     try {
       const { conversationId } = request.params;
+      const body = request.body as any;
       logger.info('[sendMessage] Raw request body:', { 
         body: request.body,
         conversationId,
-        hasMediaUrl: !!request.body?.mediaUrl,
-        mediaUrl: request.body?.mediaUrl,
-        messageType: request.body?.messageType,
-        content: request.body?.content,
+        hasMediaUrl: !!body?.mediaUrl,
+        mediaUrl: body?.mediaUrl,
+        messageType: body?.messageType,
+        content: body?.content,
       });
       
       let data;

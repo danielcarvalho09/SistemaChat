@@ -2105,6 +2105,52 @@ class BaileysManager {
   }
 
   /**
+   * Helper para fazer upload de mídia para Supabase Storage (com fallback local)
+   * @param buffer Buffer do arquivo
+   * @param filename Nome do arquivo
+   * @param mimetype Tipo MIME
+   * @returns URL do arquivo (Supabase ou local)
+   */
+  private async uploadMediaToStorage(
+    buffer: Buffer,
+    filename: string,
+    mimetype: string
+  ): Promise<string> {
+    // ✅ Tentar fazer upload para Supabase Storage primeiro (prioridade)
+    if (supabaseStorageService.isConfigured()) {
+      try {
+        const supabaseUrl = await supabaseStorageService.uploadFile(
+          buffer,
+          filename,
+          mimetype
+        );
+        
+        if (supabaseUrl) {
+          logger.info(`[Baileys] ✅ Media uploaded to Supabase Storage: ${filename}`);
+          
+          // Também salvar localmente como backup
+          const uploadsDir = path.join(process.cwd(), 'secure-uploads');
+          if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
+          fs.writeFileSync(path.join(uploadsDir, filename), buffer);
+          
+          return supabaseUrl;
+        }
+      } catch (supabaseError) {
+        logger.warn(`[Baileys] ⚠️ Supabase upload failed, using local storage:`, supabaseError);
+      }
+    }
+    
+    // Fallback para armazenamento local
+    const uploadsDir = path.join(process.cwd(), 'secure-uploads');
+    if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
+    fs.writeFileSync(path.join(uploadsDir, filename), buffer);
+    const localUrl = `/uploads/${filename}`;
+    logger.info(`[Baileys] ✅ Media saved locally: ${filename}`);
+    
+    return localUrl;
+  }
+
+  /**
    * Envia mensagem via WhatsApp
    */
   async sendMessage(

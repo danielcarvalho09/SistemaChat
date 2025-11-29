@@ -59,8 +59,9 @@ export class SupabaseStorageService {
     
     // ✅ Prioridade 2: Extrair da DATABASE_URL (para sistemas que já usam Supabase via connection string)
     if (!supabaseUrl && process.env.DATABASE_URL) {
-      supabaseUrl = this.extractSupabaseUrl(process.env.DATABASE_URL);
-      if (supabaseUrl) {
+      const extractedUrl = this.extractSupabaseUrl(process.env.DATABASE_URL);
+      if (extractedUrl) {
+        supabaseUrl = extractedUrl;
         logger.info(`✅ Extracted Supabase URL from DATABASE_URL: ${supabaseUrl}`);
       }
     }
