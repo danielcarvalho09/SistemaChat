@@ -181,8 +181,9 @@ export class KanbanService {
 
   /**
    * Obter conversas por etapa (para visualização do Kanban)
-   * Filtra por connectionId do usuário e apenas conversas aceitas (status 'open' ou 'in_progress')
+   * Filtra por connectionId do usuário e apenas conversas aceitas (status 'in_progress' ou 'transferred')
    * Para admin: pode ver todas as conversas ou filtrar por usuário específico
+   * ✅ Se usuário não tem conexões atreladas, retorna array vazio (nenhuma conversa)
    */
   async getConversationsByStage(
     stageId: string, 
@@ -195,36 +196,56 @@ export class KanbanService {
     
     // Buscar conexões do usuário
     let connectionIds: string[] = [];
+    let shouldFilterByConnections = false;
+    
     if (effectiveUserId && !isAdmin) {
-      // Para usuários normais: buscar apenas suas conexões
-      const user = await this.prisma.user.findUnique({
-        where: { id: effectiveUserId },
-        include: {
-          whatsappConnections: {
-            where: { isActive: true },
-          },
+      // ✅ Para usuários normais: buscar conexões onde userId = effectiveUserId
+      const connections = await this.prisma.whatsAppConnection.findMany({
+        where: {
+          userId: effectiveUserId, // ✅ Buscar conexões atreladas ao usuário
+          isActive: true,
+        },
+        select: {
+          id: true,
         },
       });
-      connectionIds = user?.whatsappConnections?.map(c => c.id) || [];
+      connectionIds = connections.map(c => c.id);
+      shouldFilterByConnections = true; // ✅ SEMPRE filtrar (mesmo se vazio, não mostra nada)
+      
+      // ✅ Se usuário não tem conexões, retornar array vazio imediatamente
+      if (connectionIds.length === 0) {
+        return [];
+      }
     } else if (isAdmin && targetUserId) {
-      // Admin vendo kanban de outro usuário: buscar conexões do targetUserId
-      const user = await this.prisma.user.findUnique({
-        where: { id: targetUserId },
-        include: {
-          whatsappConnections: {
-            where: { isActive: true },
-          },
+      // ✅ Admin vendo kanban de outro usuário: buscar conexões do targetUserId
+      const connections = await this.prisma.whatsAppConnection.findMany({
+        where: {
+          userId: targetUserId, // ✅ Buscar conexões atreladas ao usuário específico
+          isActive: true,
+        },
+        select: {
+          id: true,
         },
       });
-      connectionIds = user?.whatsappConnections?.map(c => c.id) || [];
+      connectionIds = connections.map(c => c.id);
+      shouldFilterByConnections = true; // ✅ Filtrar por conexões do usuário específico
+      
+      // ✅ Se usuário não tem conexões, retornar array vazio imediatamente
+      if (connectionIds.length === 0) {
+        return [];
+      }
     }
-    // Se admin sem targetUserId: não filtrar por connectionId (mostra todas)
+    // ✅ Se admin sem targetUserId: não filtrar por connectionId (mostra todas)
 
     return await this.prisma.conversation.findMany({
       where: { 
         kanbanStageId: stageId,
-        // ✅ Filtrar por connectionId apenas se não for admin ou se admin estiver vendo kanban de usuário específico
-        ...(connectionIds.length > 0 && { connectionId: { in: connectionIds } }),
+        // ✅ CRÍTICO: Filtrar por connectionId apenas se shouldFilterByConnections for true
+        // Se usuário tem conexões, mostrar apenas dessas conexões
+        // Se usuário não tem conexões, já retornamos vazio acima
+        ...(shouldFilterByConnections && connectionIds.length > 0 && { 
+          connectionId: { in: connectionIds } 
+        }),
         // ✅ IMPORTANTE: Filtrar apenas conversas aceitas (não 'waiting')
         // Status aceitos: 'in_progress' (conversas que foram aceitas e estão em atendimento)
         // Também incluir 'transferred' se a conversa foi transferida mas ainda está em atendimento
