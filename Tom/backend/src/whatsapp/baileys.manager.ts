@@ -4187,6 +4187,241 @@ class BaileysManager {
       return null;
     }
   }
+
+  /**
+   * Envia áudio PTT (Push-to-Talk) para um destinatário no WhatsApp
+   * 
+   * Esta função envia áudio no formato correto para mensagens de voz do WhatsApp:
+   * - Formato: OGG/Opus mono
+   * - MIMEType: 'audio/ogg; codecs=opus'
+   * - PTT: true (mensagem de voz)
+   * 
+   * @param connectionId - ID da conexão WhatsApp
+   * @param jid - JID do destinatário (ex: '5511999999999@s.whatsapp.net')
+   * @param audioBuffer - Buffer do áudio em formato OGG/Opus mono OU caminho do arquivo
+   * @param options - Opções adicionais (conversão automática, etc.)
+   * @returns Promise<string | undefined> - ID da mensagem enviada
+   * 
+   * @example
+   * ```typescript
+   * // Enviar buffer de áudio
+   * const audioBuffer = fs.readFileSync('./audio.ogg');
+   * await baileysManager.enviarAudioPTT('connection-id', '5511999999999@s.whatsapp.net', audioBuffer);
+   * 
+   * // Enviar arquivo (será convertido automaticamente se necessário)
+   * await baileysManager.enviarAudioPTT('connection-id', '5511999999999@s.whatsapp.net', './audio.mp3', {
+   *   autoConvert: true
+   * });
+   * ```
+   */
+  async enviarAudioPTT(
+    connectionId: string,
+    jid: string,
+    audioBuffer: Buffer | string,
+    options?: {
+      autoConvert?: boolean; // Converter automaticamente para OGG/Opus se necessário
+      quotedMessage?: QuotedMessagePayload;
+    }
+  ): Promise<string | undefined> {
+    try {
+      // ✅ VALIDAÇÃO DE ENTRADA
+      if (!connectionId || !jid || !audioBuffer) {
+        throw new Error('Parâmetros obrigatórios: connectionId, jid e audioBuffer são necessários');
+      }
+
+      logger.info(`[Baileys] 🎤 Preparando envio de áudio PTT para ${jid}`);
+
+      // ✅ VALIDAR JID
+      // JID deve estar no formato: 5511999999999@s.whatsapp.net ou 5511999999999
+      const cleanNumber = jid.replace(/\D/g, '');
+      const formattedJid = cleanNumber.includes('@') 
+        ? jid 
+        : `${cleanNumber}@s.whatsapp.net`;
+      
+      // Validar formato do JID
+      if (!formattedJid.match(/^\d+@s\.whatsapp\.net$/)) {
+        throw new Error(`JID inválido: ${formattedJid}. Formato esperado: 5511999999999@s.whatsapp.net`);
+      }
+
+      logger.info(`[Baileys] ✅ JID validado: ${formattedJid}`);
+
+      // ✅ OBTER CLIENTE
+      const client = this.clients.get(connectionId);
+      if (!client) {
+        throw new Error(`Conexão ${connectionId} não encontrada`);
+      }
+
+      // ✅ VALIDAR SESSÃO
+      const isSessionValid = await this.validateSession(connectionId);
+      if (!isSessionValid) {
+        throw new Error(`Sessão inválida para ${connectionId} - conexão pode estar instável ou desconectada`);
+      }
+
+      if (client.status !== 'connected') {
+        throw new Error(`Conexão ${connectionId} não está conectada (status: ${client.status})`);
+      }
+
+      if (!client.socket) {
+        throw new Error(`Socket não disponível para conexão ${connectionId}`);
+      }
+
+      logger.info(`[Baileys] ✅ Cliente validado e pronto para enviar áudio PTT`);
+
+      // ✅ PROCESSAR ÁUDIO (Buffer ou arquivo)
+      let finalAudioBuffer: Buffer | null = null;
+      let isTemporaryFile = false;
+      let tempFilePath: string | null = null;
+
+      if (typeof audioBuffer === 'string') {
+        // ✅ É um caminho de arquivo
+        const filePath = audioBuffer;
+        
+        if (!fs.existsSync(filePath)) {
+          throw new Error(`Arquivo de áudio não encontrado: ${filePath}`);
+        }
+
+        logger.info(`[Baileys] 📁 Lendo arquivo de áudio: ${filePath}`);
+        
+        // Verificar extensão do arquivo
+        const fileExtension = path.extname(filePath).toLowerCase();
+        const isOggOpus = fileExtension === '.ogg' || fileExtension === '.opus';
+
+        // ✅ CONVERSÃO AUTOMÁTICA (se necessário e solicitada)
+        if (!isOggOpus && options?.autoConvert) {
+          logger.info(`[Baileys] 🔄 Arquivo não está em formato OGG/Opus - convertendo automaticamente...`);
+          
+          try {
+            const { convertToOggOpusMono } = await import('../utils/audio-ptt.utils.js');
+            const convertedPath = await convertToOggOpusMono(filePath, {
+              quality: 3, // Boa qualidade para voz
+              bitrate: 32000, // 32kbps é suficiente para voz
+              sampleRate: 16000, // 16kHz padrão para voz
+              keepOriginal: true, // Manter arquivo original
+            });
+            
+            logger.info(`[Baileys] ✅ Conversão concluída: ${convertedPath}`);
+            finalAudioBuffer = fs.readFileSync(convertedPath);
+            tempFilePath = convertedPath; // Marcar para limpeza
+            isTemporaryFile = true;
+          } catch (convertError) {
+            const errorMsg = convertError instanceof Error ? convertError.message : String(convertError);
+            logger.error(`[Baileys] ❌ Erro ao converter áudio: ${errorMsg}`);
+            
+            // Tentar usar arquivo original mesmo assim
+            logger.warn(`[Baileys] ⚠️ Tentando usar arquivo original sem conversão...`);
+            finalAudioBuffer = fs.readFileSync(filePath);
+          }
+        } else if (!isOggOpus) {
+          // Arquivo não é OGG/Opus e conversão automática não foi solicitada
+          logger.warn(`[Baileys] ⚠️ Arquivo não está em formato OGG/Opus (${fileExtension}). ` +
+            `Recomendado converter para melhor compatibilidade. ` +
+            `Use autoConvert: true ou converta manualmente com convertToOggOpusMono()`);
+        }
+
+        // Se ainda não foi definido (arquivo já é OGG ou conversão falhou), ler direto
+        if (!finalAudioBuffer) {
+          finalAudioBuffer = fs.readFileSync(filePath);
+        }
+
+        logger.info(`[Baileys] ✅ Arquivo carregado: ${finalAudioBuffer.length} bytes`);
+      } else {
+        // ✅ É um Buffer
+        finalAudioBuffer = audioBuffer;
+        logger.info(`[Baileys] ✅ Buffer recebido: ${finalAudioBuffer.length} bytes`);
+      }
+
+      // ✅ GARANTIR QUE BUFFER FOI DEFINIDO
+      if (!finalAudioBuffer) {
+        throw new Error('Falha ao processar áudio: buffer não foi definido');
+      }
+
+      // ✅ VALIDAR BUFFER
+      if (!Buffer.isBuffer(finalAudioBuffer)) {
+        throw new Error('audioBuffer deve ser um Buffer ou caminho de arquivo válido');
+      }
+
+      if (finalAudioBuffer.length === 0) {
+        throw new Error('Buffer de áudio está vazio');
+      }
+
+      // Limite de tamanho do WhatsApp (geralmente 16MB para mensagens de voz)
+      const MAX_SIZE = 16 * 1024 * 1024; // 16MB
+      if (finalAudioBuffer.length > MAX_SIZE) {
+        throw new Error(`Buffer de áudio muito grande: ${finalAudioBuffer.length} bytes (máximo: ${MAX_SIZE} bytes)`);
+      }
+
+      logger.info(`[Baileys] ✅ Buffer validado: ${finalAudioBuffer.length} bytes (dentro do limite)`);
+
+      // ✅ PREPARAR MENSAGEM DE ÁUDIO PTT
+      // Formato correto conforme documentação Baileys e issue #501
+      // Baseado em: https://github.com/WhiskeySockets/Baileys/issues/501
+      // Formato: { audio: Buffer, mimetype: 'audio/ogg; codecs=opus', ptt: true }
+      const audioMessage = {
+        audio: finalAudioBuffer,
+        mimetype: 'audio/ogg; codecs=opus', // Formato correto para PTT
+        ptt: true, // Push-to-Talk (mensagem de voz)
+      };
+
+      logger.info(`[Baileys] ✅ Mensagem de áudio PTT preparada:`);
+      logger.info(`[Baileys]    - MIMEType: ${audioMessage.mimetype}`);
+      logger.info(`[Baileys]    - PTT: ${audioMessage.ptt}`);
+      logger.info(`[Baileys]    - Tamanho: ${finalAudioBuffer.length} bytes`);
+
+      // ✅ PREPARAR OPÇÕES DE ENVIO (reply, etc.)
+      let sendOptions: Record<string, any> | undefined;
+
+      if (options?.quotedMessage) {
+        const stanzaId = options.quotedMessage.stanzaId || options.quotedMessage.messageId;
+        logger.info(`[Baileys] 🧷 Preparando reply para mensagem ${stanzaId}`);
+        
+        const quotedPayload = await this.resolveQuotedMessagePayload(client, formattedJid, options.quotedMessage);
+        
+        if (quotedPayload) {
+          sendOptions = { quoted: quotedPayload };
+          logger.info(`[Baileys] 🧷 Quoted payload pronto para stanza ${stanzaId}`);
+        } else {
+          logger.warn(`[Baileys] ⚠️ Não foi possível construir quoted payload - enviando sem contexto de reply`);
+        }
+      }
+
+      // ✅ ENVIAR MENSAGEM
+      logger.info(`[Baileys] 📤 Enviando áudio PTT para ${formattedJid}...`);
+      
+      const sent = await client.socket.sendMessage(
+        formattedJid,
+        audioMessage,
+        sendOptions
+      );
+
+      const messageId = sent?.key?.id || undefined;
+      
+      if (messageId) {
+        logger.info(`[Baileys] ✅ Áudio PTT enviado com sucesso! Message ID: ${messageId}`);
+      } else {
+        logger.warn(`[Baileys] ⚠️ Áudio PTT enviado mas sem Message ID retornado`);
+      }
+
+      // ✅ LIMPAR ARQUIVO TEMPORÁRIO (se foi criado durante conversão)
+      if (isTemporaryFile && tempFilePath) {
+        try {
+          if (fs.existsSync(tempFilePath)) {
+            fs.unlinkSync(tempFilePath);
+            logger.info(`[Baileys] 🗑️ Arquivo temporário removido: ${tempFilePath}`);
+          }
+        } catch (cleanupError) {
+          const cleanupErrorMsg = cleanupError instanceof Error ? cleanupError.message : String(cleanupError);
+          logger.warn(`[Baileys] ⚠️ Erro ao remover arquivo temporário: ${cleanupErrorMsg}`);
+        }
+      }
+
+      return messageId;
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      logger.error(`[Baileys] ❌ Erro ao enviar áudio PTT: ${errorMessage}`);
+      logger.error(`[Baileys] Stack trace:`, error instanceof Error ? error.stack : undefined);
+      throw error;
+    }
+  }
 }
 
 export const baileysManager = new BaileysManager();

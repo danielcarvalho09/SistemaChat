@@ -59,7 +59,10 @@ export class BroadcastService {
       throw new AppError('Lista sem contatos', 400);
     }
 
-        // ✅ Criar registro do broadcast com informações adicionais
+    // ✅ Buscar configurações de intervalo ANTES de criar o broadcast
+    const config = await this.getIntervalConfig(userId);
+
+    // ✅ Criar registro do broadcast com informações adicionais
     const broadcast = await this.prisma.broadcast.create({
       data: {
         userId,
@@ -87,9 +90,6 @@ export class BroadcastService {
     // Marcar broadcast como ativo
     this.activeBroadcasts.set(broadcast.id, true);
 
-    // Buscar configurações de intervalo
-    const config = await this.getIntervalConfig(userId);
-
     // Iniciar envio assíncrono
     this.processBroadcast(broadcast.id, connectionId, list.contacts, message, mediaUrl, mediaType, privacyPolicyUrl, config);
 
@@ -114,6 +114,8 @@ export class BroadcastService {
   ) {
     const startTime = Date.now(); // ✅ Marcar início para calcular duração
     let lastSentAt: Date | null = null;
+    let sent = 0; // ✅ Declarar antes do try para estar acessível no catch
+    let failed = 0; // ✅ Declarar antes do try para estar acessível no catch
     
     try {
       // Atualizar status para "em andamento"
@@ -121,9 +123,6 @@ export class BroadcastService {
         where: { id: broadcastId },
         data: { status: 'in_progress', startedAt: new Date() }
       });
-
-      let sent = 0;
-      let failed = 0;
 
       for (const contact of contacts) {
         // Verificar se o broadcast foi cancelado
