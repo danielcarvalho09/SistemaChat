@@ -754,6 +754,11 @@ export class MessageService {
 
       logger.info(`[MessageService] ✅ Message processed for conversation ${conversation.id}`);
 
+      // ✅ Verificar se é resposta a um broadcast (apenas mensagens recebidas do contato)
+      if (!isFromMe) {
+        await this.checkAndUpdateBroadcastReply(phoneNumber, connectionId, new Date());
+      }
+
       // 🤖 Verificar se deve responder com IA automaticamente
       // IMPORTANTE: IA só responde conversas em atendimento (in_progress) DA SUA PRÓPRIA CONEXÃO
       if (!isFromMe && conversation.status === 'in_progress') {
@@ -934,5 +939,131 @@ export class MessageService {
           }
         : null,
     };
+  }
+
+  /**
+   * Verifica se uma mensagem recebida é resposta a um broadcast e atualiza os contadores
+   * ✅ Atualiza em tempo real quando contatos respondem aos disparos
+   */
+  private async checkAndUpdateBroadcastReply(
+    phoneNumber: string,
+    connectionId: string,
+    replyTimestamp: Date
+  ): Promise<void> {
+    try {
+      // ✅ Normalizar número para comparação (remover @s.whatsapp.net se houver)
+      const normalizedPhone = phoneNumber.replace('@s.whatsapp.net', '').replace('@g.us', '').replace(/\D/g, '');
+      
+      // ✅ Garantir formato brasileiro (55 + DDD + número)
+      let searchPhone = normalizedPhone;
+      if (!searchPhone.startsWith('55') && (searchPhone.length === 10 || searchPhone.length === 11)) {
+        searchPhone = `55${searchPhone}`;
+      }
+
+      // ✅ Buscar BroadcastLog pendentes para esse número que ainda não foram respondidos
+      // Buscar logs de broadcasts enviados recentemente (últimos 30 dias)
+      const thirtyDaysAgo = new Date();
+      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+      // ✅ Buscar BroadcastLogs por número e status, depois filtrar por conexão do broadcast
+      const pendingLogs = await this.prisma.broadcastLog.findMany({
+        where: {
+          phoneNumber: searchPhone,
+          status: 'sent',
+          hasReplied: false,
+          sentAt: { gte: thirtyDaysAgo },
+          // ✅ Filtrar por conexão do broadcast usando a relação
+          broadcast: {
+            connectionId: connectionId,
+          },
+        },
+        include: {
+          broadcast: {
+            select: {
+              id: true,
+              connectionId: true,
+              status: true,
+            },
+          },
+        },
+      });
+
+      // ✅ Logs já estão filtrados pela conexão, então usar diretamente
+      const relevantLogs = pendingLogs;
+
+      if (relevantLogs.length === 0) {
+        return; // Não é resposta a broadcast
+      }
+
+      logger.info(`[MessageService] 📨 Broadcast reply detected from ${searchPhone} - ${relevantLogs.length} broadcast(s)`);
+
+      // ✅ Atualizar cada log marcando como respondido
+      for (const log of relevantLogs) {
+        try {
+          // ✅ Atualizar o log marcando como respondido
+          await this.prisma.broadcastLog.update({
+            where: { id: log.id },
+            data: {
+              hasReplied: true,
+              repliedAt: replyTimestamp,
+            },
+          });
+
+          logger.info(`[MessageService] ✅ BroadcastLog ${log.id} marked as replied`);
+
+          // ✅ Atualizar contadores no Broadcast (apenas uma vez por broadcast)
+          // Usar transação para garantir consistência
+          await this.prisma.$transaction(async (tx) => {
+            // Buscar broadcast atualizado
+            const broadcast = await tx.broadcast.findUnique({
+              where: { id: log.broadcastId },
+              select: {
+                id: true,
+                totalContacts: true,
+                sentCount: true,
+                failedCount: true,
+                repliedCount: true,
+              },
+            });
+
+            if (!broadcast) return;
+
+            // ✅ Contar quantos logs deste broadcast já foram respondidos
+            const repliedLogsCount = await tx.broadcastLog.count({
+              where: {
+                broadcastId: log.broadcastId,
+                hasReplied: true,
+              },
+            });
+
+            // ✅ Calcular notRepliedCount = contatos que receberam mas não responderam
+            // Total que receberam = sentCount
+            // Total que responderam = repliedLogsCount
+            // Não responderam = sentCount - repliedLogsCount
+            const notRepliedCount = Math.max(0, broadcast.sentCount - repliedLogsCount);
+
+            // ✅ Atualizar broadcast com novos contadores
+            await tx.broadcast.update({
+              where: { id: log.broadcastId },
+              data: {
+                repliedCount: repliedLogsCount,
+                notRepliedCount: notRepliedCount,
+              },
+            });
+
+            logger.info(
+              `[MessageService] ✅ Broadcast ${log.broadcastId} updated: ` +
+              `repliedCount=${repliedLogsCount}, notRepliedCount=${notRepliedCount}`
+            );
+          });
+        } catch (logError) {
+          logger.error(`[MessageService] ❌ Error updating broadcast log ${log.id}:`, logError);
+          // Continuar com outros logs mesmo se um falhar
+        }
+      }
+    } catch (error) {
+      // ✅ Não falhar o processamento da mensagem se a atualização de broadcast falhar
+      logger.error(`[MessageService] ❌ Error checking broadcast reply:`, error);
+    }
   }
 }

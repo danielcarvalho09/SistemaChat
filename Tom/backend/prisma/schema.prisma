@@ -550,9 +550,20 @@ model Broadcast {
   totalContacts    Int       @default(0)
   sentCount        Int       @default(0)
   failedCount      Int       @default(0)
+  repliedCount     Int       @default(0) // Quantos contatos responderam
+  notRepliedCount  Int       @default(0) // Quantos contatos não responderam (calculado)
   status           String    @default("pending") // pending, in_progress, completed, cancelled, failed
   startedAt        DateTime?
   completedAt      DateTime?
+  lastSentAt       DateTime? // Timestamp do último envio realizado
+  durationSeconds  Int?      // Duração total do broadcast em segundos
+  messagesPerMinute Float?   // Velocidade de envio (mensagens por minuto)
+  successRate      Float?    // Taxa de sucesso (0-100)
+  minIntervalUsed  Int?      // Intervalo mínimo usado (em segundos)
+  maxIntervalUsed  Int?      // Intervalo máximo usado (em segundos)
+  listName         String?   // Nome da lista (cache para facilitar consultas)
+  connectionName   String?   // Nome da conexão (cache)
+  connectionPhone  String?   // Número da conexão (cache)
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
 
@@ -565,6 +576,8 @@ model Broadcast {
   @@index([listId])
   @@index([status])
   @@index([createdAt])
+  @@index([startedAt])
+  @@index([completedAt])
   @@map("broadcasts")
 }
 
@@ -574,7 +587,15 @@ model BroadcastLog {
   contactId   String
   status      String // sent, failed
   error       String?
+  phoneNumber String?   // Número do contato (cache para facilitar consultas)
+  contactName String?   // Nome do contato usado (cache)
+  uniqueId    String?   // ID único da mensagem de broadcast (para rastrear respostas)
+  attempts    Int       @default(1) // Número de tentativas de envio
+  hasReplied  Boolean   @default(false) // Se o contato respondeu ao broadcast
+  repliedAt   DateTime? // Timestamp da primeira resposta
   sentAt      DateTime  @default(now())
+  deliveredAt DateTime? // Quando a mensagem foi entregue (se disponível)
+  readAt      DateTime? // Quando a mensagem foi lida (se disponível)
 
   // Relações
   broadcast Broadcast    @relation(fields: [broadcastId], references: [id], onDelete: Cascade)
@@ -583,6 +604,8 @@ model BroadcastLog {
   @@index([broadcastId])
   @@index([contactId])
   @@index([status])
+  @@index([sentAt])
+  @@index([phoneNumber])
   @@map("broadcast_logs")
 }
 

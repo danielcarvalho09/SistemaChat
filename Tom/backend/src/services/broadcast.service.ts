@@ -59,7 +59,7 @@ export class BroadcastService {
       throw new AppError('Lista sem contatos', 400);
     }
 
-    // Criar registro do broadcast
+        // ✅ Criar registro do broadcast com informações adicionais
     const broadcast = await this.prisma.broadcast.create({
       data: {
         userId,
@@ -70,7 +70,17 @@ export class BroadcastService {
         mediaType,
         privacyPolicyUrl: privacyPolicyUrl || null,
         totalContacts: list.contacts.length,
-        status: 'pending'
+        status: 'pending',
+        // ✅ Cache de informações para facilitar consultas
+        listName: list.name,
+        connectionName: connection.name,
+        connectionPhone: connection.phoneNumber,
+        // ✅ Salvar configurações de intervalo usadas
+        minIntervalUsed: config.minInterval,
+        maxIntervalUsed: config.maxInterval,
+        // ✅ Inicializar contadores de resposta
+        repliedCount: 0,
+        notRepliedCount: 0, // Será atualizado quando o broadcast finalizar e quando contatos responderem
       }
     });
 
@@ -102,6 +112,9 @@ export class BroadcastService {
     privacyPolicyUrl: string | undefined,
     config: IntervalConfig
   ) {
+    const startTime = Date.now(); // ✅ Marcar início para calcular duração
+    let lastSentAt: Date | null = null;
+    
     try {
       // Atualizar status para "em andamento"
       await this.prisma.broadcast.update({
@@ -171,19 +184,37 @@ export class BroadcastService {
 
           sent++;
 
-          // Registrar envio
+          // ✅ Registrar envio com informações adicionais
+          const sentAt = new Date();
+          lastSentAt = sentAt;
+          
           await this.prisma.broadcastLog.create({
             data: {
               broadcastId,
               contactId: contact.id,
-              status: 'sent'
+              status: 'sent',
+              phoneNumber: phoneNumber, // ✅ Cache do número
+              contactName: finalName, // ✅ Cache do nome usado
+              uniqueId: uniqueId, // ✅ Salvar ID único para rastrear respostas
+              attempts: 1,
+              hasReplied: false, // ✅ Inicialmente não respondeu
+              sentAt: sentAt,
             }
           });
 
-          // Atualizar progresso
+          // ✅ Calcular métricas em tempo real
+          const elapsedSeconds = Math.floor((Date.now() - startTime) / 1000);
+          const messagesPerMinute = elapsedSeconds > 0 ? (sent / elapsedSeconds) * 60 : 0;
+
+          // Atualizar progresso com métricas
           await this.prisma.broadcast.update({
             where: { id: broadcastId },
-            data: { sentCount: sent }
+            data: { 
+              sentCount: sent,
+              lastSentAt: sentAt,
+              durationSeconds: elapsedSeconds,
+              messagesPerMinute: Math.round(messagesPerMinute * 100) / 100, // 2 casas decimais
+            }
           });
 
           // Aguardar intervalo aleatório antes do próximo envio
@@ -195,13 +226,28 @@ export class BroadcastService {
           failed++;
           console.error(`Erro ao enviar para ${contact.phone}:`, error);
 
-          // Registrar falha
+          // ✅ Tentar obter phoneNumber formatado mesmo em caso de erro
+          let phoneNumberForLog: string | null = null;
+          try {
+            let phoneNum = contact.phone.replace(/\D/g, '');
+            if (!phoneNum.startsWith('55') && (phoneNum.length === 10 || phoneNum.length === 11)) {
+              phoneNum = `55${phoneNum}`;
+            }
+            phoneNumberForLog = phoneNum;
+          } catch {
+            phoneNumberForLog = contact.phone || null;
+          }
+
+          // ✅ Registrar falha com informações adicionais
           await this.prisma.broadcastLog.create({
             data: {
               broadcastId,
               contactId: contact.id,
               status: 'failed',
-              error: (error as Error).message
+              error: (error as Error).message,
+              phoneNumber: phoneNumberForLog, // ✅ Cache do número formatado
+              contactName: contact.name || null, // ✅ Cache do nome
+              attempts: 1,
             }
           });
 
@@ -213,18 +259,66 @@ export class BroadcastService {
         }
       }
 
-      // Finalizar broadcast
+      // ✅ Finalizar broadcast com métricas finais
+      const endTime = Date.now();
+      const totalDurationSeconds = Math.floor((endTime - startTime) / 1000);
+      const totalMessages = sent + failed;
+      const finalMessagesPerMinute = totalDurationSeconds > 0 
+        ? (sent / totalDurationSeconds) * 60 
+        : 0;
+      const successRate = totalMessages > 0 
+        ? (sent / totalMessages) * 100 
+        : 0;
+
+      // ✅ Calcular contadores de resposta (inicialmente todos não responderam)
+      const repliedCount = 0; // Ainda não há respostas no momento da finalização
+      const notRepliedCount = Math.max(0, sent - repliedCount); // Todos que receberam ainda não responderam
+
       await this.prisma.broadcast.update({
         where: { id: broadcastId },
-        data: { status: 'completed', completedAt: new Date() }
+        data: { 
+          status: 'completed', 
+          completedAt: new Date(),
+          lastSentAt: lastSentAt || new Date(),
+          durationSeconds: totalDurationSeconds,
+          messagesPerMinute: Math.round(finalMessagesPerMinute * 100) / 100,
+          successRate: Math.round(successRate * 100) / 100, // Taxa de sucesso em %
+          repliedCount: repliedCount, // ✅ Inicialmente 0 (atualizado em tempo real quando responderem)
+          notRepliedCount: notRepliedCount, // ✅ Todos que receberam (atualizado quando responderem)
+        }
       });
 
       this.activeBroadcasts.delete(broadcastId);
     } catch (error) {
       console.error('Erro ao processar broadcast:', error);
+      
+      // ✅ Atualizar com métricas parciais mesmo em caso de falha
+      const endTime = Date.now();
+      const totalDurationSeconds = Math.floor((endTime - startTime) / 1000);
+      const totalMessages = sent + failed;
+      const finalMessagesPerMinute = totalDurationSeconds > 0 
+        ? (sent / totalDurationSeconds) * 60 
+        : 0;
+      const successRate = totalMessages > 0 
+        ? (sent / totalMessages) * 100 
+        : 0;
+      
+      // ✅ Calcular contadores de resposta mesmo em caso de falha
+      const repliedCount = 0;
+      const notRepliedCount = Math.max(0, sent - repliedCount);
+
       await this.prisma.broadcast.update({
         where: { id: broadcastId },
-        data: { status: 'failed', completedAt: new Date() }
+        data: { 
+          status: 'failed', 
+          completedAt: new Date(),
+          lastSentAt: lastSentAt || null,
+          durationSeconds: totalDurationSeconds,
+          messagesPerMinute: Math.round(finalMessagesPerMinute * 100) / 100,
+          successRate: Math.round(successRate * 100) / 100,
+          repliedCount: repliedCount,
+          notRepliedCount: notRepliedCount,
+        }
       });
       this.activeBroadcasts.delete(broadcastId);
     }
