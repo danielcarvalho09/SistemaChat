@@ -168,15 +168,20 @@ export class KanbanController {
   /**
    * GET /api/v1/kanban/board
    * Obter board completo (todas etapas com suas conversas)
-   * Filtra apenas conversas do usuário logado
+   * Para usuários normais: filtra por conexões do usuário e apenas conversas aceitas
+   * Para admin: mostra todas as conversas aceitas ou pode filtrar por usuário específico via query param
    */
   getBoard = async (
-    request: FastifyRequest,
+    request: FastifyRequest<{ Querystring: { userId?: string } }>,
     reply: FastifyReply
   ) => {
     try {
       const userId = request.user!.userId;
-      const board = await this.kanbanService.getKanbanBoard(userId);
+      const userRoles = request.user!.roles || [];
+      const isAdmin = userRoles.includes('admin');
+      const targetUserId = request.query?.userId; // Para admin ver kanban de outro usuário
+
+      const board = await this.kanbanService.getKanbanBoard(userId, isAdmin, targetUserId);
 
       return reply.send({
         success: true,
@@ -190,14 +195,29 @@ export class KanbanController {
   /**
    * GET /api/v1/kanban/stages/:id/conversations
    * Obter conversas de uma etapa específica
+   * Para usuários normais: filtra por conexões do usuário e apenas conversas aceitas
+   * Para admin: mostra todas as conversas aceitas ou pode filtrar por usuário específico via query param
    */
   getStageConversations = async (
-    request: FastifyRequest<{ Params: { id: string } }>,
+    request: FastifyRequest<{ 
+      Params: { id: string };
+      Querystring: { userId?: string };
+    }>,
     reply: FastifyReply
   ) => {
     try {
       const { id } = request.params;
-      const conversations = await this.kanbanService.getConversationsByStage(id);
+      const userId = request.user!.userId;
+      const userRoles = request.user!.roles || [];
+      const isAdmin = userRoles.includes('admin');
+      const targetUserId = request.query?.userId; // Para admin ver kanban de outro usuário
+
+      const conversations = await this.kanbanService.getConversationsByStage(
+        id, 
+        userId, 
+        isAdmin, 
+        targetUserId
+      );
 
       return reply.send({
         success: true,

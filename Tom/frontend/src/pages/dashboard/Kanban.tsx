@@ -10,12 +10,13 @@ import {
   useDroppable,
   useDraggable,
 } from '@dnd-kit/core';
-import { Plus, Trash2, X } from 'lucide-react';
+import { Plus, Trash2, X, Users as UsersIcon } from 'lucide-react';
 import { api } from '../../lib/api';
 import { toast } from 'sonner';
 import { GlassButton } from '../../components/ui/glass-button';
 import { formatPhoneNumber } from '../../utils/formatPhone';
 import { MessageModal } from '../../components/kanban/MessageModal';
+import { useAuthStore } from '../../store/authStore';
 
 interface KanbanStage {
   id: string;
@@ -88,6 +89,7 @@ function DraggableCard({ id, children }: { id: string; children: React.ReactNode
 }
 
 export function Kanban() {
+  const { user } = useAuthStore();
   const [board, setBoard] = useState<BoardColumn[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeCard, setActiveCard] = useState<KanbanConversation | null>(null);
@@ -95,6 +97,9 @@ export function Kanban() {
   const [newStageName, setNewStageName] = useState('');
   const [newStageColor, setNewStageColor] = useState('#3B82F6');
   const [selectedConversation, setSelectedConversation] = useState<KanbanConversation | null>(null);
+  const [selectedUserId, setSelectedUserId] = useState<string | undefined>(undefined); // Para admin ver kanban de outros usuários
+
+  const isAdmin = user?.roles?.some(role => role.name === 'admin') || false;
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -106,11 +111,13 @@ export function Kanban() {
 
   useEffect(() => {
     loadBoard();
-  }, []);
+  }, [selectedUserId]); // Recarregar quando mudar usuário selecionado (admin)
 
   const loadBoard = async () => {
     try {
-      const response = await api.get('/kanban/board');
+      // ✅ Para admin: passar userId como query param se estiver visualizando kanban de outro usuário
+      const params = isAdmin && selectedUserId ? { userId: selectedUserId } : {};
+      const response = await api.get('/kanban/board', { params });
       const data = response.data?.data || response.data || [];
       const normalized: BoardColumn[] = Array.isArray(data) ? data : [];
 
@@ -136,6 +143,24 @@ export function Kanban() {
       setLoading(false);
     }
   };
+
+  // ✅ Buscar lista de usuários para admin
+  const [users, setUsers] = useState<Array<{ id: string; name: string; email: string }>>([]);
+  const [showUserSelector, setShowUserSelector] = useState(false);
+
+  useEffect(() => {
+    if (isAdmin) {
+      // Buscar lista de usuários para o seletor
+      api.get('/users')
+        .then((response) => {
+          const usersData = response.data?.data || [];
+          setUsers(usersData.map((u: any) => ({ id: u.id, name: u.name, email: u.email })));
+        })
+        .catch((error) => {
+          console.error('Erro ao carregar usuários:', error);
+        });
+    }
+  }, [isAdmin]);
 
   const handleDragStart = (event: DragStartEvent) => {
     const { active } = event;
@@ -296,10 +321,64 @@ export function Kanban() {
       <div className="bg-white border-b border-gray-200 p-6">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-3xl font-bold text-gray-900">Minhas Conversas - Kanban</h1>
-            <p className="text-gray-600 mt-1">Gerencie suas conversas em atendimento</p>
+            <h1 className="text-3xl font-bold text-gray-900">
+              {isAdmin && selectedUserId 
+                ? `Kanban - ${users.find(u => u.id === selectedUserId)?.name || 'Usuário'}` 
+                : 'Minhas Conversas - Kanban'}
+            </h1>
+            <p className="text-gray-600 mt-1">
+              {isAdmin && selectedUserId
+                ? `Visualizando conversas aceitas do usuário selecionado`
+                : 'Gerencie suas conversas em atendimento (apenas conversas aceitas das suas conexões)'}
+            </p>
           </div>
           <div className="flex gap-2">
+            {/* ✅ Seletor de usuário para admin */}
+            {isAdmin && (
+              <div className="relative">
+                <button
+                  onClick={() => setShowUserSelector(!showUserSelector)}
+                  className="flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors"
+                >
+                  <UsersIcon className="w-4 h-4" />
+                  {selectedUserId 
+                    ? users.find(u => u.id === selectedUserId)?.name || 'Usuário'
+                    : 'Todos os Usuários'}
+                </button>
+                {showUserSelector && (
+                  <div className="absolute right-0 mt-2 w-64 bg-white border border-gray-200 rounded-lg shadow-lg z-50 max-h-96 overflow-y-auto">
+                    <div className="p-2">
+                      <button
+                        onClick={() => {
+                          setSelectedUserId(undefined);
+                          setShowUserSelector(false);
+                        }}
+                        className={`w-full text-left px-3 py-2 rounded hover:bg-gray-100 ${
+                          !selectedUserId ? 'bg-blue-50 text-blue-700' : 'text-gray-700'
+                        }`}
+                      >
+                        Todos os Usuários
+                      </button>
+                      {users.map((user) => (
+                        <button
+                          key={user.id}
+                          onClick={() => {
+                            setSelectedUserId(user.id);
+                            setShowUserSelector(false);
+                          }}
+                          className={`w-full text-left px-3 py-2 rounded hover:bg-gray-100 ${
+                            selectedUserId === user.id ? 'bg-blue-50 text-blue-700' : 'text-gray-700'
+                          }`}
+                        >
+                          <div className="font-medium">{user.name}</div>
+                          <div className="text-xs text-gray-500">{user.email}</div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
             {/* Botão principal */}
             <button
               onClick={() => setShowCreateModal(true)}

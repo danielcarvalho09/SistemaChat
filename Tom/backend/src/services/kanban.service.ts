@@ -181,29 +181,56 @@ export class KanbanService {
 
   /**
    * Obter conversas por etapa (para visualização do Kanban)
-   * Filtra por connectionId do usuário (mostra apenas conversas da sua conexão WhatsApp)
+   * Filtra por connectionId do usuário e apenas conversas aceitas (status 'open' ou 'in_progress')
+   * Para admin: pode ver todas as conversas ou filtrar por usuário específico
    */
-  async getConversationsByStage(stageId: string, userId?: string) {
-    // Buscar a conexão ativa do usuário
-    let connectionId: string | undefined;
-    if (userId) {
+  async getConversationsByStage(
+    stageId: string, 
+    userId?: string, 
+    isAdmin: boolean = false,
+    targetUserId?: string // Para admin ver kanban de outro usuário
+  ) {
+    // Se admin está vendo kanban de outro usuário, usar targetUserId
+    const effectiveUserId = isAdmin && targetUserId ? targetUserId : userId;
+    
+    // Buscar conexões do usuário
+    let connectionIds: string[] = [];
+    if (effectiveUserId && !isAdmin) {
+      // Para usuários normais: buscar apenas suas conexões
       const user = await this.prisma.user.findUnique({
-        where: { id: userId },
+        where: { id: effectiveUserId },
         include: {
           whatsappConnections: {
             where: { isActive: true },
-            take: 1,
           },
         },
       });
-      connectionId = user?.whatsappConnections?.[0]?.id;
+      connectionIds = user?.whatsappConnections?.map(c => c.id) || [];
+    } else if (isAdmin && targetUserId) {
+      // Admin vendo kanban de outro usuário: buscar conexões do targetUserId
+      const user = await this.prisma.user.findUnique({
+        where: { id: targetUserId },
+        include: {
+          whatsappConnections: {
+            where: { isActive: true },
+          },
+        },
+      });
+      connectionIds = user?.whatsappConnections?.map(c => c.id) || [];
     }
+    // Se admin sem targetUserId: não filtrar por connectionId (mostra todas)
 
     return await this.prisma.conversation.findMany({
       where: { 
         kanbanStageId: stageId,
-        // Filtrar por connectionId - mostrar apenas conversas da conexão do usuário
-        ...(connectionId && { connectionId }),
+        // ✅ Filtrar por connectionId apenas se não for admin ou se admin estiver vendo kanban de usuário específico
+        ...(connectionIds.length > 0 && { connectionId: { in: connectionIds } }),
+        // ✅ IMPORTANTE: Filtrar apenas conversas aceitas (não 'waiting')
+        // Status aceitos: 'in_progress' (conversas que foram aceitas e estão em atendimento)
+        // Também incluir 'transferred' se a conversa foi transferida mas ainda está em atendimento
+        status: {
+          in: ['in_progress', 'transferred'], // Conversas aceitas/em atendimento
+        },
       },
       include: {
         contact: true,
@@ -212,6 +239,20 @@ export class KanbanService {
             id: true,
             name: true,
             avatar: true,
+          },
+        },
+        connection: {
+          select: {
+            id: true,
+            name: true,
+            phoneNumber: true,
+            user: {
+              select: {
+                id: true,
+                name: true,
+                email: true,
+              },
+            },
           },
         },
         messages: {
@@ -234,16 +275,20 @@ export class KanbanService {
 
   /**
    * Obter todas as conversas organizadas por etapa
-   * Mostra TODAS as conversas (aguardando, transferidas, em atendimento)
-   * Não filtra por usuário para permitir visibilidade completa
+   * Para usuários normais: mostra apenas conversas aceitas das suas conexões
+   * Para admin: mostra todas as conversas aceitas ou pode filtrar por usuário específico
    */
-  async getKanbanBoard(userId?: string) {
+  async getKanbanBoard(
+    userId?: string, 
+    isAdmin: boolean = false,
+    targetUserId?: string // Para admin ver kanban de outro usuário
+  ) {
     const stages = await this.listStages();
 
     const board = await Promise.all(
       stages.map(async (stage) => ({
         stage,
-        conversations: await this.getConversationsByStage(stage.id, userId),
+        conversations: await this.getConversationsByStage(stage.id, userId, isAdmin, targetUserId),
       }))
     );
 
