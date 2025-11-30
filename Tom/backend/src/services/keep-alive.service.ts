@@ -142,57 +142,82 @@ export class KeepAliveService {
 
           const client = baileysManager.getClient(connection.id);
           
-          // ✅ Caso 1: Cliente não existe mas deveria estar conectado (tem credenciais)
-          if (!client) {
-            if (connection.status === 'connected' || connection.status === 'connecting') {
-              logger.warn(`💔 Baileys connection ${connection.id} (${connection.phoneNumber}) should be ${connection.status} but client not found - attempting reconnect...`);
-              try {
-                await baileysManager.manualReconnect(connection.id);
-                logger.info(`✅ Reconnection initiated for ${connection.id} (client not found)`);
-              } catch (reconnectError: any) {
-                logger.error(`❌ Failed to reconnect ${connection.id}:`, reconnectError?.message || reconnectError);
-              }
-            } else {
-              // Status é 'disconnected' mas tem credenciais válidas - tentar reconectar automaticamente
-              logger.info(`🔄 Connection ${connection.id} (${connection.phoneNumber}) is disconnected but has valid credentials - attempting auto-reconnect...`);
-              try {
-                await baileysManager.manualReconnect(connection.id);
-                logger.info(`✅ Auto-reconnection initiated for ${connection.id}`);
-              } catch (reconnectError: any) {
-                logger.error(`❌ Failed to auto-reconnect ${connection.id}:`, reconnectError?.message || reconnectError);
-              }
-            }
-          } 
-          // ✅ Caso 2: Cliente existe mas não está conectado
-          else if (client.status !== 'connected') {
-            logger.warn(`💔 Baileys connection ${connection.id} (${connection.phoneNumber}) has client but status is ${client.status} - attempting reconnect...`);
-            if (client.hasCredentials || hasValidCredentials) {
-              try {
-                await baileysManager.manualReconnect(connection.id);
-                logger.info(`🔄 Reconnection attempted for ${connection.id}`);
-              } catch (reconnectError: any) {
-                logger.error(`❌ Failed to reconnect ${connection.id}:`, reconnectError?.message || reconnectError);
-              }
-            }
-          } 
-          // ✅ Caso 3: Conexão está ativa - verificar heartbeat
-          else {
+          // ✅ CRÍTICO: Verificar se já está conectado ANTES de tentar qualquer coisa
+          if (client && client.status === 'connected') {
+            logger.debug(`✅ Baileys connection ${connection.id} (${connection.phoneNumber}) is already connected - skipping keep-alive reconnection`);
+            
+            // Apenas verificar heartbeat se estiver conectado
             const secondsSinceHeartbeat = client.lastHeartbeat
               ? Math.floor((Date.now() - client.lastHeartbeat.getTime()) / 1000)
               : null;
             
             if (secondsSinceHeartbeat !== null && secondsSinceHeartbeat > 120) {
-              logger.warn(`⚠️ Baileys connection ${connection.id} heartbeat is stale (${secondsSinceHeartbeat}s ago) - connection may be dead`);
-              // Tentar reconectar se heartbeat está muito antigo
-              try {
-                await baileysManager.manualReconnect(connection.id);
-                logger.info(`🔄 Reconnection attempted for ${connection.id} due to stale heartbeat`);
-              } catch (reconnectError: any) {
-                logger.error(`❌ Failed to reconnect ${connection.id} after stale heartbeat:`, reconnectError?.message || reconnectError);
-              }
+              logger.warn(`⚠️ Baileys connection ${connection.id} heartbeat is stale (${secondsSinceHeartbeat}s ago) but status is connected - monitoring`);
             } else {
               logger.debug(`✅ Baileys connection ${connection.id} (${connection.phoneNumber}) is alive and healthy`);
             }
+            continue; // Pular para próxima conexão - não tentar reconectar
+          }
+
+          // ✅ CRÍTICO: Verificar se já está conectando/reconectando ANTES de tentar reconectar
+          if (client && (client.status === 'connecting' || client.isReconnecting)) {
+            logger.debug(`⏳ Baileys connection ${connection.id} (${connection.phoneNumber}) is already ${client.status} - skipping keep-alive reconnection`);
+            continue; // Pular para próxima conexão - não tentar reconectar enquanto já está conectando
+          }
+
+          // ✅ CRÍTICO: Verificar status no banco ANTES de tentar reconectar
+          // Se status no banco é 'connected' ou 'connecting', não tentar reconectar
+          if (connection.status === 'connected') {
+            logger.debug(`✅ Connection ${connection.id} status in DB is 'connected' - skipping keep-alive reconnection`);
+            continue;
+          }
+          
+          if (connection.status === 'connecting') {
+            logger.debug(`⏳ Connection ${connection.id} status in DB is 'connecting' - skipping keep-alive reconnection (already in progress)`);
+            continue;
+          }
+          
+          // ✅ Caso 1: Cliente não existe mas deveria estar conectado (tem credenciais)
+          if (!client) {
+            // ✅ Só tentar reconectar se status for 'disconnected' e não estiver em 'connecting' no banco
+            if (connection.status === 'disconnected') {
+              logger.info(`🔄 Connection ${connection.id} (${connection.phoneNumber}) is disconnected but has valid credentials - attempting auto-reconnect...`);
+              try {
+                const result = await baileysManager.manualReconnect(connection.id);
+                
+                // ✅ Verificar resultado - se já está conectado/conectando, não tentar novamente
+                if (result.status === 'already_connected' || result.status === 'already_reconnecting') {
+                  logger.debug(`✅ Connection ${connection.id} is already ${result.status} - keep-alive skipping`);
+                } else {
+                  logger.info(`✅ Auto-reconnection initiated for ${connection.id}: ${result.status}`);
+                }
+              } catch (reconnectError: any) {
+                logger.error(`❌ Failed to auto-reconnect ${connection.id}:`, reconnectError?.message || reconnectError);
+              }
+            }
+            // ✅ Removido: Caso de status 'connected'/'connecting' no banco mas sem cliente
+            // Se status no banco é 'connected' ou 'connecting', não tentar reconectar (já verificado acima)
+          } 
+          // ✅ Caso 2: Cliente existe mas não está conectado (e não está conectando)
+          else if (client.status !== 'connected' && client.status !== 'connecting' && !client.isReconnecting) {
+            logger.warn(`💔 Baileys connection ${connection.id} (${connection.phoneNumber}) has client but status is ${client.status} - attempting reconnect...`);
+            if (client.hasCredentials || hasValidCredentials) {
+              try {
+                const result = await baileysManager.manualReconnect(connection.id);
+                
+                if (result.status === 'already_connected' || result.status === 'already_reconnecting') {
+                  logger.debug(`✅ Connection ${connection.id} is already ${result.status} - keep-alive skipping`);
+                } else {
+                  logger.info(`🔄 Reconnection attempted for ${connection.id}: ${result.status}`);
+                }
+              } catch (reconnectError: any) {
+                logger.error(`❌ Failed to reconnect ${connection.id}:`, reconnectError?.message || reconnectError);
+              }
+            }
+          } 
+          // ✅ Caso 3: Status desconhecido ou inválido
+          else {
+            logger.debug(`ℹ️ Baileys connection ${connection.id} (${connection.phoneNumber}) status: ${client.status}, isReconnecting: ${client.isReconnecting} - monitoring`);
           }
         } catch (connectionError: any) {
           logger.error(`❌ Error checking Baileys connection ${connection.id}:`, connectionError?.message || connectionError);

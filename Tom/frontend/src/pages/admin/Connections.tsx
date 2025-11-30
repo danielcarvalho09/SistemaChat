@@ -99,17 +99,36 @@ export function Connections() {
 
     // Evento: WhatsApp conectando
     socket.on('whatsapp_connecting', (data: { connectionId: string }) => {
-      console.log('🔄 WhatsApp conectando:', data.connectionId);
-      setConnections((prev) =>
-        prev.map((conn) =>
+      // ✅ CRÍTICO: Verificar se já está conectando/conectado antes de atualizar
+      setConnections((prev) => {
+        const connection = prev.find(c => c.id === data.connectionId);
+        
+        // Ignorar se já está conectado (evitar loops de reconexão)
+        if (connection?.status === 'connected') {
+          console.warn(`⚠️ Evento 'whatsapp_connecting' recebido mas conexão ${data.connectionId} já está conectada - ignorando`);
+          return prev; // Não atualizar
+        }
+        
+        // Se já está conectando, apenas logar (evitar múltiplas atualizações)
+        if (connection?.status === 'connecting') {
+          console.debug(`ℹ️ Evento 'whatsapp_connecting' recebido mas conexão ${data.connectionId} já está conectando - ignorando duplicata`);
+          return prev; // Não atualizar novamente
+        }
+        
+        // Atualizar apenas se realmente precisa mudar de status
+        console.log('🔄 WhatsApp conectando:', data.connectionId);
+        return prev.map((conn) =>
           conn.id === data.connectionId ? { ...conn, status: 'connecting' } : conn
-        )
-      );
+        );
+      });
       
-      // Atualizar modal se estiver aberto para esta conexão
-      setSelectedConnection((prev) =>
-        prev?.id === data.connectionId ? { ...prev, status: 'connecting' } : prev
-      );
+      // Atualizar modal apenas se realmente mudou de status
+      setSelectedConnection((prev) => {
+        if (prev?.id === data.connectionId && prev.status !== 'connected' && prev.status !== 'connecting') {
+          return { ...prev, status: 'connecting' };
+        }
+        return prev;
+      });
     });
 
     // Evento: WhatsApp conectado

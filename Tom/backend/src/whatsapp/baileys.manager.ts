@@ -501,6 +501,20 @@ class BaileysManager {
 
     // Conectando
     if (connection === 'connecting') {
+      // ✅ CRÍTICO: Verificar se já está conectado ANTES de mudar para 'connecting'
+      // Isso evita loops de reconexão quando a conexão já está estabelecida
+      if (client.status === 'connected') {
+        logger.info(`[Baileys] ⏭️ Connection ${connectionId} update to 'connecting' ignored - already connected`);
+        return; // Não fazer nada se já está conectado
+      }
+      
+      // ✅ CRÍTICO: Verificar se já está conectando antes de emitir evento novamente
+      // Isso evita múltiplos eventos 'whatsapp_connecting' para a mesma conexão
+      if (client.status === 'connecting') {
+        logger.debug(`[Baileys] ⏭️ Connection ${connectionId} update to 'connecting' ignored - already connecting`);
+        return; // Não fazer nada se já está conectando
+      }
+      
       const connectingAt = new Date();
       client.status = 'connecting';
       
@@ -565,6 +579,13 @@ class BaileysManager {
 
     // Conectado
     if (connection === 'open') {
+      // ✅ CRÍTICO: Verificar se já está conectado antes de processar
+      // Isso evita processar múltiplos eventos 'open' para a mesma conexão
+      if (client.status === 'connected') {
+        logger.debug(`[Baileys] ⏭️ Connection ${connectionId} update to 'open' ignored - already connected`);
+        return; // Já está conectado, não processar novamente
+      }
+      
       // ✅ BUG FIX: Cancelar timeout de "connecting" se existir (evitar race condition)
       if (client.connectingTimeout) {
         clearTimeout(client.connectingTimeout);
@@ -3390,6 +3411,24 @@ class BaileysManager {
     
     logger.info(`[Baileys] 🔁 Manual reconnect requested for ${connectionId}`);
     logger.info(`[Baileys] 📋 Credenciais VÁLIDAS no banco: ${hasValidCredentialsInDB ? 'SIM ✅' : 'NÃO ❌'}`);
+    
+    // ✅ CRÍTICO: Verificar status no banco ANTES de tentar reconectar
+    // Se já está conectado ou conectando no banco, não tentar reconectar
+    if (connection && connection.status === 'connected') {
+      logger.info(`[Baileys] ⏭️ Connection ${connectionId} is already 'connected' in DB - skipping reconnect`);
+      return {
+        status: 'already_connected',
+        message: 'Conexão já está conectada no banco de dados.',
+      };
+    }
+    
+    if (connection && connection.status === 'connecting') {
+      logger.info(`[Baileys] ⏭️ Connection ${connectionId} is already 'connecting' in DB - skipping reconnect (already in progress)`);
+      return {
+        status: 'already_reconnecting',
+        message: 'Conexão já está em processo de conexão no banco de dados.',
+      };
+    }
     
     if (!hasValidCredentialsInDB) {
       logger.warn(`[Baileys] ⚠️ Sem credenciais válidas para ${connectionId} - QR code será gerado`);
