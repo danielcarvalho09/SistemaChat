@@ -10,7 +10,7 @@ export const registerSchema = z.object({
     .regex(/[A-Z]/, 'Password must contain at least one uppercase letter')
     .regex(/[a-z]/, 'Password must contain at least one lowercase letter')
     .regex(/[0-9]/, 'Password must contain at least one number'),
-    
+
   name: z.string().min(2, 'Name must be at least 2 characters'),
 });
 
@@ -69,11 +69,11 @@ export const sendMessageSchema = z.object({
     })
     .pipe(z.string().max(4096))
     .default(''),
-  
+
   messageType: z
     .union([z.enum(['text', 'image', 'video', 'audio', 'document', 'location']), z.undefined()])
     .default('text'),
-  
+
   mediaUrl: z
     .union([z.string(), z.null(), z.undefined()])
     .transform((val) => {
@@ -83,7 +83,7 @@ export const sendMessageSchema = z.object({
     })
     .pipe(z.string().optional())
     .optional(),
-  
+
   quotedMessageId: z
     .union([z.string().uuid(), z.null(), z.undefined()])
     .transform((val) => {
@@ -172,7 +172,7 @@ export const updateNotificationPreferenceSchema = z.object({
 
 export const paginationSchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
-  limit: z.coerce.number().int().min(1).max(100).default(20),
+  limit: z.coerce.number().int().min(1).max(200).default(50),
   sortBy: z.string().optional(),
   sortOrder: z.enum(['asc', 'desc']).default('desc'),
 });

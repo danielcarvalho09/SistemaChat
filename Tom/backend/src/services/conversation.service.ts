@@ -28,7 +28,7 @@ export class ConversationService {
   ): Promise<PaginatedResponse<ConversationResponse>> {
     const {
       page = 1,
-      limit = 20,
+      limit = 50,
       sortBy = 'lastMessageAt',
       sortOrder = 'desc',
       status,
@@ -107,7 +107,7 @@ export class ConversationService {
     if (departmentId) {
       andConditions.push({ departmentId });
     }
-    
+
     // Apenas usuários comuns são filtrados por conexão
     // Admins veem TODAS as conversas de TODAS as conexões
     if (connectionId && !isAdmin) {
@@ -314,18 +314,18 @@ export class ConversationService {
           where: { isActive: true },
           take: 1,
         },
-          departmentAccess: {
-            include: {
-              department: true,
-            },
-            orderBy: { createdAt: 'asc' },
+        departmentAccess: {
+          include: {
+            department: true,
           },
+          orderBy: { createdAt: 'asc' },
+        },
       },
     });
 
     // ✅ Determinar departmentId: prioridade 1) fornecido, 2) departamento do usuário, 3) existente na conversa
     let finalDepartmentId = departmentId;
-    
+
     if (!finalDepartmentId && userWithConnection?.departmentAccess && userWithConnection.departmentAccess.length > 0) {
       // Ordenar manualmente: departamento primário primeiro
       const sortedDepartments = [...userWithConnection.departmentAccess].sort((a, b) => {
@@ -333,11 +333,11 @@ export class ConversationService {
         if (!a.department.isPrimary && b.department.isPrimary) return 1;
         return 0;
       });
-      
+
       finalDepartmentId = sortedDepartments[0].departmentId;
       logger.info(`✅ Using user's department for conversation: ${finalDepartmentId} (user: ${userId}, primary: ${sortedDepartments[0].department.isPrimary})`);
     }
-    
+
     // Fallback: usar o departamento atual da conversa se não tiver nenhum outro
     if (!finalDepartmentId) {
       finalDepartmentId = conversation.departmentId || undefined;
@@ -447,11 +447,11 @@ export class ConversationService {
     // 2. A conversa está no departamento dele e não está atribuída a ninguém (status waiting ou transferred)
     if (!isAdmin) {
       const userDepartmentIds = user?.departmentAccess.map((d: any) => d.departmentId) || [];
-      const canTransfer = 
+      const canTransfer =
         conversation.assignedUserId === fromUserId ||
-        ((conversation.status === 'waiting' || conversation.status === 'transferred') && 
-         conversation.departmentId && 
-         userDepartmentIds.includes(conversation.departmentId));
+        ((conversation.status === 'waiting' || conversation.status === 'transferred') &&
+          conversation.departmentId &&
+          userDepartmentIds.includes(conversation.departmentId));
 
       if (!canTransfer) {
         throw new ForbiddenError('You can only transfer conversations assigned to you or in your department queue');
@@ -480,7 +480,7 @@ export class ConversationService {
         if (!a.department.isPrimary && b.department.isPrimary) return 1;
         return 0;
       });
-      
+
       targetDepartmentId = sortedDepartments[0].departmentId;
       logger.info(`✅ Transfer: Using department ${targetDepartmentId} from target user ${toUserId} (primary: ${sortedDepartments[0].department.isPrimary})`);
     } else {
@@ -648,32 +648,32 @@ export class ConversationService {
         },
         department: conversation.department
           ? {
-              id: conversation.department.id,
-              name: conversation.department.name,
-              description: conversation.department.description || null,
-              color: conversation.department.color || '#3B82F6',
-              icon: conversation.department.icon || 'folder',
-              isActive: conversation.department.isActive ?? true,
-              createdAt: conversation.department.createdAt?.toISOString() || new Date().toISOString(),
-              updatedAt: conversation.department.updatedAt?.toISOString() || new Date().toISOString(),
-            }
+            id: conversation.department.id,
+            name: conversation.department.name,
+            description: conversation.department.description || null,
+            color: conversation.department.color || '#3B82F6',
+            icon: conversation.department.icon || 'folder',
+            isActive: conversation.department.isActive ?? true,
+            createdAt: conversation.department.createdAt?.toISOString() || new Date().toISOString(),
+            updatedAt: conversation.department.updatedAt?.toISOString() || new Date().toISOString(),
+          }
           : null,
         assignedUser: conversation.assignedUser
           ? {
-              id: conversation.assignedUser.id,
-              email: conversation.assignedUser.email,
-              name: conversation.assignedUser.name,
-              avatar: conversation.assignedUser.avatar || null,
-              status: conversation.assignedUser.status || 'offline',
-              isActive: conversation.assignedUser.isActive ?? true,
-              roles: (conversation.assignedUser.roles || []).map((ur: any) => ({
-                id: ur.role?.id || ur.roleId,
-                name: ur.role?.name || 'user',
-                description: ur.role?.description || null,
-              })),
-              createdAt: conversation.assignedUser.createdAt?.toISOString() || new Date().toISOString(),
-              updatedAt: conversation.assignedUser.updatedAt?.toISOString() || new Date().toISOString(),
-            }
+            id: conversation.assignedUser.id,
+            email: conversation.assignedUser.email,
+            name: conversation.assignedUser.name,
+            avatar: conversation.assignedUser.avatar || null,
+            status: conversation.assignedUser.status || 'offline',
+            isActive: conversation.assignedUser.isActive ?? true,
+            roles: (conversation.assignedUser.roles || []).map((ur: any) => ({
+              id: ur.role?.id || ur.roleId,
+              name: ur.role?.name || 'user',
+              description: ur.role?.description || null,
+            })),
+            createdAt: conversation.assignedUser.createdAt?.toISOString() || new Date().toISOString(),
+            updatedAt: conversation.assignedUser.updatedAt?.toISOString() || new Date().toISOString(),
+          }
           : null,
         status: conversation.status,
         lastMessageAt: conversation.lastMessageAt?.toISOString() || new Date().toISOString(),
@@ -682,32 +682,32 @@ export class ConversationService {
         unreadCount: conversation.unreadCount || 0,
         lastMessage: lastMessage
           ? {
-              id: lastMessage.id,
-              conversationId: lastMessage.conversationId,
-              sender: null,
-              content: lastMessage.content || '',
-              messageType: lastMessage.messageType || 'text',
-              mediaUrl: lastMessage.mediaUrl || null,
-              status: lastMessage.status || 'sent',
-              isFromContact: lastMessage.isFromContact ?? false,
-              timestamp: lastMessage.timestamp?.toISOString() || new Date().toISOString(),
-              createdAt: lastMessage.createdAt?.toISOString() || new Date().toISOString(),
-              quotedMessageId: lastMessage.quotedMessageId || null,
-              quotedMessage: quoted
-                ? {
-                    id: quoted.id,
-                    content: quoted.content || '',
-                    messageType: quoted.messageType || 'text',
-                    mediaUrl: quoted.mediaUrl || null,
-                    isFromContact: quoted.isFromContact ?? false,
-                    senderName: quoted.sender?.name || null,
-                    senderAvatar: quoted.sender?.avatar || null,
-                    senderId: quoted.senderId || null,
-                    timestamp: quoted.timestamp ? quoted.timestamp.toISOString() : null,
-                    status: quoted.status ? (quoted.status as MessageStatus) : null,
-                  }
-                : null,
-            }
+            id: lastMessage.id,
+            conversationId: lastMessage.conversationId,
+            sender: null,
+            content: lastMessage.content || '',
+            messageType: lastMessage.messageType || 'text',
+            mediaUrl: lastMessage.mediaUrl || null,
+            status: lastMessage.status || 'sent',
+            isFromContact: lastMessage.isFromContact ?? false,
+            timestamp: lastMessage.timestamp?.toISOString() || new Date().toISOString(),
+            createdAt: lastMessage.createdAt?.toISOString() || new Date().toISOString(),
+            quotedMessageId: lastMessage.quotedMessageId || null,
+            quotedMessage: quoted
+              ? {
+                id: quoted.id,
+                content: quoted.content || '',
+                messageType: quoted.messageType || 'text',
+                mediaUrl: quoted.mediaUrl || null,
+                isFromContact: quoted.isFromContact ?? false,
+                senderName: quoted.sender?.name || null,
+                senderAvatar: quoted.sender?.avatar || null,
+                senderId: quoted.senderId || null,
+                timestamp: quoted.timestamp ? quoted.timestamp.toISOString() : null,
+                status: quoted.status ? (quoted.status as MessageStatus) : null,
+              }
+              : null,
+          }
           : null,
         internalNotes: conversation.internalNotes || null,
         createdAt: conversation.createdAt?.toISOString() || new Date().toISOString(),
