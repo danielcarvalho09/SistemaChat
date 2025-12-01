@@ -149,7 +149,7 @@ export class MessageService {
     // 3. Conversa não tem ninguém atribuído
     // Se admin envia em conversa já atribuída a outro usuário, NÃO reatribui
     const isTransferred = conversation.status === 'transferred';
-    
+
     // Aceitar automaticamente somente se estiver em 'waiting' ou sem atendente
     if (conversation.status === 'waiting' || !conversation.assignedUserId) {
       await this.prisma.conversation.update({
@@ -170,16 +170,16 @@ export class MessageService {
 
     // Verificar se a conexão está ativa
     const isConnectionActive = baileysManager.isConnectionActive(conversation.connectionId);
-    
+
     if (!isConnectionActive) {
       logger.error(`❌ Connection ${conversation.connectionId} is not active. Cannot send message.`);
-      
+
       // Buscar info da conexão
       const connectionInfo = await this.prisma.whatsAppConnection.findUnique({
         where: { id: conversation.connectionId },
         select: { name: true, phoneNumber: true, status: true },
       });
-      
+
       throw new Error(
         `WhatsApp connection "${connectionInfo?.name}" (${connectionInfo?.phoneNumber}) is not connected. ` +
         `Status: ${connectionInfo?.status}. Please connect it first.`
@@ -240,7 +240,7 @@ export class MessageService {
         const formattedMessage = this.formatMessageResponse(message);
         // Sobrescrever status para 'sending'
         formattedMessage.status = MessageStatus.SENDING;
-        
+
         socketServer.emitNewMessage(conversationId, formattedMessage);
         logger.info(`[MessageService] 📡 Message event emitted IMMEDIATELY for conversation ${conversationId} (status: sending)`);
       }
@@ -256,31 +256,31 @@ export class MessageService {
         logger.info(`📤 [BACKGROUND] Starting WhatsApp send for message ${message.id}`);
         logger.info(`📤 [BACKGROUND] Connection: ${conversation.connectionId}, Phone: ${conversation.contact.phoneNumber}`);
         logger.info(`📤 [BACKGROUND] Message type: ${messageType}, mediaUrl: ${mediaUrl || 'none'}`);
-        
+
         // ✅ VERIFICAÇÃO: Verificar se conexão está disponível antes de enviar
         const connectionStatus = await this.prisma.whatsAppConnection.findUnique({
           where: { id: conversation.connectionId },
           select: { status: true },
         });
-        
+
         if (!connectionStatus || connectionStatus.status !== 'connected') {
           throw new Error(`Connection ${conversation.connectionId} is not connected (status: ${connectionStatus?.status || 'not found'})`);
         }
-        
+
         logger.info(`📤 [BACKGROUND] Connection verified: ${connectionStatus.status}`);
-        
+
         let externalId: string | undefined;
-        
+
         const quotedForSend = quotedMessage && quotedMessage.externalId
           ? {
-              stanzaId: quotedMessage.externalId as string,
-              messageId: quotedMessage.id,
-              messageType: quotedMessage.messageType,
-              content: quotedMessage.content,
-              mediaUrl: quotedMessage.mediaUrl,
-              isFromContact: quotedMessage.isFromContact,
-              metadata: quotedMessage.metadata ?? null,
-            }
+            stanzaId: quotedMessage.externalId as string,
+            messageId: quotedMessage.id,
+            messageType: quotedMessage.messageType,
+            content: quotedMessage.content,
+            mediaUrl: quotedMessage.mediaUrl,
+            isFromContact: quotedMessage.isFromContact,
+            metadata: quotedMessage.metadata ?? null,
+          }
           : undefined;
 
         if (quotedMessage && !quotedMessage.externalId) {
@@ -300,7 +300,7 @@ export class MessageService {
         } else if (mediaUrl) {
           logger.info(`📤 [BACKGROUND] Sending media message: type=${messageType}, url=${mediaUrl}`);
           // Só passar caption se houver conteúdo, caso contrário enviar sem caption
-          const mediaContent = formattedContent && formattedContent.trim() 
+          const mediaContent = formattedContent && formattedContent.trim()
             ? { url: mediaUrl, caption: formattedContent }
             : { url: mediaUrl };
           externalId = await baileysManager.sendMessage(
@@ -314,11 +314,11 @@ export class MessageService {
         } else {
           throw new Error(`Invalid message type or missing mediaUrl for media message`);
         }
-        
+
         if (!externalId) {
           logger.warn(`📤 [BACKGROUND] ⚠️ Message sent but no externalId returned - may not have been sent`);
         }
-        
+
         // ✅ Atualizar mensagem com externalId e status "sent"
         await this.prisma.message.update({
           where: { id: message.id },
@@ -327,9 +327,9 @@ export class MessageService {
             status: 'sent',
           },
         });
-        
+
         logger.info(`✅ [BACKGROUND] Message ${message.id} updated to 'sent' status (externalId: ${externalId || 'none'})`);
-        
+
         // ✅ Emitir evento WebSocket com status atualizado
         try {
           const socketServer = getSocketServer();
@@ -358,7 +358,7 @@ export class MessageService {
                 },
               },
             });
-            
+
             if (updatedMessageData) {
               const updatedMessage = this.formatMessageResponse(updatedMessageData);
               socketServer.emitNewMessage(conversationId, updatedMessage);
@@ -368,7 +368,7 @@ export class MessageService {
         } catch (socketError) {
           logger.error('[MessageService] ❌ Error emitting socket event (update):', socketError);
         }
-        
+
         logger.info(`✅ [BACKGROUND] Message ${message.id} sent successfully via WhatsApp (id: ${externalId || 'n/a'})`);
       } catch (error: any) {
         // ✅ LOG DETALHADO DO ERRO
@@ -383,7 +383,7 @@ export class MessageService {
           errorStack: error?.stack || 'No stack trace',
           errorName: error?.name || 'Unknown',
         });
-        
+
         // ✅ Atualizar mensagem com status "failed"
         try {
           await this.prisma.message.update({
@@ -396,7 +396,7 @@ export class MessageService {
         } catch (updateError) {
           logger.error('❌ [BACKGROUND] Error updating message status to failed:', updateError);
         }
-        
+
         // ✅ Emitir evento WebSocket com status "failed"
         try {
           const socketServer = getSocketServer();
@@ -425,7 +425,7 @@ export class MessageService {
                 },
               },
             });
-            
+
             if (failedMessageData) {
               const failedMessage = this.formatMessageResponse(failedMessageData);
               socketServer.emitNewMessage(conversationId, failedMessage);
@@ -502,9 +502,25 @@ export class MessageService {
       }
       // Verificar se é um grupo
       const isGroup = from.endsWith('@g.us');
-      
+
       // Normalizar número de telefone/ID do grupo
       const phoneNumber = from.replace('@s.whatsapp.net', '').replace('@g.us', '');
+
+      // ✅ FILTRO LID: Evitar criar conversas fantasmas para IDs @lid
+      // LIDs (Linked Device IDs) são usados internamente pelo WhatsApp para dispositivos vinculados
+      // Não devemos criar novas conversas para eles, pois duplicam as conversas reais
+      if (from.includes('@lid')) {
+        // Verificar se já existe contato para este LID
+        const existingLidContact = await this.prisma.contact.findUnique({
+          where: { phoneNumber },
+        });
+
+        if (!existingLidContact) {
+          logger.warn(`[MessageService] ⚠️ Skipping message from LID ${from} to avoid ghost conversation creation`);
+          return;
+        }
+        // Se já existe, processar normalmente (pode ser um contato legado ou intencional)
+      }
 
       // Buscar ou criar contato
       let contact = await this.prisma.contact.findUnique({
@@ -514,11 +530,11 @@ export class MessageService {
       if (!contact) {
         // Se for grupo, tentar buscar o nome do grupo
         let contactName = phoneNumber;
-        
+
         if (isGroup) {
           try {
             const client = baileysManager['clients'].get(connectionId);
-            
+
             if (client?.socket) {
               const groupMetadata = await client.socket.groupMetadata(from);
               contactName = groupMetadata.subject || phoneNumber;
@@ -528,7 +544,7 @@ export class MessageService {
             logger.warn(`[MessageService] Could not fetch group name:`, error);
           }
         }
-        
+
         contact = await this.prisma.contact.create({
           data: {
             phoneNumber,
@@ -594,8 +610,8 @@ export class MessageService {
           user: {
             include: {
               departmentAccess: {
-                include: { 
-                  department: true 
+                include: {
+                  department: true
                 },
                 orderBy: { createdAt: 'asc' },
               },
@@ -613,7 +629,7 @@ export class MessageService {
           if (!a.department.isPrimary && b.department.isPrimary) return 1;
           return 0;
         });
-        
+
         userDepartmentId = sortedDepartments[0].departmentId;
         logger.info(`[MessageService] 📍 Found department for connection user: ${userDepartmentId} (user: ${connection.user?.name || 'N/A'}, primary: ${sortedDepartments[0].department.isPrimary})`);
       } else {
@@ -739,7 +755,7 @@ export class MessageService {
           },
         },
       });
-      
+
       logger.info(`[MessageService] 💾 Message saved: ${message.id} (external: ${message.externalId})`);
 
       // Atualizar conversa
@@ -773,16 +789,16 @@ export class MessageService {
         if (connectionWithAI?.aiEnabled && connectionWithAI?.aiAssistantId && conversationBelongsToConnection) {
           try {
             logger.info(`[MessageService] 🤖 AI is enabled for connection ${connectionId}, conversation is in_progress and belongs to this connection, generating response...`);
-            
+
             const { AIService } = await import('./ai.service.js');
             const aiService = new AIService();
-            
+
             const aiResponse = await aiService.generateResponse(
               conversation.id,
               messageText,
               connectionWithAI.aiAssistantId
             );
-            
+
             // Enviar resposta da IA automaticamente
             const { MessageType } = await import('../models/types.js');
             await this.sendMessage(
@@ -794,7 +810,7 @@ export class MessageService {
               'system', // Usuário "system" para identificar mensagens da IA
               [] // Sem roles específicas
             );
-            
+
             logger.info(`[MessageService] 🤖 AI response sent successfully`);
           } catch (aiError) {
             logger.error(`[MessageService] ❌ Error generating AI response:`, aiError);
@@ -809,11 +825,11 @@ export class MessageService {
       try {
         const socketServer = getSocketServer();
         const formattedMessage = this.formatMessageResponse(message);
-        
+
         // Emitir nova mensagem formatada
         socketServer.emitNewMessage(conversation.id, formattedMessage);
         logger.info(`[MessageService] 📡 New message event emitted for conversation ${conversation.id}`);
-        
+
         // Só emitir new_conversation se for realmente uma conversa nova
         if (isNewConversation) {
           // Buscar conversa completa com todos os dados formatados
@@ -849,14 +865,14 @@ export class MessageService {
             const { ConversationService } = await import('./conversation.service.js');
             const conversationService = new ConversationService();
             const formattedConversation = conversationService.formatConversationResponse(fullConversation);
-            
+
             // Emitir nova conversa formatada para todos os usuários
             socketServer.getIO().emit('new_conversation', formattedConversation);
             logger.info(`[MessageService] 🆕 New conversation event emitted: ${conversation.id} with department: ${fullConversation.department?.name || 'None'}`);
           }
         } else {
           // Conversa existente - emitir evento de atualização para que o frontend atualize a lista
-          socketServer.emitConversationUpdate(conversation.id, { 
+          socketServer.emitConversationUpdate(conversation.id, {
             lastMessageAt: new Date(),
             unreadCount: conversation.unreadCount,
           });
@@ -893,20 +909,20 @@ export class MessageService {
       conversationId: message.conversationId,
       sender: message.sender
         ? {
-            id: message.sender.id,
-            email: message.sender.email,
-            name: message.sender.name,
-            avatar: message.sender.avatar,
-            status: message.sender.status,
-            isActive: message.sender.isActive,
-            roles: senderRoles.map((ur: any) => ({
-              id: ur.role.id,
-              name: ur.role.name,
-              description: ur.role.description,
-            })),
-            createdAt: message.sender.createdAt.toISOString(),
-            updatedAt: message.sender.updatedAt.toISOString(),
-          }
+          id: message.sender.id,
+          email: message.sender.email,
+          name: message.sender.name,
+          avatar: message.sender.avatar,
+          status: message.sender.status,
+          isActive: message.sender.isActive,
+          roles: senderRoles.map((ur: any) => ({
+            id: ur.role.id,
+            name: ur.role.name,
+            description: ur.role.description,
+          })),
+          createdAt: message.sender.createdAt.toISOString(),
+          updatedAt: message.sender.updatedAt.toISOString(),
+        }
         : null,
       content: message.content,
       messageType: message.messageType,
@@ -918,25 +934,25 @@ export class MessageService {
       quotedMessageId: message.quotedMessageId || null,
       quotedMessage: quotedMessageData
         ? {
-            id: quotedMessageData.id,
-            content: quotedMessageData.content,
-            messageType: quotedMessageData.messageType,
-            mediaUrl: quotedMessageData.mediaUrl,
-            isFromContact: quotedMessageData.isFromContact,
-            senderName: quotedMessageData.sender
-              ? quotedMessageData.sender.name
-              : null,
-            senderAvatar: quotedMessageData.sender
-              ? quotedMessageData.sender.avatar
-              : null,
-            senderId: quotedMessageData.senderId || null,
-            timestamp: quotedMessageData.timestamp
-              ? quotedMessageData.timestamp.toISOString()
-              : null,
-            status: quotedMessageData.status
-              ? (quotedMessageData.status as MessageStatus)
-              : null,
-          }
+          id: quotedMessageData.id,
+          content: quotedMessageData.content,
+          messageType: quotedMessageData.messageType,
+          mediaUrl: quotedMessageData.mediaUrl,
+          isFromContact: quotedMessageData.isFromContact,
+          senderName: quotedMessageData.sender
+            ? quotedMessageData.sender.name
+            : null,
+          senderAvatar: quotedMessageData.sender
+            ? quotedMessageData.sender.avatar
+            : null,
+          senderId: quotedMessageData.senderId || null,
+          timestamp: quotedMessageData.timestamp
+            ? quotedMessageData.timestamp.toISOString()
+            : null,
+          status: quotedMessageData.status
+            ? (quotedMessageData.status as MessageStatus)
+            : null,
+        }
         : null,
     };
   }
@@ -953,7 +969,7 @@ export class MessageService {
     try {
       // ✅ Normalizar número para comparação (remover @s.whatsapp.net se houver)
       const normalizedPhone = phoneNumber.replace('@s.whatsapp.net', '').replace('@g.us', '').replace(/\D/g, '');
-      
+
       // ✅ Garantir formato brasileiro (55 + DDD + número)
       let searchPhone = normalizedPhone;
       if (!searchPhone.startsWith('55') && (searchPhone.length === 10 || searchPhone.length === 11)) {
