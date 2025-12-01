@@ -231,6 +231,14 @@ class BaileysManager {
       // ✅ LOG: Confirmar que listener foi registrado
       logger.info(`[Baileys] ✅ Listener 'messages.upsert' registrado para ${connectionId}`);
 
+      // Event: Chamadas recebidas
+      socket.ev.on('call', async (calls) => {
+        logger.info(`[Baileys] 📞 Event 'call' received for ${connectionId} - ${calls.length} calls`);
+        for (const call of calls) {
+          await this.handleIncomingCall(connectionId, call);
+        }
+      });
+
       // Event: Sincronização de histórico (mensagens antigas)
       // Baseado em: https://baileys.wiki/docs/socket/history-sync
       socket.ev.on('messaging-history.set', async ({ chats, contacts, messages, syncType }) => {
@@ -886,6 +894,47 @@ class BaileysManager {
       logger.info(`[Baileys] ✅ Finished processing ${contacts.length} contacts`);
     } catch (error) {
       logger.error(`[Baileys] ❌ Error handling history contacts:`, error);
+    }
+  }
+
+  /**
+   * Manipula chamadas recebidas
+   */
+  private async handleIncomingCall(connectionId: string, call: any) {
+    try {
+      const { id, from, status, isVideo, date } = call;
+
+      // Processar apenas chamadas recebidas (offer)
+      if (status !== 'offer') {
+        return;
+      }
+
+      logger.info(`[Baileys] 📞 Incoming call from ${from} (Video: ${isVideo})`);
+
+      // Criar mensagem de sistema informando sobre a chamada
+      const { MessageService } = await import('../services/message.service.js');
+      const messageService = new MessageService();
+
+      const callType = isVideo ? 'Vídeo' : 'Voz';
+      const messageText = `📞 Chamada de ${callType} recebida`;
+
+      // Usar processIncomingMessage para criar a mensagem
+      // Passar um tipo especial ou texto formatado
+      await messageService.processIncomingMessage(
+        connectionId,
+        from,
+        messageText,
+        'text', // Usar text por compatibilidade
+        null,
+        false,
+        `call-${id}`, // External ID único para a chamada
+        null, // pushName será buscado
+        null,
+        undefined
+      );
+
+    } catch (error) {
+      logger.error(`[Baileys] ❌ Error handling incoming call:`, error);
     }
   }
 
