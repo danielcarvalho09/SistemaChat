@@ -87,14 +87,14 @@ type IncomingRetryItem = {
 class BaileysManager {
   private clients: Map<string, BaileysClient> = new Map();
   private prisma = getPrismaClient();
-  private reconnectionLocks: Map<string, { locked: boolean; lockedAt: Date }> = new Map(); 
-  private syncRetryQueue: Map<string, IncomingRetryItem> = new Map(); 
-  private readonly MAX_RECONNECT_ATTEMPTS = 5; 
+  private reconnectionLocks: Map<string, { locked: boolean; lockedAt: Date }> = new Map();
+  private syncRetryQueue: Map<string, IncomingRetryItem> = new Map();
+  private readonly MAX_RECONNECT_ATTEMPTS = 5;
   private readonly QR_RESET_DELAY_MS = 2000;
-  private readonly LOCK_TIMEOUT_MS = 180000; 
+  private readonly LOCK_TIMEOUT_MS = 180000;
   private circuitBreaker: Map<string, { failures: number; lastFailure: Date; state: 'closed' | 'open' | 'half-open' }> = new Map();
-  private readonly CIRCUIT_BREAKER_THRESHOLD = 5; 
-  private readonly CIRCUIT_BREAKER_TIMEOUT = 60000; 
+  private readonly CIRCUIT_BREAKER_THRESHOLD = 5;
+  private readonly CIRCUIT_BREAKER_TIMEOUT = 60000;
 
   /**
    * Cria um novo cliente Baileys para uma conexão
@@ -120,15 +120,15 @@ class BaileysManager {
       // Carregar ou criar auth state do banco de dados
       logger.info(`[Baileys] 🔑 Carregando credenciais do banco para ${connectionId}...`);
       const { state, saveCreds, hasValidCredentials } = await this.usePostgreSQLAuthState(connectionId);
-      
+
       // ✅ VERIFICAR SE TEM CREDENCIAIS VÁLIDAS (não apenas se existe authData)
       // Credenciais válidas = tem creds.me.id (já conectou antes)
       const hasCredentials = hasValidCredentials;
-      
+
       logger.info(`[Baileys] ✅ Credenciais carregadas para ${connectionId}`);
       logger.info(`[Baileys] 📋 Informações da conexão:`);
       logger.info(`[Baileys]    - Tem credenciais VÁLIDAS: ${hasCredentials ? 'SIM ✅' : 'NÃO ❌'}`);
-      
+
       if (hasCredentials) {
         logger.info(`[Baileys] 💡 Reconexão sem QR code: Usando credenciais salvas`);
         logger.info(`[Baileys] 💡 Baileys deve conectar automaticamente sem gerar QR code`);
@@ -170,12 +170,12 @@ class BaileysManager {
             logger.debug(`[Baileys] ⏭️ Primeira conexão - desabilitando history sync`);
             return false;
           }
-          
+
           // Reconexão: permitir sincronização (filtraremos por timestamp no evento)
           if (lastDisconnectAtForSync) {
             logger.debug(`[Baileys] ✅ Reconexão detectada - permitindo history sync desde ${lastDisconnectAtForSync.toISOString()}`);
           }
-          
+
           return true;
         },
         connectTimeoutMs: 120000,
@@ -201,7 +201,7 @@ class BaileysManager {
           return undefined;
         },
       });
-      
+
       const client: BaileysClient = {
         id: connectionId,
         socket,
@@ -227,7 +227,7 @@ class BaileysManager {
         logger.info(`[Baileys] 📨 Event 'messages.upsert' recebido para ${connectionId} - ${m.messages?.length || 0} mensagens`);
         await this.handleIncomingMessages(connectionId, m);
       });
-      
+
       // ✅ LOG: Confirmar que listener foi registrado
       logger.info(`[Baileys] ✅ Listener 'messages.upsert' registrado para ${connectionId}`);
 
@@ -240,30 +240,30 @@ class BaileysManager {
         logger.info(`[Baileys] 📚 Chats: ${chats?.length || 0}`);
         logger.info(`[Baileys] 📚 Contacts: ${contacts?.length || 0}`);
         logger.info(`[Baileys] 📚 Sync Type: ${syncType || 'unknown'}`);
-        
+
         // ✅ Log do período de sincronização esperado
         const connection = await this.prisma.whatsAppConnection.findUnique({
           where: { id: connectionId },
           select: { lastDisconnectAt: true, firstConnectedAt: true },
         });
-        
+
         if (connection?.lastDisconnectAt) {
           const syncWindowMinutes = (Date.now() - connection.lastDisconnectAt.getTime()) / 1000 / 60;
           logger.info(`[Baileys] 📅 Sync window: desde ${connection.lastDisconnectAt.toISOString()} (${syncWindowMinutes.toFixed(1)} minutos atrás)`);
           logger.info(`[Baileys] 🔍 Filtrando mensagens anteriores a ${connection.lastDisconnectAt.toISOString()}`);
         }
-        
+
         logger.info(`[Baileys] 📚 ==========================================`);
-        
+
         // Armazenar chats e contacts conforme documentação
         if (chats && chats.length > 0) {
           await this.handleHistoryChats(connectionId, chats);
         }
-        
+
         if (contacts && contacts.length > 0) {
           await this.handleHistoryContacts(connectionId, contacts);
         }
-        
+
         // Processar mensagens do histórico
         if (messages && messages.length > 0) {
           logger.info(`[Baileys] 📨 Processando ${messages.length} mensagens do histórico...`);
@@ -285,20 +285,20 @@ class BaileysManager {
 
       // Iniciar monitoramento de conexão
       this.startConnectionMonitoring(connectionId);
-      
+
       // Iniciar heartbeat ativo
       this.startActiveHeartbeat(connectionId);
-      
+
       // Sincronização periódica leve como backup (funciona independente do frontend)
       this.startPeriodicSync(connectionId);
-      
-      
+
+
 
       logger.info(`[Baileys] ✅ Client created: ${connectionId}`);
       return client;
     } catch (error) {
       logger.error(`[Baileys] ❌ Error creating client ${connectionId}:`, error);
-      
+
       // Emitir evento de falha
       try {
         const socketServer = getSocketServer();
@@ -309,7 +309,7 @@ class BaileysManager {
       } catch (emitError) {
         logger.error(`[Baileys] ❌ Error emitting failure event:`, emitError);
       }
-      
+
       throw error;
     }
   }
@@ -335,7 +335,7 @@ class BaileysManager {
       // Carregar credenciais existentes
       try {
         const authDataString = connection.authData as string;
-        
+
         // Verificar se não está vazio após trim
         if (authDataString.trim() === '') {
           logger.warn(`[Baileys] ⚠️ Auth data is empty string for ${connectionId}, creating new credentials`);
@@ -344,7 +344,7 @@ class BaileysManager {
           // Tentar parse direto (sem criptografia)
           try {
             const authData = JSON.parse(authDataString, BufferJSON.reviver);
-            
+
             // ✅ VERIFICAÇÃO ADICIONAL: Verificar se creds existe e tem dados válidos
             if (!authData.creds || !authData.creds.me || !authData.creds.me.id) {
               logger.warn(`[Baileys] ⚠️ Auth data exists but is invalid for ${connectionId}, creating new credentials`);
@@ -363,14 +363,14 @@ class BaileysManager {
               const { decrypt } = await import('../utils/encryption.js');
               const decrypted = decrypt(authDataString);
               const authData = JSON.parse(decrypted, BufferJSON.reviver);
-              
+
               // ✅ VERIFICAÇÃO ADICIONAL: Verificar se creds existe e tem dados válidos
               if (!authData.creds || !authData.creds.me || !authData.creds.me.id) {
                 logger.warn(`[Baileys] ⚠️ Legacy auth data exists but is invalid for ${connectionId}, creating new credentials`);
                 creds = initAuthCreds();
               } else {
-        creds = authData.creds;
-        keys = authData.keys || {};
+                creds = authData.creds;
+                keys = authData.keys || {};
                 const meId = creds.me?.id || 'N/A';
                 logger.info(`[Baileys] ✅ Loaded legacy encrypted auth for ${connectionId} (will save unencrypted)`);
                 logger.debug(`[Baileys] 📋 Legacy credentials loaded - me.id: ${meId}`);
@@ -421,7 +421,7 @@ class BaileysManager {
     // ✅ VERIFICAR SE AS CREDENCIAIS SÃO VÁLIDAS (têm me.id)
     // Credenciais válidas = já conectou antes, pode reconectar sem QR code
     const hasValidCredentials = !!(creds && creds.me && creds.me.id);
-    
+
     if (hasValidCredentials) {
       const meId = creds.me?.id || 'N/A';
       logger.info(`[Baileys] ✅ Credenciais válidas detectadas para ${connectionId} (me.id: ${meId})`);
@@ -480,7 +480,7 @@ class BaileysManager {
       logger.warn(`[Baileys] ⚠️ ========== QR CODE GERADO ==========`);
       logger.warn(`[Baileys] 🔗 Connection ID: ${connectionId}`);
       logger.warn(`[Baileys] 🔑 Tem credenciais salvas: ${client.hasCredentials ? 'SIM' : 'NÃO'}`);
-      
+
       // ⚠️ AVISO: Se tem credenciais mas ainda gerou QR, pode ser que:
       // 1. As credenciais estão inválidas/corrompidas
       // 2. O WhatsApp invalidou a sessão
@@ -493,7 +493,7 @@ class BaileysManager {
       } else {
         logger.info(`[Baileys] ✅ QR code gerado (conexão nova - sem credenciais)`);
       }
-      
+
       logger.info(`[Baileys] 📱 QR Code generated for ${connectionId}`);
       await this.emitQRCode(connectionId, qr);
       return;
@@ -507,22 +507,22 @@ class BaileysManager {
         logger.info(`[Baileys] ⏭️ Connection ${connectionId} update to 'connecting' ignored - already connected`);
         return; // Não fazer nada se já está conectado
       }
-      
+
       // ✅ CRÍTICO: Verificar se já está conectando antes de emitir evento novamente
       // Isso evita múltiplos eventos 'whatsapp_connecting' para a mesma conexão
       if (client.status === 'connecting') {
         logger.debug(`[Baileys] ⏭️ Connection ${connectionId} update to 'connecting' ignored - already connecting`);
         return; // Não fazer nada se já está conectando
       }
-      
+
       const connectingAt = new Date();
       client.status = 'connecting';
-      
+
       // ✅ LOG DETALHADO PARA DIAGNÓSTICO
       logger.info(`[Baileys] 🔄 Connecting ${connectionId}...`);
-      
+
       this.emitStatus(connectionId, 'connecting');
-      
+
       // Atualizar status no banco
       try {
         await this.prisma.whatsAppConnection.update({
@@ -532,7 +532,7 @@ class BaileysManager {
       } catch (error) {
         logger.warn(`[Baileys] ⚠️ Erro ao atualizar status para 'connecting':`, error);
       }
-      
+
       // ✅ TIMEOUT DE SEGURANÇA: Se ficar em "connecting" por mais de 2 minutos, forçar desconexão
       // ✅ BUG FIX: Armazenar referência do timeout para poder cancelá-lo se a conexão for bem-sucedida
       const connectingTimeout = setTimeout(async () => {
@@ -552,7 +552,7 @@ class BaileysManager {
             logger.error(`[Baileys]    - Servidor WhatsApp indisponível`);
             logger.error(`[Baileys] 💡 Ação: Forçando desconexão e resetando status`);
             logger.error(`[Baileys] ===========================================`);
-            
+
             // ✅ BUG FIX: Verificar status uma última vez antes de modificar (evitar sobrescrever conexão bem-sucedida)
             const finalCheck = this.clients.get(connectionId);
             if (finalCheck && finalCheck.status === 'connecting') {
@@ -560,7 +560,7 @@ class BaileysManager {
               finalCheck.status = 'disconnected';
               await this.updateConnectionStatus(connectionId, 'disconnected');
               this.emitStatus(connectionId, 'disconnected');
-              
+
               // Status atualizado
             } else {
               logger.info(`[Baileys] ✅ Conexão mudou de status durante timeout - cancelando ação`);
@@ -570,10 +570,10 @@ class BaileysManager {
           logger.error(`[Baileys] ❌ Erro no callback do timeout de conexão:`, error);
         }
       }, 120000); // 2 minutos
-      
+
       // Armazenar referência do timeout no cliente para poder cancelá-lo
       client.connectingTimeout = connectingTimeout;
-      
+
       return;
     }
 
@@ -585,17 +585,17 @@ class BaileysManager {
         logger.debug(`[Baileys] ⏭️ Connection ${connectionId} update to 'open' ignored - already connected`);
         return; // Já está conectado, não processar novamente
       }
-      
+
       // ✅ BUG FIX: Cancelar timeout de "connecting" se existir (evitar race condition)
       if (client.connectingTimeout) {
         clearTimeout(client.connectingTimeout);
         client.connectingTimeout = undefined;
         logger.debug(`[Baileys] ✅ Timeout de "connecting" cancelado para ${connectionId} - conexão bem-sucedida`);
       }
-      
+
       client.status = 'connected';
       logger.info(`[Baileys] ✅ Connected: ${connectionId}`);
-      
+
       // Limpar flags de reconexão
       client.isReconnecting = false;
       this.resetReconnectionAttempts(connectionId);
@@ -603,23 +603,23 @@ class BaileysManager {
       // ✅ LÓGICA DE SINCRONIZAÇÃO CONFORME REQUISITO:
       // 1. Primeira conexão: NÃO sincronizar nada
       // 2. Reconexão: Sincronizar desde lastDisconnectAt até agora
-      
+
       let lastDisconnectAt: Date | null = null;
       let firstConnectedAt: Date | null = null;
       let wasFirstConnection = false;
-      
+
       try {
         const connectionRecord = await this.prisma.whatsAppConnection.findUnique({
           where: { id: connectionId },
           select: { lastDisconnectAt: true, firstConnectedAt: true },
         });
-        
+
         lastDisconnectAt = connectionRecord?.lastDisconnectAt ?? null;
         firstConnectedAt = connectionRecord?.firstConnectedAt ?? null;
-        
+
         // Verificar se é primeira conexão (não tem firstConnectedAt)
         wasFirstConnection = firstConnectedAt === null;
-        
+
         // Salvar firstConnectedAt se for a primeira conexão
         if (wasFirstConnection) {
           await this.saveFirstConnectedAt(connectionId);
@@ -639,7 +639,7 @@ class BaileysManager {
         const timeSinceDisconnect = (Date.now() - lastDisconnectAt.getTime()) / 1000 / 60; // minutos
         logger.info(`[Baileys] 🔄 Reconexão detectada - sincronizando desde ${lastDisconnectAt.toISOString()}`);
         logger.info(`[Baileys] 📊 Período de sincronização: ${lastDisconnectAt.toISOString()} até agora (${timeSinceDisconnect.toFixed(1)} minutos offline)`);
-        
+
         // Sincronização após conexão estabilizar
         // ✅ Aumentar timeout para conexões instáveis e múltiplas tentativas
         setTimeout(async () => {
@@ -649,14 +649,14 @@ class BaileysManager {
               logger.warn(`[Baileys] ⚠️ Conexão não está mais ativa - cancelando sincronização`);
               return;
             }
-            
+
             // Sincronizar todas conversas ativas desde lastDisconnectAt
             logger.info(`[Baileys] 🔄 Iniciando sincronização de mensagens perdidas (após 10s de estabilização)...`);
             logger.info(`[Baileys] 📅 Buscando mensagens desde: ${lastDisconnectAt.toISOString()}`);
-            
+
             const syncedCount = await this.syncAllActiveConversations(connectionId, 50);
             logger.info(`[Baileys] ✅ Sincronização concluída - ${syncedCount} conversas processadas`);
-            
+
             // ✅ Segunda tentativa após mais tempo para garantir que todas as mensagens foram recebidas
             if (timeSinceDisconnect > 5) { // Se esteve offline por mais de 5 minutos
               logger.info(`[Baileys] 🔄 Período offline longo (${timeSinceDisconnect.toFixed(1)} min) - agendando segunda sincronização...`);
@@ -697,15 +697,15 @@ class BaileysManager {
     if (connection === 'close') {
       const statusCode = (lastDisconnect?.error as Boom)?.output?.statusCode;
       const errorMessage = (lastDisconnect?.error as Error)?.message || 'Unknown error';
-      
+
       // ✅ CRÍTICO: Salvar momento exato da desconexão para sincronização futura
       const disconnectAt = new Date();
       client.status = 'disconnected';
       client.lastDisconnectAt = disconnectAt;
-      
+
       logger.info(`[Baileys] ❌ Connection closed for ${connectionId}. Status: ${statusCode || 'N/A'}, Error: ${errorMessage}`);
       logger.info(`[Baileys] 📅 Disconnect timestamp saved: ${disconnectAt.toISOString()} (será usado para sincronização na reconexão)`);
-      
+
       // ✅ CRÍTICO: Salvar lastDisconnectAt no banco para sincronização na reconexão
       try {
         await this.prisma.whatsAppConnection.update({
@@ -724,10 +724,10 @@ class BaileysManager {
       // Deve criar um novo socket (este socket é inútil agora)
       if (statusCode === DisconnectReason.restartRequired) {
         logger.info(`[Baileys] 🔄 Restart required for ${connectionId} (normal after QR scan - creating new socket)`);
-        
+
         // Remover cliente antigo
         this.clients.delete(connectionId);
-        
+
         // Criar novo socket após pequeno delay
         setTimeout(async () => {
           try {
@@ -749,13 +749,13 @@ class BaileysManager {
       // Outros erros - tentar reconectar se tiver credenciais válidas
       // Conforme documentação: se tem credenciais válidas, deve reconectar automaticamente
       const shouldReconnect = statusCode !== DisconnectReason.loggedOut && client.hasCredentials;
-      
+
       if (shouldReconnect) {
         logger.info(`[Baileys] 🔄 Attempting reconnection for ${connectionId} (has valid credentials)`);
-        
+
         // Remover cliente antigo
         this.clients.delete(connectionId);
-        
+
         // Aguardar antes de reconectar (evitar reconexão imediata)
         setTimeout(async () => {
           try {
@@ -779,17 +779,17 @@ class BaileysManager {
   private async handleHistoryChats(connectionId: string, chats: any[]): Promise<void> {
     try {
       logger.info(`[Baileys] 📚 Processing ${chats.length} chats from history sync`);
-      
+
       // Armazenar informações de chats para referência futura
       // Os chats contêm metadados importantes como nome, última mensagem, etc.
       for (const chat of chats) {
         try {
           const jid = chat.id;
           if (!jid) continue;
-          
+
           // Extrair número de telefone do JID (remover @s.whatsapp.net)
           const phoneNumber = jid.split('@')[0];
-          
+
           // Buscar ou criar contato
           const contact = await this.prisma.contact.upsert({
             where: { phoneNumber },
@@ -803,7 +803,7 @@ class BaileysManager {
               pushName: chat.name || undefined,
             },
           });
-          
+
           // Buscar ou criar conversa
           let conversation = await this.prisma.conversation.findFirst({
             where: {
@@ -833,13 +833,13 @@ class BaileysManager {
               },
             });
           }
-          
+
           logger.debug(`[Baileys] ✅ Processed chat: ${jid}`);
         } catch (error) {
           logger.error(`[Baileys] ❌ Error processing chat:`, error);
         }
       }
-      
+
       logger.info(`[Baileys] ✅ Finished processing ${chats.length} chats`);
     } catch (error) {
       logger.error(`[Baileys] ❌ Error handling history chats:`, error);
@@ -853,16 +853,16 @@ class BaileysManager {
   private async handleHistoryContacts(connectionId: string, contacts: any[]): Promise<void> {
     try {
       logger.info(`[Baileys] 📚 Processing ${contacts.length} contacts from history sync`);
-      
+
       // Armazenar informações de contatos para referência futura
       for (const contact of contacts) {
         try {
           const jid = contact.id;
           if (!jid) continue;
-          
+
           // Extrair número de telefone do JID
           const phoneNumber = jid.split('@')[0];
-          
+
           // Atualizar ou criar contato
           await this.prisma.contact.upsert({
             where: { phoneNumber },
@@ -876,13 +876,13 @@ class BaileysManager {
               pushName: contact.notify || contact.name || undefined,
             },
           });
-          
+
           logger.debug(`[Baileys] ✅ Processed contact: ${jid}`);
         } catch (error) {
           logger.error(`[Baileys] ❌ Error processing contact:`, error);
         }
       }
-      
+
       logger.info(`[Baileys] ✅ Finished processing ${contacts.length} contacts`);
     } catch (error) {
       logger.error(`[Baileys] ❌ Error handling history contacts:`, error);
@@ -925,23 +925,23 @@ class BaileysManager {
 
       const firstConnectedAt = connection?.firstConnectedAt;
       const lastDisconnectAt = connection?.lastDisconnectAt;
-      
+
       // ✅ LÓGICA DE SINCRONIZAÇÃO:
       // 1. Primeira conexão (sem firstConnectedAt): Não processar histórico antigo
       // 2. Reconexão (com lastDisconnectAt): Processar apenas desde lastDisconnectAt
       // 3. Mensagens em tempo real (notify): Sempre processar
-      
+
       if (!firstConnectedAt && type === 'history') {
         logger.info(`[Baileys] ⏭️ Skipping history sync - primeira conexão (sem firstConnectedAt)`);
         return;
       }
-      
+
       // ✅ IMPORTANTE: Atualizar client.lastSyncFrom com lastDisconnectAt para filtro correto
       if (client && lastDisconnectAt) {
         client.lastSyncFrom = lastDisconnectAt;
         logger.debug(`[Baileys] 📅 Usando lastDisconnectAt para filtro: ${lastDisconnectAt.toISOString()}`);
       }
-      
+
       // Mensagens em tempo real (notify/append) sempre processar
       // Para mensagens history/append: processar desde lastDisconnectAt (se houver)
 
@@ -956,7 +956,7 @@ class BaileysManager {
         logger.warn(`[Baileys] ⚠️ Received batch of ${messages.length} messages - possible delayed sync detected`);
         logger.info(`[Baileys] 📊 Processing large batch - will process in chunks to avoid overload`);
       }
-      
+
       // 📊 Estatísticas de sincronização (declarar ANTES de usar)
       const syncStats = {
         total: messages?.length || 0,
@@ -965,26 +965,26 @@ class BaileysManager {
         errors: 0,
         type,
       };
-      
+
       // Se receber MUITAS mensagens (> 50), processar em lotes menores para evitar timeout
       const BATCH_SIZE = 50;
       const shouldProcessInBatches = messages && messages.length > BATCH_SIZE;
-      
+
       if (shouldProcessInBatches) {
         logger.info(`[Baileys] 📦 Large batch detected (${messages.length} messages) - processing in batches of ${BATCH_SIZE}`);
-        
+
         const batches: any[][] = [];
         for (let i = 0; i < messages.length; i += BATCH_SIZE) {
           batches.push(messages.slice(i, i + BATCH_SIZE));
         }
-        
+
         logger.info(`[Baileys] 📦 Split into ${batches.length} batches`);
-        
+
         // Processar cada lote
         for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
           const batch = batches[batchIndex];
           logger.info(`[Baileys] 📦 Processing batch ${batchIndex + 1}/${batches.length} (${batch.length} messages)...`);
-          
+
           // Processar lote (usar mesmo código de processamento)
           await this.processMessageBatch(
             connectionId,
@@ -994,19 +994,19 @@ class BaileysManager {
             syncStats,
             client?.lastSyncFrom ?? null
           );
-          
+
           // Delay entre lotes para evitar sobrecarga
           if (batchIndex < batches.length - 1) {
             logger.info(`[Baileys] ⏸️ Pausing 2 seconds before next batch...`);
             await new Promise(resolve => setTimeout(resolve, 2000));
           }
         }
-        
+
         // Log final
         logger.info(`[Baileys] 📊 Batch processing complete: Total=${syncStats.total}, Processed=${syncStats.processed}, Skipped=${syncStats.skipped}, Errors=${syncStats.errors}`);
         return; // Sair da função - já processou tudo em lotes
       }
-      
+
       // Processar mensagens normalmente (se não foi processado em lotes)
       await this.processMessageBatch(
         connectionId,
@@ -1035,7 +1035,7 @@ class BaileysManager {
     syncWindowStart: Date | null
   ): Promise<void> {
     logger.info(`[Baileys] 📨 Processing message batch - Type: ${type}, Count: ${messages?.length || 0}, firstConnectedAt: ${firstConnectedAt?.toISOString() || 'N/A'}`);
-    
+
     // Log de tipo de mensagem para debug
     if (type === 'notify') {
       logger.info(`[Baileys] ✅ Processing REAL-TIME messages (notify) - will process ALL`);
@@ -1047,10 +1047,10 @@ class BaileysManager {
 
     const totalMessages = messages?.length || 0;
     let processedIndex = 0;
-    
+
     for (const msg of messages) {
       processedIndex++;
-      
+
       try {
         // VERIFICAÇÃO 1: Verificar se conexão ainda está ativa durante processamento
         const currentClient = this.clients.get(connectionId);
@@ -1059,7 +1059,7 @@ class BaileysManager {
           logger.warn(`[Baileys] ⚠️ ${totalMessages - processedIndex + 1} messages remaining - will retry on next sync`);
           break; // Parar loop mas não falhar completamente
         }
-        
+
         const from = msg.key.remoteJid;
         const isFromMe = msg.key.fromMe || false;
         const externalId = msg.key.id;
@@ -1069,7 +1069,7 @@ class BaileysManager {
         const isGroup = from?.endsWith('@g.us') || false;
         const participant = msg.key.participant || null; // JID do participante que enviou (em grupos)
         let senderName: string | null = null;
-        
+
         // Se for grupo e não for mensagem nossa, buscar nome do participante
         if (isGroup && !isFromMe && participant) {
           try {
@@ -1086,7 +1086,7 @@ class BaileysManager {
               } catch (groupError) {
                 logger.debug(`[Baileys] Could not fetch participant name from group:`, groupError);
               }
-              
+
               // Se não encontrou do grupo, usar pushName da mensagem
               if (!senderName && pushName) {
                 senderName = pushName;
@@ -1136,7 +1136,7 @@ class BaileysManager {
         }
 
         // ===== FILTROS =====
-        
+
         // 0. Filtrar mensagens MUITO antigas (anteriores à primeira conexão - margem de segurança)
         // ✅ CORRIGIDO: Processar TODAS mensagens desde firstConnectedAt
         // A deduplicação (por externalId) vai pular mensagens já sincronizadas automaticamente
@@ -1158,7 +1158,7 @@ class BaileysManager {
             }
           }
         }
-        
+
         // 1. Filtrar STATUS do WhatsApp
         if (from === 'status@broadcast') {
           logger.debug(`[Baileys] ⏭️ Skipping WhatsApp Status message`);
@@ -1203,7 +1203,7 @@ class BaileysManager {
           // Mensagem de texto estendida (pode ter reply, link preview, etc.)
           messageText = message.extendedTextMessage.text || '';
           messageType = 'text';
-          
+
           // Log de metadados se presentes
           if (message.extendedTextMessage.contextInfo?.quotedMessage) {
             logger.debug(`[Baileys] 📎 Extended text message has quoted context`);
@@ -1211,39 +1211,39 @@ class BaileysManager {
           if (message.extendedTextMessage.contextInfo?.linkPreview) {
             logger.debug(`[Baileys] 🔗 Extended text message has link preview`);
           }
-        } 
+        }
         // Media Messages conforme documentação
         else if (message?.imageMessage) {
           // proto.IMessage.imageMessage
           // Só usar caption se existir, caso contrário deixar vazio (sem adicionar '[Imagem]')
           messageText = message.imageMessage.caption || '';
           messageType = 'image';
-          
+
           // Baixar imagem usando downloadMediaMessage conforme documentação
           // Para mídia faltando, usar sock.updateMediaMessage
           try {
             if (client?.socket) {
               const imageBuffer = await Promise.race([
                 downloadMediaMessage(
-                  msg, 
-                  'buffer', 
-                  {}, 
-                  { 
-                    logger: pino({ level: 'silent' }), 
-                    reuploadRequest: client.socket.updateMediaMessage 
+                  msg,
+                  'buffer',
+                  {},
+                  {
+                    logger: pino({ level: 'silent' }),
+                    reuploadRequest: client.socket.updateMediaMessage
                   }
                 ),
                 new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Image download timeout')), 15000))
               ]) as Buffer;
-              
+
               if (imageBuffer && Buffer.isBuffer(imageBuffer)) {
                 const imageMimetype = message.imageMessage?.mimetype || 'image/jpeg';
-                const imageExt = imageMimetype.includes('png') ? '.png' 
-                  : imageMimetype.includes('gif') ? '.gif' 
-                  : imageMimetype.includes('webp') ? '.webp' 
-                  : '.jpg';
+                const imageExt = imageMimetype.includes('png') ? '.png'
+                  : imageMimetype.includes('gif') ? '.gif'
+                    : imageMimetype.includes('webp') ? '.webp'
+                      : '.jpg';
                 const filename = `image-${Date.now()}-${Math.random().toString(36).substring(7)}${imageExt}`;
-                
+
                 // ✅ Fazer upload para Supabase Storage (com fallback local)
                 imageMediaUrl = await this.uploadMediaToStorage(imageBuffer, filename, imageMimetype);
               }
@@ -1264,31 +1264,31 @@ class BaileysManager {
           // proto.IMessage.audioMessage
           messageText = '[Áudio]';
           messageType = 'audio';
-          
+
           // Baixar áudio conforme documentação
           try {
             if (client?.socket) {
               const audioBuffer = await Promise.race([
                 downloadMediaMessage(
-                  msg, 
-                  'buffer', 
-                  {}, 
-                  { 
-                    logger: pino({ level: 'silent' }), 
-                    reuploadRequest: client.socket.updateMediaMessage 
+                  msg,
+                  'buffer',
+                  {},
+                  {
+                    logger: pino({ level: 'silent' }),
+                    reuploadRequest: client.socket.updateMediaMessage
                   }
                 ),
                 new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Audio download timeout')), 20000))
               ]) as Buffer;
-              
+
               if (audioBuffer && Buffer.isBuffer(audioBuffer)) {
                 const audioMimetype = message.audioMessage?.mimetype || 'audio/ogg; codecs=opus';
-                const audioExt = audioMimetype.includes('mp3') ? '.mp3' 
-                  : audioMimetype.includes('wav') ? '.wav' 
-                  : audioMimetype.includes('m4a') ? '.m4a' 
-                  : '.ogg';
+                const audioExt = audioMimetype.includes('mp3') ? '.mp3'
+                  : audioMimetype.includes('wav') ? '.wav'
+                    : audioMimetype.includes('m4a') ? '.m4a'
+                      : '.ogg';
                 const filename = `audio-${Date.now()}-${Math.random().toString(36).substring(7)}${audioExt}`;
-                
+
                 // ✅ Fazer upload para Supabase Storage (com fallback local)
                 audioMediaUrl = await this.uploadMediaToStorage(audioBuffer, filename, audioMimetype);
               }
@@ -1310,30 +1310,30 @@ class BaileysManager {
           // Só usar caption se existir, caso contrário deixar vazio (sem adicionar '[Vídeo]')
           messageText = message.videoMessage.caption || '';
           messageType = 'video';
-          
+
           // Baixar vídeo conforme documentação
           try {
             if (client?.socket) {
               const videoBuffer = await Promise.race([
                 downloadMediaMessage(
-                  msg, 
-                  'buffer', 
-                  {}, 
-                  { 
-                    logger: pino({ level: 'silent' }), 
-                    reuploadRequest: client.socket.updateMediaMessage 
+                  msg,
+                  'buffer',
+                  {},
+                  {
+                    logger: pino({ level: 'silent' }),
+                    reuploadRequest: client.socket.updateMediaMessage
                   }
                 ),
                 new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Video download timeout')), 30000))
               ]) as Buffer;
-              
+
               if (videoBuffer && Buffer.isBuffer(videoBuffer)) {
                 const videoMimetype = message.videoMessage?.mimetype || 'video/mp4';
-                const videoExt = videoMimetype.includes('mp4') ? '.mp4' 
-                  : videoMimetype.includes('webm') ? '.webm' 
-                  : '.mp4';
+                const videoExt = videoMimetype.includes('mp4') ? '.mp4'
+                  : videoMimetype.includes('webm') ? '.webm'
+                    : '.mp4';
                 const filename = `video-${Date.now()}-${Math.random().toString(36).substring(7)}${videoExt}`;
-                
+
                 // ✅ Fazer upload para Supabase Storage (com fallback local)
                 videoMediaUrl = await this.uploadMediaToStorage(videoBuffer, filename, videoMimetype);
               }
@@ -1355,28 +1355,28 @@ class BaileysManager {
           // Não usar fileName como caption - documentos não devem ter caption a menos que venha do WhatsApp
           messageText = message.documentMessage.caption || '';
           messageType = 'document';
-          
+
           // Baixar documento conforme documentação
           try {
             if (client?.socket) {
               const docBuffer = await Promise.race([
                 downloadMediaMessage(
-                  msg, 
-                  'buffer', 
-                  {}, 
-                  { 
-                    logger: pino({ level: 'silent' }), 
-                    reuploadRequest: client.socket.updateMediaMessage 
+                  msg,
+                  'buffer',
+                  {},
+                  {
+                    logger: pino({ level: 'silent' }),
+                    reuploadRequest: client.socket.updateMediaMessage
                   }
                 ),
                 new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Document download timeout')), 30000))
               ]) as Buffer;
-              
+
               if (docBuffer && Buffer.isBuffer(docBuffer)) {
                 const docMimetype = message.documentMessage?.mimetype || 'application/octet-stream';
                 const docFileName = message.documentMessage?.fileName || 'document';
                 const filename = `doc-${Date.now()}-${docFileName}`;
-                
+
                 // ✅ Fazer upload para Supabase Storage (com fallback local)
                 documentMediaUrl = await this.uploadMediaToStorage(docBuffer, filename, docMimetype);
               }
@@ -1447,16 +1447,16 @@ class BaileysManager {
         } else {
           syncStats.errors++;
         }
-        
+
         // Rate limiting: delay entre mensagens
         const delay = (messageType === 'image' || messageType === 'audio' || messageType === 'video') ? 300 : 100;
         await new Promise(resolve => setTimeout(resolve, delay));
-        
+
       } catch (error) {
         // Erro ao processar mensagem individual - não parar o loop
         logger.error(`[Baileys] ❌ Error processing message ${processedIndex}/${totalMessages}:`, error);
         syncStats.errors++;
-        
+
         // Continuar com próxima mensagem
         continue;
       }
@@ -1487,7 +1487,7 @@ class BaileysManager {
   ): Promise<boolean> {
     const maxRetries = 3;
     const timeoutMs = 30000; // 30 segundos por tentativa
-    
+
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
         // Criar promise com timeout
@@ -1514,18 +1514,18 @@ class BaileysManager {
         });
 
         await Promise.race([processPromise, timeoutPromise]);
-        
+
         // Sucesso!
         logger.info(`[Baileys] 💾 Message ${processedIndex}/${totalMessages} saved successfully (${messageType}, attempt ${attempt})`);
         return true;
-        
+
       } catch (error: any) {
         const isTimeout = error?.message?.includes('Timeout');
         const isLastAttempt = attempt === maxRetries;
-        
-        logger.warn(`[Baileys] ⚠️ Error processing message ${processedIndex}/${totalMessages} (attempt ${attempt}/${maxRetries}):`, 
+
+        logger.warn(`[Baileys] ⚠️ Error processing message ${processedIndex}/${totalMessages} (attempt ${attempt}/${maxRetries}):`,
           isTimeout ? `Timeout after ${timeoutMs}ms` : error?.message || error);
-        
+
         // Se não é última tentativa, aguardar antes de retry (backoff exponencial)
         if (!isLastAttempt) {
           const backoffDelay = Math.min(1000 * Math.pow(2, attempt - 1), 10000); // 1s, 2s, 4s (max 10s)
@@ -1534,7 +1534,7 @@ class BaileysManager {
         } else {
           // Última tentativa falhou - armazenar na fila de retry para processamento posterior
           logger.error(`[Baileys] ❌ Max retries reached for message ${externalId} - enqueueing for background retry`);
-          
+
           const retryKey = `${connectionId}:${externalId}`;
           const existingRetry = this.syncRetryQueue.get(retryKey);
           const retryItem: IncomingRetryItem = {
@@ -1552,19 +1552,19 @@ class BaileysManager {
             lastAttempt: new Date(),
           };
           this.syncRetryQueue.set(retryKey, retryItem);
-          
+
           // Disparar retry em background após pequeno delay
           setTimeout(() => {
             this.retryIncomingMessage(retryKey).catch((retryError) => {
               logger.error(`[Baileys] ❌ Background retry promise rejected for ${externalId}:`, retryError);
             });
           }, 10000); // 10 segundos
-          
+
           return false;
         }
       }
     }
-    
+
     return false; // Nunca deve chegar aqui, mas TypeScript precisa
   }
 
@@ -1689,25 +1689,25 @@ class BaileysManager {
    */
   private getCircuitBreakerState(connectionId: string): 'closed' | 'open' | 'half-open' {
     const breaker = this.circuitBreaker.get(connectionId);
-    
+
     if (!breaker) {
       return 'closed'; // Sem histórico de falhas
     }
-    
+
     // Se está aberto, verificar se já passou o timeout
     if (breaker.state === 'open') {
       const timeSinceLastFailure = Date.now() - breaker.lastFailure.getTime();
-      
+
       if (timeSinceLastFailure >= this.CIRCUIT_BREAKER_TIMEOUT) {
         // Timeout expirado, mudar para half-open (permitir uma tentativa)
         breaker.state = 'half-open';
         logger.info(`[Baileys] 🔓 Circuit breaker HALF-OPEN for ${connectionId} - allowing retry`);
         return 'half-open';
       }
-      
+
       return 'open'; // Ainda no período de timeout
     }
-    
+
     return breaker.state;
   }
 
@@ -1720,16 +1720,16 @@ class BaileysManager {
       lastFailure: new Date(),
       state: 'closed' as const,
     };
-    
+
     breaker.failures += 1;
     breaker.lastFailure = new Date();
-    
+
     // Abrir circuit se atingiu threshold
     if (breaker.failures >= this.CIRCUIT_BREAKER_THRESHOLD) {
       breaker.state = 'open';
       logger.warn(`[Baileys] 🚫 Circuit breaker OPENED for ${connectionId} - ${breaker.failures} consecutive failures`);
     }
-    
+
     this.circuitBreaker.set(connectionId, breaker);
   }
 
@@ -1738,7 +1738,7 @@ class BaileysManager {
    */
   private resetCircuitBreaker(connectionId: string): void {
     const breaker = this.circuitBreaker.get(connectionId);
-    
+
     if (breaker) {
       logger.info(`[Baileys] ✅ Circuit breaker RESET for ${connectionId} - connection successful`);
       this.circuitBreaker.delete(connectionId);
@@ -1750,7 +1750,7 @@ class BaileysManager {
    */
   private shouldAttemptReconnection(connectionId: string, statusCode?: number): boolean {
     const client = this.clients.get(connectionId);
-    
+
     if (!client) {
       logger.warn(`[Baileys] Client ${connectionId} not found for reconnection check`);
       return false;
@@ -1780,8 +1780,8 @@ class BaileysManager {
     // 4. Não reconectar em casos específicos
     // - loggedOut (401): Usuário desconectou manualmente
     // - badSession (400): Sessão inválida, precisa escanear novo QR
-    if (statusCode === DisconnectReason.loggedOut || 
-        statusCode === DisconnectReason.badSession) {
+    if (statusCode === DisconnectReason.loggedOut ||
+      statusCode === DisconnectReason.badSession) {
       logger.info(`[Baileys] ⏭️ Skipping reconnection for ${connectionId}: Deliberate logout or bad session (code: ${statusCode})`);
       return false;
     }
@@ -1804,12 +1804,12 @@ class BaileysManager {
         this.reconnectionLocks.delete(connectionId);
       } else {
         logger.info(`[Baileys] ⏭️ Skipping reconnection for ${connectionId}: Already reconnecting (lock age: ${Math.round(lockAge / 1000)}s)`);
-      return;
+        return;
       }
     }
 
     const client = this.clients.get(connectionId);
-    
+
     if (!client) {
       logger.error(`[Baileys] Cannot reconnect: Client ${connectionId} not found`);
       return;
@@ -1826,7 +1826,7 @@ class BaileysManager {
       locked: true,
       lockedAt: new Date(),
     });
-    
+
     // Marcar como reconectando
     client.isReconnecting = true;
     client.reconnectAttempts = (client.reconnectAttempts || 0) + 1;
@@ -1836,17 +1836,17 @@ class BaileysManager {
     const baseDelay = 3000; // 3 segundos base (aumentado para mais estabilidade)
     const maxDelay = 90000; // Máximo 90 segundos (aumentado para aguardar mais tempo)
     const exponentialDelay = Math.min(maxDelay, baseDelay * Math.pow(2, client.reconnectAttempts - 1));
-    
+
     // Adicionar jitter aleatório de ±20% para evitar reconexões simultâneas
     const jitter = exponentialDelay * 0.2 * (Math.random() * 2 - 1);
     const delay = Math.max(1000, exponentialDelay + jitter); // Mínimo 1 segundo
-    
+
     logger.info(`[Baileys] ⏱️ Calculated delay: ${Math.round(delay)}ms (exponential: ${exponentialDelay}ms, jitter: ${Math.round(jitter)}ms)`);
-    
+
     logger.info(
       `[Baileys] 🔄 Reconnection attempt ${client.reconnectAttempts}/${this.MAX_RECONNECT_ATTEMPTS} for ${connectionId} in ${delay}ms...`
     );
-    
+
     // Aguardar antes de reconectar
     await new Promise(resolve => setTimeout(resolve, delay));
 
@@ -1854,37 +1854,37 @@ class BaileysManager {
       // Tentar recriar cliente
       logger.info(`[Baileys] 🔌 Reconnecting ${connectionId}...`);
       await this.createClient(connectionId);
-      
+
       logger.info(`[Baileys] ✅ Reconnection initiated for ${connectionId}`);
-      
+
       // Resetar flag de reconexão após sucesso
       const updatedClient = this.clients.get(connectionId);
       if (updatedClient) {
         updatedClient.isReconnecting = false;
       }
-      
+
       // ✅ Lock será liberado pelo createClient em caso de sucesso
     } catch (error: any) {
       logger.error(`[Baileys] ❌ Reconnection failed for ${connectionId}:`, error);
-      
+
       // ✅ LIBERAR LOCK EM CASO DE ERRO
       this.reconnectionLocks.delete(connectionId);
-      
+
       // Resetar flag mesmo em caso de erro
       const updatedClient = this.clients.get(connectionId);
       if (updatedClient) {
         updatedClient.isReconnecting = false;
       }
-      
+
       // Verificar se é erro 503 (Service Unavailable) - aguardar mais tempo
-      const is503Error = error?.message?.includes('503') || 
-                        error?.output?.statusCode === 503 ||
-                        error?.statusCode === 503;
-      
+      const is503Error = error?.message?.includes('503') ||
+        error?.output?.statusCode === 503 ||
+        error?.statusCode === 503;
+
       if (is503Error) {
         logger.warn(`[Baileys] ⚠️ Error 503 (Service Unavailable) - WhatsApp may be temporarily unavailable`);
         logger.warn(`[Baileys] 💡 Will retry after longer delay (30s)`);
-        
+
         // Aguardar 30 segundos antes de tentar novamente (se não excedeu limite)
         if (client.reconnectAttempts < this.MAX_RECONNECT_ATTEMPTS) {
           setTimeout(() => {
@@ -1894,7 +1894,7 @@ class BaileysManager {
           }, 30000); // 30 segundos para erro 503
         }
       }
-      
+
       if (client.reconnectAttempts >= this.MAX_RECONNECT_ATTEMPTS) {
         logger.warn(
           `[Baileys] ❌ Maximum reconnection attempts reached for ${connectionId} - forcing credential reset`
@@ -1927,33 +1927,33 @@ class BaileysManager {
   private async validateSession(connectionId: string): Promise<boolean> {
     try {
       const client = this.clients.get(connectionId);
-      
+
       if (!client || !client.socket) {
         logger.warn(`[Baileys] ⚠️ Session validation failed: client or socket not found for ${connectionId}`);
         return false;
       }
-      
+
       if (client.status !== 'connected') {
         logger.warn(`[Baileys] ⚠️ Session validation failed: status is ${client.status} for ${connectionId}`);
         return false;
       }
-      
+
       // Verificar se tem credenciais válidas
       const connection = await this.prisma.whatsAppConnection.findUnique({
         where: { id: connectionId },
         select: { authData: true, status: true },
       });
-      
+
       if (!connection || !connection.authData) {
         logger.warn(`[Baileys] ⚠️ Session validation failed: no auth data in database for ${connectionId}`);
         return false;
       }
-      
+
       if (connection.status !== 'connected') {
         logger.warn(`[Baileys] ⚠️ Session validation failed: database status is ${connection.status} for ${connectionId}`);
         return false;
       }
-      
+
       logger.debug(`[Baileys] ✅ Session validation passed for ${connectionId}`);
       return true;
     } catch (error) {
@@ -1982,29 +1982,29 @@ class BaileysManager {
           filename,
           mimetype
         );
-        
+
         if (supabaseUrl) {
           logger.info(`[Baileys] ✅ Media uploaded to Supabase Storage: ${filename}`);
-          
+
           // Também salvar localmente como backup
           const uploadsDir = path.join(process.cwd(), 'secure-uploads');
           if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
           fs.writeFileSync(path.join(uploadsDir, filename), buffer);
-          
+
           return supabaseUrl;
         }
       } catch (supabaseError) {
         logger.warn(`[Baileys] ⚠️ Supabase upload failed, using local storage:`, supabaseError);
       }
     }
-    
+
     // Fallback para armazenamento local
     const uploadsDir = path.join(process.cwd(), 'secure-uploads');
     if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
     fs.writeFileSync(path.join(uploadsDir, filename), buffer);
     const localUrl = `/uploads/${filename}`;
     logger.info(`[Baileys] ✅ Media saved locally: ${filename}`);
-    
+
     return localUrl;
   }
 
@@ -2043,12 +2043,12 @@ class BaileysManager {
     // JID deve estar no formato: 5511999999999@s.whatsapp.net
     // Remover caracteres não numéricos do número
     const cleanNumber = to.replace(/\D/g, '');
-    const jid = cleanNumber.includes('@') 
-      ? cleanNumber 
+    const jid = cleanNumber.includes('@')
+      ? cleanNumber
       : `${cleanNumber}@s.whatsapp.net`;
-    
+
     logger.info(`[Baileys] Preparing to send message to JID: ${jid} (original: ${to})`);
-    
+
     try {
       let messageContent: any;
 
@@ -2058,48 +2058,48 @@ class BaileysManager {
         // ✅ IMPLEMENTAÇÃO SIMPLES E DIRETA BASEADA NA DOCUMENTAÇÃO DO BAILEYS
         // Documentação: https://baileys.wiki/docs/sending-messages/
         // Formato oficial: { image: Buffer | { url: string }, caption?: string }
-        
+
         const { url, caption } = content as { url: string; caption?: string };
-        
+
         if (!url) {
           throw new Error('Image URL is required');
         }
-        
+
         logger.info(`[Baileys] 🖼️ Sending image from URL: ${url}`);
-        
+
         // Converter URL relativa para absoluta
         let imageUrl = url;
         if (!imageUrl.startsWith('http://') && !imageUrl.startsWith('https://')) {
           const baseUrl = process.env.API_BASE_URL || process.env.RAILWAY_PUBLIC_DOMAIN || 'http://localhost:3000';
-          imageUrl = imageUrl.startsWith('/') 
-            ? `${baseUrl}${imageUrl}` 
+          imageUrl = imageUrl.startsWith('/')
+            ? `${baseUrl}${imageUrl}`
             : `${baseUrl}/${imageUrl}`;
         }
-        
+
         // ✅ Enviar usando URL (formato recomendado pela documentação)
         // Documentação: https://baileys.wiki/docs/sending-messages/
-        messageContent = caption && caption.trim() 
+        messageContent = caption && caption.trim()
           ? { image: { url: imageUrl }, caption }
           : { image: { url: imageUrl } };
-        
+
         logger.info(`[Baileys] ✅ Image message prepared with URL: ${imageUrl}`);
       } else if (messageType === 'audio') {
         const { url } = content as { url: string };
         // ✅ Converter URL relativa para absoluta se necessário
         let audioUrl = url;
         let audioMimetype = 'audio/ogg; codecs=opus'; // padrão
-        
+
         if (!audioUrl.startsWith('http://') && !audioUrl.startsWith('https://')) {
           // Se for URL relativa, tentar ler o arquivo local para detectar mimetype
           const filename = audioUrl.split('/').pop();
           if (filename) {
             const uploadsDir = path.join(process.cwd(), 'uploads');
             const filepath = path.join(uploadsDir, filename);
-            
+
             // ✅ Tentar ler o arquivo local para detectar mimetype correto
             if (fs.existsSync(filepath)) {
               const audioExtension = filename.split('.').pop()?.toLowerCase();
-              
+
               // Detectar mimetype baseado na extensão
               if (audioExtension === 'mp3' || audioExtension === 'mpeg') {
                 audioMimetype = 'audio/mpeg';
@@ -2116,15 +2116,15 @@ class BaileysManager {
               } else if (audioExtension === 'amr') {
                 audioMimetype = 'audio/amr';
               }
-              
+
               logger.info(`[Baileys] Detected mimetype from file: ${audioMimetype} (extension: ${audioExtension})`);
             }
           }
-          
+
           // Converter para URL absoluta
           const baseUrl = process.env.API_BASE_URL || process.env.RAILWAY_PUBLIC_DOMAIN || 'http://localhost:3000';
-          audioUrl = audioUrl.startsWith('/') 
-            ? `${baseUrl}${audioUrl}` 
+          audioUrl = audioUrl.startsWith('/')
+            ? `${baseUrl}${audioUrl}`
             : `${baseUrl}/${audioUrl}`;
         } else {
           // Se já for URL absoluta, detectar mimetype da extensão
@@ -2145,7 +2145,7 @@ class BaileysManager {
             audioMimetype = 'audio/amr';
           }
         }
-        
+
         // ✅ IMPORTANTE: Baseado no issue #501 do Baileys (https://github.com/WhiskeySockets/Baileys/issues/501)
         // e recomendações da comunidade, o formato correto para áudio PTT é:
         // { audio: { url: string } | Buffer, mimetype: 'audio/ogg', ptt: true }
@@ -2153,17 +2153,17 @@ class BaileysManager {
         // NOTA: O mimetype deve ser 'audio/ogg' (sem 'codecs=opus') para evitar problemas
         // O áudio idealmente deve estar em formato OGG com codec libopus e canal único (ac: 1)
         // Para conversão, usar: ffmpeg -i input.mp3 -avoid_negative_ts make_zero -ac 1 output.ogg
-        
+
         // ✅ Usar mimetype simples 'audio/ogg' conforme issue #501
         // O Baileys pode ter problemas com 'audio/ogg; codecs=opus'
         const whatsappAudioMimetype = 'audio/ogg'; // Formato correto conforme issue #501
-        
+
         logger.info(`[Baileys] Processing audio: URL=${audioUrl}, detected mimetype=${audioMimetype}`);
-        
+
         let audioBuffer: Buffer | null = null;
         let filename: string | null = null;
         let finalAudioUrl = audioUrl; // URL final a ser usada (pode ser convertida para absoluta)
-        
+
         // ✅ Extrair filename e tentar ler arquivo localmente
         if (!audioUrl.startsWith('http://') && !audioUrl.startsWith('https://')) {
           // URL relativa - extrair filename
@@ -2173,17 +2173,17 @@ class BaileysManager {
           const urlParts = audioUrl.split('/');
           filename = urlParts[urlParts.length - 1]?.split('?')[0] || null;
         }
-        
+
         // ✅ Tentar ler arquivo localmente para enviar como buffer
         if (filename) {
           // Tentar primeiro em secure-uploads (diretório usado pelo upload controller)
           const secureUploadsDir = path.join(process.cwd(), 'secure-uploads');
           const secureUploadsPath = path.join(secureUploadsDir, filename);
-          
+
           // Tentar também em uploads (fallback)
           const uploadsDir = path.join(process.cwd(), 'uploads');
           const uploadsPath = path.join(uploadsDir, filename);
-          
+
           if (fs.existsSync(secureUploadsPath)) {
             try {
               audioBuffer = fs.readFileSync(secureUploadsPath);
@@ -2203,26 +2203,26 @@ class BaileysManager {
           } else {
             logger.warn(`[Baileys] ⚠️ Audio file not found locally: ${filename}`);
           }
-          
+
           // ✅ Se arquivo existe localmente, garantir que a URL seja absoluta e pública
           // Baseado no exemplo PHP, o Baileys precisa de URL pública para funcionar
           if (!finalAudioUrl.startsWith('http://') && !finalAudioUrl.startsWith('https://')) {
             const baseUrl = process.env.API_BASE_URL || process.env.RAILWAY_PUBLIC_DOMAIN || 'http://localhost:3000';
-            finalAudioUrl = finalAudioUrl.startsWith('/') 
-              ? `${baseUrl}${finalAudioUrl}` 
+            finalAudioUrl = finalAudioUrl.startsWith('/')
+              ? `${baseUrl}${finalAudioUrl}`
               : `${baseUrl}/${finalAudioUrl}`;
             logger.info(`[Baileys] Converted relative URL to absolute: ${finalAudioUrl}`);
           }
         }
-        
+
         // ✅ Estratégia: Tentar buffer primeiro, se não funcionar, usar URL pública
         // Baseado no issue #501 e exemplos da comunidade (TabNews, GitHub)
         // Formato correto: { audio: Buffer | { url: string }, mimetype: 'audio/ogg', ptt: true }
         if (audioBuffer) {
           // ✅ Enviar como buffer (mais eficiente)
           // Conforme issue #501, o Baileys aceita Buffer diretamente
-          messageContent = { 
-            audio: audioBuffer, 
+          messageContent = {
+            audio: audioBuffer,
             mimetype: whatsappAudioMimetype, // 'audio/ogg' (sem codecs=opus)
             ptt: true // Push-to-Talk (mensagem de voz)
           };
@@ -2231,25 +2231,25 @@ class BaileysManager {
           // ✅ Usar URL pública (conforme issue #501 e exemplos)
           // IMPORTANTE: URL deve ser absoluta e acessível publicamente
           // Formato: { audio: { url: string }, mimetype: 'audio/ogg', ptt: true }
-          messageContent = { 
+          messageContent = {
             audio: { url: finalAudioUrl }, // ✅ URL absoluta e pública
             mimetype: whatsappAudioMimetype, // 'audio/ogg' (sem codecs=opus)
             ptt: true // Push-to-Talk (mensagem de voz)
           };
           logger.info(`[Baileys] ✅ Using audio URL (format: ${whatsappAudioMimetype}, url: ${finalAudioUrl}, PTT: true)`);
-          
+
           // ⚠️ AVISO: Se o áudio não estiver em formato OGG/Opus, pode não funcionar
           // Recomendação: Converter para OGG com FFmpeg antes de enviar
           logger.warn(`[Baileys] ⚠️ Audio URL format may not be compatible. Consider converting to OGG/Opus with FFmpeg.`);
         }
       } else if (messageType === 'video') {
         const { url, caption } = content as { url: string; caption?: string };
-        
+
         // ✅ Converter URL relativa para absoluta se necessário
         let videoUrl = url;
         let videoBuffer: Buffer | null = null;
         let filename: string | null = null;
-        
+
         // Extrair filename da URL
         if (!videoUrl.startsWith('http://') && !videoUrl.startsWith('https://')) {
           // URL relativa - extrair filename
@@ -2259,17 +2259,17 @@ class BaileysManager {
           const urlParts = videoUrl.split('/');
           filename = urlParts[urlParts.length - 1]?.split('?')[0] || null;
         }
-        
+
         // ✅ Tentar ler arquivo localmente para enviar como buffer (mais eficiente)
         if (filename) {
           // Tentar primeiro em secure-uploads (diretório usado pelo upload controller)
           const secureUploadsDir = path.join(process.cwd(), 'secure-uploads');
           const secureUploadsPath = path.join(secureUploadsDir, filename);
-          
+
           // Tentar também em uploads (fallback)
           const uploadsDir = path.join(process.cwd(), 'uploads');
           const uploadsPath = path.join(uploadsDir, filename);
-          
+
           if (fs.existsSync(secureUploadsPath)) {
             try {
               videoBuffer = fs.readFileSync(secureUploadsPath);
@@ -2289,17 +2289,17 @@ class BaileysManager {
           } else {
             logger.warn(`[Baileys] ⚠️ Video file not found locally: ${filename}`);
           }
-          
+
           // ✅ Converter URL relativa para absoluta (necessário para Baileys baixar)
           if (!videoUrl.startsWith('http://') && !videoUrl.startsWith('https://')) {
             const baseUrl = process.env.API_BASE_URL || process.env.RAILWAY_PUBLIC_DOMAIN || 'http://localhost:3000';
-            videoUrl = videoUrl.startsWith('/') 
-              ? `${baseUrl}${videoUrl}` 
+            videoUrl = videoUrl.startsWith('/')
+              ? `${baseUrl}${videoUrl}`
               : `${baseUrl}/${videoUrl}`;
             logger.info(`[Baileys] Converted relative video URL to absolute: ${videoUrl}`);
           }
         }
-        
+
         // ✅ Estratégia: Tentar buffer primeiro (mais eficiente), senão usar URL pública
         // Baseado na documentação do Baileys: https://baileys.wiki/docs/sending-messages/
         if (videoBuffer) {
@@ -2317,16 +2317,16 @@ class BaileysManager {
         }
       } else if (messageType === 'document') {
         const { url, caption } = content as { url: string; caption?: string };
-        
+
         // ✅ Converter URL relativa para absoluta se necessário
         let documentUrl = url;
         let documentBuffer: Buffer | null = null;
         let filename: string | null = null;
-        
+
         // Para documentos, extrair nome do arquivo da URL ou usar padrão
         const fileName = documentUrl.split('/').pop()?.split('?')[0] || 'document';
         filename = fileName !== 'document' ? fileName : null;
-        
+
         // Extrair filename da URL
         if (!documentUrl.startsWith('http://') && !documentUrl.startsWith('https://')) {
           // URL relativa - extrair filename
@@ -2336,17 +2336,17 @@ class BaileysManager {
           const urlParts = documentUrl.split('/');
           filename = urlParts[urlParts.length - 1]?.split('?')[0] || null;
         }
-        
+
         // ✅ Tentar ler arquivo localmente para enviar como buffer (mais eficiente)
         if (filename) {
           // Tentar primeiro em secure-uploads (diretório usado pelo upload controller)
           const secureUploadsDir = path.join(process.cwd(), 'secure-uploads');
           const secureUploadsPath = path.join(secureUploadsDir, filename);
-          
+
           // Tentar também em uploads (fallback)
           const uploadsDir = path.join(process.cwd(), 'uploads');
           const uploadsPath = path.join(uploadsDir, filename);
-          
+
           if (fs.existsSync(secureUploadsPath)) {
             try {
               documentBuffer = fs.readFileSync(secureUploadsPath);
@@ -2366,17 +2366,17 @@ class BaileysManager {
           } else {
             logger.warn(`[Baileys] ⚠️ Document file not found locally: ${filename}`);
           }
-          
+
           // ✅ Converter URL relativa para absoluta (necessário para Baileys baixar)
           if (!documentUrl.startsWith('http://') && !documentUrl.startsWith('https://')) {
             const baseUrl = process.env.API_BASE_URL || process.env.RAILWAY_PUBLIC_DOMAIN || 'http://localhost:3000';
-            documentUrl = documentUrl.startsWith('/') 
-              ? `${baseUrl}${documentUrl}` 
+            documentUrl = documentUrl.startsWith('/')
+              ? `${baseUrl}${documentUrl}`
               : `${baseUrl}/${documentUrl}`;
             logger.info(`[Baileys] Converted relative document URL to absolute: ${documentUrl}`);
           }
         }
-        
+
         // ✅ Estratégia: Tentar buffer primeiro (mais eficiente), senão usar URL pública
         // Baseado na documentação do Baileys: https://baileys.wiki/docs/sending-messages/
         const finalFileName = filename || 'document';
@@ -2396,7 +2396,7 @@ class BaileysManager {
       }
 
       logger.info(`[Baileys] Attempting to send message to ${jid}, type: ${messageType}`);
-      
+
       // ✅ Log detalhado do messageContent (sem tentar serializar Buffer)
       if (messageType === 'audio' && messageContent.audio) {
         const isBuffer = Buffer.isBuffer(messageContent.audio);
@@ -2409,7 +2409,7 @@ class BaileysManager {
       } else {
         logger.debug(`[Baileys] Message content structure:`, JSON.stringify(messageContent, null, 2).substring(0, 500));
       }
-      
+
       // ✅ VERIFICAÇÃO FINAL: Verificar se socket ainda está conectado antes de enviar
       if (!client.socket || client.status !== 'connected') {
         throw new Error(`Socket disconnected before sending message (status: ${client.status})`);
@@ -2429,11 +2429,11 @@ class BaileysManager {
           logger.warn(`[Baileys] ⚠️ Could not build quoted payload for stanza ${stanzaId} - sending without reply context`);
         }
       }
-      
+
       // ✅ ENVIAR MENSAGEM conforme documentação do Baileys
       // Documentação: https://baileys.wiki/docs/sending-messages/
       // Formato: socket.sendMessage(jid, messageContent)
-      
+
       logger.info(`[Baileys] 📤 Calling sendMessage with JID: ${jid}, type: ${messageType}`);
       logger.info(`[Baileys] 📤 Message content preview:`, {
         type: messageType,
@@ -2443,17 +2443,17 @@ class BaileysManager {
         hasVideo: !!messageContent.video,
         hasDocument: !!messageContent.document,
       });
-      
+
       const sent = await client.socket.sendMessage(
         jid,
         messageContent,
         sendOptions
       );
-      
+
       // ✅ EXTRAIR EXTERNAL ID DE FORMA ROBUSTA
       // O Baileys pode retornar o ID em diferentes formatos
       let externalId: string | undefined = undefined;
-      
+
       if (sent?.key?.id) {
         externalId = sent.key.id as string;
       } else if (typeof sent === 'string') {
@@ -2466,7 +2466,7 @@ class BaileysManager {
           externalId = idMatch[1];
         }
       }
-      
+
       logger.info(`[Baileys] 📤 sendMessage returned:`, {
         hasKey: !!sent?.key,
         hasId: !!sent?.key?.id,
@@ -2475,7 +2475,7 @@ class BaileysManager {
         sentKeys: sent && typeof sent === 'object' ? Object.keys(sent) : 'N/A',
         fullResponse: JSON.stringify(sent, null, 2).substring(0, 1000),
       });
-      
+
       if (externalId) {
         logger.info(`[Baileys] ✅ Message sent successfully from ${connectionId} to ${to} (id: ${externalId})`);
       } else {
@@ -2484,12 +2484,12 @@ class BaileysManager {
         logger.warn(`[Baileys] ⚠️ Message sent but no externalId returned from Baileys`);
         logger.warn(`[Baileys] ⚠️ This may indicate the message was not actually sent`);
         logger.warn(`[Baileys] ⚠️ Full response:`, JSON.stringify(sent, null, 2));
-        
+
         // ✅ IMPORTANTE: Mesmo sem externalId, considerar como enviado se não houve erro
         // O Baileys pode enviar a mensagem mas não retornar o ID em alguns casos
         logger.info(`[Baileys] ⚠️ Assuming message was sent (no error thrown, but no externalId)`);
       }
-      
+
       return externalId;
     } catch (error: any) {
       // ✅ LOG DETALHADO DO ERRO
@@ -2506,17 +2506,17 @@ class BaileysManager {
         errorCode: error?.code || 'N/A',
         errorOutput: error?.output ? JSON.stringify(error.output, null, 2).substring(0, 500) : 'N/A',
       });
-      
+
       // ✅ Verificar se é erro de conexão
       if (error?.message?.includes('not connected') || error?.message?.includes('Socket not available')) {
         logger.error(`[Baileys] ❌ Connection issue detected - message cannot be sent`);
       }
-      
+
       // ✅ Verificar se é erro de formato
       if (error?.message?.includes('Invalid') || error?.message?.includes('format')) {
         logger.error(`[Baileys] ❌ Format issue detected - check message content`);
       }
-      
+
       throw error;
     }
   }
@@ -2580,10 +2580,10 @@ class BaileysManager {
       quoted.messageType === 'text'
         ? { conversation: placeholderText }
         : {
-            extendedTextMessage: {
-              text: placeholderText,
-            },
-          };
+          extendedTextMessage: {
+            text: placeholderText,
+          },
+        };
 
     return {
       key,
@@ -2715,7 +2715,7 @@ class BaileysManager {
    */
   async checkWhatsAppNumber(connectionId: string, phone: string): Promise<{ exists: boolean; jid?: string }> {
     const client = this.clients.get(connectionId);
-    
+
     if (!client) {
       throw new Error(`Connection ${connectionId} not found`);
     }
@@ -2727,12 +2727,12 @@ class BaileysManager {
     try {
       // Formatar número (remover caracteres especiais)
       const cleanPhone = phone.replace(/\D/g, '');
-      
+
       logger.info(`[Baileys] 📱 Checking if ${cleanPhone} is on WhatsApp...`);
-      
+
       // Verificar se número existe no WhatsApp
       const results = await client.socket.onWhatsApp(cleanPhone);
-      
+
       if (results && results.length > 0 && results[0].exists) {
         logger.info(`[Baileys] ✅ Number ${cleanPhone} exists on WhatsApp`);
         return {
@@ -2743,7 +2743,7 @@ class BaileysManager {
         logger.info(`[Baileys] ❌ Number ${cleanPhone} not found on WhatsApp`);
         return { exists: false };
       }
-      
+
     } catch (error) {
       logger.error(`[Baileys] ❌ Error checking WhatsApp number:`, error);
       throw new Error(`Failed to check WhatsApp number: ${(error as Error).message}`);
@@ -2756,7 +2756,7 @@ class BaileysManager {
    */
   async getContactName(connectionId: string, phone: string): Promise<string | null> {
     const client = this.clients.get(connectionId);
-    
+
     if (!client || client.status !== 'connected') {
       logger.warn(`[Baileys] Connection ${connectionId} not available for contact name lookup`);
       return null;
@@ -2765,49 +2765,49 @@ class BaileysManager {
     try {
       const cleanPhone = phone.replace(/\D/g, '');
       const jid = `${cleanPhone}@s.whatsapp.net`;
-      
+
       logger.info(`[Baileys] 📱 Fetching profile name for ${cleanPhone}...`);
-      
+
       // Método 1: Buscar no banco de dados (se já conversou)
       const contact = await this.prisma.contact.findFirst({
         where: { phoneNumber: cleanPhone },
         select: { name: true },
       });
-      
+
       if (contact?.name) {
         logger.info(`[Baileys] ✅ Found contact name in DB: ${contact.name}`);
         return contact.name;
       }
-      
+
       // Método 2: Buscar informações do perfil do WhatsApp
       try {
         // Verificar se número existe no WhatsApp
         const results = await client.socket.onWhatsApp(cleanPhone);
-        
+
         if (!results || results.length === 0 || !results[0].exists) {
           logger.warn(`[Baileys] Number ${cleanPhone} not on WhatsApp`);
           return null;
         }
-        
+
         // Tentar buscar informações do business profile
         const businessProfile = await client.socket.getBusinessProfile(jid).catch(() => null);
-        
+
         if (businessProfile?.description) {
           logger.info(`[Baileys] ✅ Found business name: ${businessProfile.description}`);
           return businessProfile.description;
         }
-        
+
         // Nota: fetchStatus retorna informações diferentes do esperado
         // Por enquanto, vamos apenas usar business profile e banco de dados
-        
+
         logger.info(`[Baileys] ⚠️ No profile name found for ${cleanPhone}`);
         return null;
-        
+
       } catch (profileError) {
         logger.warn(`[Baileys] Could not fetch profile for ${cleanPhone}:`, profileError);
         return null;
       }
-      
+
     } catch (error) {
       logger.error(`[Baileys] ❌ Error fetching contact name:`, error);
       return null;
@@ -2822,16 +2822,16 @@ class BaileysManager {
   async getContactInfo(connectionId: string, phone: string): Promise<{ phone: string; exists: boolean } | null> {
     try {
       const result = await this.checkWhatsAppNumber(connectionId, phone);
-      
+
       if (result.exists) {
         return {
           phone: phone.replace(/\D/g, ''),
           exists: true,
         };
       }
-      
+
       return null;
-      
+
     } catch (error) {
       logger.error(`[Baileys] ❌ Error fetching contact info:`, error);
       return null;
@@ -2857,17 +2857,17 @@ class BaileysManager {
       clearInterval(client.keepAliveInterval);
       logger.debug(`[Baileys] ✅ KeepAlive interval limpo para ${connectionId}`);
     }
-    
+
     if (client.heartbeatInterval) {
       clearInterval(client.heartbeatInterval);
       logger.debug(`[Baileys] ✅ Heartbeat interval limpo para ${connectionId}`);
     }
-    
+
     if (client.syncInterval) {
       clearInterval(client.syncInterval);
       logger.debug(`[Baileys] ✅ Sync interval limpo para ${connectionId}`);
     }
-    
+
     // ✅ BUG FIX: Limpar timeout de "connecting" se existir (evitar vazamento de memória)
     if (client.connectingTimeout) {
       clearTimeout(client.connectingTimeout);
@@ -2931,15 +2931,45 @@ class BaileysManager {
       const now = new Date();
       const lastReceived = currentClient.lastMessageReceived;
       const lastHeartbeat = currentClient.lastHeartbeat;
-      
+
       if (currentClient.status === 'connected') {
+        // ✅ NOVA VERIFICAÇÃO: Verificar estado real do WebSocket
+        // readyState: 0=CONNECTING, 1=OPEN, 2=CLOSING, 3=CLOSED
+        try {
+          const wsReadyState = (currentClient.socket as any)?.ws?.readyState;
+
+          if (wsReadyState !== undefined && wsReadyState !== 1) {
+            logger.warn(`[Baileys] ⚠️ Socket CLOSED (readyState: ${wsReadyState}) but status is 'connected' - forcing disconnect`);
+
+            // Forçar status para disconnected
+            currentClient.status = 'disconnected';
+            currentClient.lastDisconnectAt = new Date();
+
+            this.updateConnectionStatus(connectionId, 'disconnected').catch(err => {
+              logger.error(`[Baileys] Failed to update status:`, err);
+            });
+            this.emitStatus(connectionId, 'disconnected');
+
+            // Agendar reconexão
+            setTimeout(() => {
+              this.attemptReconnection(connectionId).catch(err => {
+                logger.error(`[Baileys] Failed to trigger reconnection:`, err);
+              });
+            }, 5000);
+
+            return; // Sair do intervalo
+          }
+        } catch (wsCheckError) {
+          logger.warn(`[Baileys] Error checking WebSocket state:`, wsCheckError);
+        }
+
         if (lastReceived) {
           const minutesSinceLastMessage = (now.getTime() - lastReceived.getTime()) / 1000 / 60;
           logger.debug(`[Baileys] 💓 Keepalive ${connectionId} - Last message: ${minutesSinceLastMessage.toFixed(1)}min ago`);
         } else {
           logger.debug(`[Baileys] 💓 Keepalive ${connectionId} - No messages received yet`);
         }
-        
+
         // Verificar se heartbeat está funcionando (aumentar tolerância para 180s - 3 minutos)
         // Isso evita desconexões prematuras por falhas temporárias de rede
         if (lastHeartbeat) {
@@ -2954,27 +2984,27 @@ class BaileysManager {
       } else {
         // Não logar warning para status 'connecting' ou 'qr' - são estados normais
         if (currentClient.status !== 'connecting' && currentClient.status !== 'qr') {
-        logger.warn(`[Baileys] ⚠️ Connection ${connectionId} is ${currentClient.status}, not connected!`);
+          logger.warn(`[Baileys] ⚠️ Connection ${connectionId} is ${currentClient.status}, not connected!`);
         }
-        
+
         // Se está desconectado mas tem credenciais, tentar reconectar
         // Mas apenas se não estiver já reconectando e não estiver em processo de conexão
         // ADICIONAR VERIFICAÇÃO DE TEMPO: Não reconectar imediatamente após desconexão
         // Aguardar pelo menos 5 segundos para evitar reconexões prematuras
         const lock = this.reconnectionLocks.get(connectionId);
         const isLocked = lock && lock.locked;
-        
+
         // Verificar quando foi a última desconexão
         const lastDisconnectAt = currentClient.lastDisconnectAt;
-        const timeSinceDisconnect = lastDisconnectAt 
-          ? (now.getTime() - lastDisconnectAt.getTime()) / 1000 
+        const timeSinceDisconnect = lastDisconnectAt
+          ? (now.getTime() - lastDisconnectAt.getTime()) / 1000
           : Infinity;
-        
+
         // Só tentar reconectar se passou pelo menos 5 segundos desde a desconexão
         // Isso evita reconexões prematuras em caso de desconexões temporárias
         if (
-          currentClient.hasCredentials && 
-          !currentClient.isReconnecting && 
+          currentClient.hasCredentials &&
+          !currentClient.isReconnecting &&
           currentClient.status === 'disconnected' &&
           !isLocked &&
           timeSinceDisconnect >= 5 // Aguardar pelo menos 5 segundos
@@ -3016,7 +3046,7 @@ class BaileysManager {
       if (currentClient.status === 'connected') {
         try {
           // ESTRATÉGIA MULTI-CAMADAS para manter conexão viva:
-          
+
           // 1. Marcar presença online (CRÍTICO para manter conexão)
           try {
             await currentClient.socket.sendPresenceUpdate('available');
@@ -3043,17 +3073,17 @@ class BaileysManager {
             // Para cada conversa ativa, marcar presença para manter conexão
             for (const conv of activeConversations) {
               try {
-                const jid = conv.contact.phoneNumber.includes('@') 
-                  ? conv.contact.phoneNumber 
+                const jid = conv.contact.phoneNumber.includes('@')
+                  ? conv.contact.phoneNumber
                   : `${conv.contact.phoneNumber}@s.whatsapp.net`;
-                
+
                 // Marcar presença no chat (ativa conexão e sincroniza mensagens)
                 await currentClient.socket.sendPresenceUpdate('available', jid);
               } catch (fetchError) {
                 // Ignorar erros individuais
               }
             }
-            
+
             logger.debug(`[Baileys] 📥 Message sync attempted for ${activeConversations.length} conversations`);
           } catch (syncError) {
             logger.warn(`[Baileys] ⚠️ Could not sync messages:`, syncError);
@@ -3074,7 +3104,7 @@ class BaileysManager {
           logger.debug(`[Baileys] 💚 Heartbeat OK for ${connectionId}`);
         } catch (error) {
           logger.warn(`[Baileys] 💔 Heartbeat failed for ${connectionId}:`, error);
-          
+
           // Não desconectar imediatamente - apenas logar o erro
           // O monitoramento de conexão vai detectar se realmente desconectou
           // Tentar verificar se socket ainda está vivo antes de considerar morto
@@ -3147,12 +3177,12 @@ class BaileysManager {
         }
 
         logger.info(`[Baileys] 🔄 Periodic sync (backup) for ${connectionId} - checking for missed messages...`);
-        
+
         // Sincronização leve: apenas conversas ativas recentes (últimas 10)
         // Limite baixo para não sobrecarregar
         // ✅ Esta sincronização é apenas backup - a principal ocorre na reconexão
         const syncedCount = await this.syncAllActiveConversations(connectionId, 10);
-        
+
         if (syncedCount > 0) {
           logger.info(`[Baileys] ✅ Periodic sync found ${syncedCount} conversations to sync for ${connectionId}`);
         } else {
@@ -3174,36 +3204,36 @@ class BaileysManager {
   private async processRetryQueue(connectionId: string): Promise<number> {
     try {
       const retryKeys = Array.from(this.syncRetryQueue.keys()).filter(key => key.startsWith(`${connectionId}:`));
-      
+
       if (retryKeys.length === 0) {
         return 0; // Nenhuma mensagem na queue
       }
-      
+
       logger.info(`[Baileys] 🔄 Processing retry queue: ${retryKeys.length} messages to retry`);
-      
+
       let processedCount = 0;
       for (const retryKey of retryKeys) {
         try {
           const retryInfo = this.syncRetryQueue.get(retryKey);
           if (!retryInfo) continue;
-          
+
           // Se última tentativa foi há menos de 1 minuto, aguardar
           const timeSinceLastAttempt = Date.now() - retryInfo.lastAttempt.getTime();
           if (timeSinceLastAttempt < 60000) {
             continue; // Aguardar mais tempo
           }
-          
+
           await this.retryIncomingMessage(retryKey);
           processedCount++;
         } catch (error) {
           logger.error(`[Baileys] ❌ Error processing retry queue item:`, error);
         }
       }
-      
+
       if (processedCount > 0) {
         logger.info(`[Baileys] ✅ Processed ${processedCount} items from retry queue`);
       }
-      
+
       return processedCount;
     } catch (error) {
       logger.error(`[Baileys] ❌ Error processing retry queue:`, error);
@@ -3253,7 +3283,7 @@ class BaileysManager {
         select: { lastDisconnectAt: true },
       });
       originalLastDisconnectAt = connection?.lastDisconnectAt ?? null;
-      
+
       if (originalLastDisconnectAt) {
         logger.info(`[Baileys] 📅 Preserving original lastDisconnectAt: ${originalLastDisconnectAt.toISOString()}`);
         logger.info(`[Baileys] 📅 This will be used as sync reference after QR scan`);
@@ -3295,7 +3325,7 @@ class BaileysManager {
           lastSyncTo: null,
         },
       });
-      
+
       logger.info(`[Baileys] ✅ Credentials cleared, lastDisconnectAt preserved for sync`);
     } catch (error) {
       logger.error(`[Baileys] ❌ Error clearing stored credentials for ${connectionId}:`, error);
@@ -3393,7 +3423,7 @@ class BaileysManager {
             const authData = JSON.parse(authDataString, BufferJSON.reviver);
             // ✅ Credenciais válidas = têm creds.me.id (já conectou antes)
             hasValidCredentialsInDB = !!(authData.creds && authData.creds.me && authData.creds.me.id);
-            
+
             if (hasValidCredentialsInDB) {
               const meId = authData.creds.me.id;
               logger.info(`[Baileys] ✅ Credenciais VÁLIDAS encontradas para ${connectionId} (me.id: ${meId})`);
@@ -3408,10 +3438,10 @@ class BaileysManager {
         logger.warn(`[Baileys] ⚠️ Erro ao verificar credenciais para ${connectionId}:`, error);
       }
     }
-    
+
     logger.info(`[Baileys] 🔁 Manual reconnect requested for ${connectionId}`);
     logger.info(`[Baileys] 📋 Credenciais VÁLIDAS no banco: ${hasValidCredentialsInDB ? 'SIM ✅' : 'NÃO ❌'}`);
-    
+
     // ✅ CRÍTICO: Verificar status no banco ANTES de tentar reconectar
     // Se já está conectado ou conectando no banco, não tentar reconectar
     if (connection && connection.status === 'connected') {
@@ -3421,7 +3451,7 @@ class BaileysManager {
         message: 'Conexão já está conectada no banco de dados.',
       };
     }
-    
+
     if (connection && connection.status === 'connecting') {
       logger.info(`[Baileys] ⏭️ Connection ${connectionId} is already 'connecting' in DB - skipping reconnect (already in progress)`);
       return {
@@ -3429,7 +3459,7 @@ class BaileysManager {
         message: 'Conexão já está em processo de conexão no banco de dados.',
       };
     }
-    
+
     if (!hasValidCredentialsInDB) {
       logger.warn(`[Baileys] ⚠️ Sem credenciais válidas para ${connectionId} - QR code será gerado`);
     } else {
@@ -3446,11 +3476,11 @@ class BaileysManager {
         this.reconnectionLocks.delete(connectionId);
       } else {
         logger.info(`[Baileys] 🔁 Manual reconnect for ${connectionId} ignored - reconnection already in progress (lock age: ${Math.round(lockAge / 1000)}s).`);
-      return {
-        status: 'already_reconnecting',
-        message: 'Já existe um processo de reconexão em andamento.',
-      };
-    }
+        return {
+          status: 'already_reconnecting',
+          message: 'Já existe um processo de reconexão em andamento.',
+        };
+      }
     }
 
     // Se não há cliente, criar novo
@@ -3459,11 +3489,11 @@ class BaileysManager {
       logger.info(`[Baileys] 📋 Estado antes de criar cliente:`);
       logger.info(`[Baileys]    - Lock ativo: ${this.reconnectionLocks.get(connectionId)?.locked ? 'SIM' : 'NÃO'}`);
       logger.info(`[Baileys]    - Credenciais válidas: ${hasValidCredentialsInDB ? 'SIM ✅' : 'NÃO ❌'}`);
-      
+
       // Limpar locks ANTES de criar cliente (evitar conflitos)
       this.reconnectionLocks.delete(connectionId);
       logger.info(`[Baileys] ✅ Locks limpos antes de criar cliente`);
-      
+
       // ✅ IMPORTANTE: Criar novo cliente (vai usar credenciais do banco se existirem)
       // O usePostgreSQLAuthState vai carregar as credenciais automaticamente
       try {
@@ -3478,16 +3508,16 @@ class BaileysManager {
         }
         throw error;
       }
-      
+
       return hasValidCredentialsInDB
         ? {
-            status: 'reconnecting',
-            message: 'Reconectando com credenciais existentes...',
-          }
+          status: 'reconnecting',
+          message: 'Reconectando com credenciais existentes...',
+        }
         : {
-            status: 'awaiting_qr',
-            message: 'Aguardando QR code...',
-          };
+          status: 'awaiting_qr',
+          message: 'Aguardando QR code...',
+        };
     }
 
     // Se o cliente existe e está reconectando, informar
@@ -3506,12 +3536,12 @@ class BaileysManager {
 
     logger.info(`[Baileys] 🔁 Manual reconnect initiated for ${connectionId}`);
     logger.info(`[Baileys] 📋 Will ${hasValidCredentialsInDB ? 'reconnect with existing credentials (NO QR CODE)' : 'generate new QR code'}`);
-    
+
     // ✅ IMPORTANTE: Remover cliente atual SEM fazer logout
     // Isso preserva as credenciais no banco de dados
     // O createClient vai carregar as credenciais automaticamente via usePostgreSQLAuthState
     await this.removeClient(connectionId, false); // false = NÃO fazer logout (preserva credenciais)
-    
+
     try {
       // ✅ Criar novo cliente - vai usar credenciais do banco se existirem
       // O usePostgreSQLAuthState verifica o banco e carrega as credenciais
@@ -3528,14 +3558,14 @@ class BaileysManager {
     }
 
     return hasValidCredentialsInDB
-        ? {
-      status: 'reconnecting',
-          message: 'Reconectando com credenciais existentes (sem QR code)...',
-        }
-        : {
-          status: 'awaiting_qr',
-          message: 'Aguardando QR code...',
-        };
+      ? {
+        status: 'reconnecting',
+        message: 'Reconectando com credenciais existentes (sem QR code)...',
+      }
+      : {
+        status: 'awaiting_qr',
+        message: 'Aguardando QR code...',
+      };
   }
 
   /**
@@ -3611,7 +3641,7 @@ class BaileysManager {
       });
 
       const isFirstConnection = connection && !connection.firstConnectedAt;
-      
+
       // Só salvar se ainda não foi salvo (primeira conexão)
       if (isFirstConnection) {
         const now = new Date();
@@ -3625,7 +3655,7 @@ class BaileysManager {
         // RECONEXÃO: Não é a primeira vez que conecta
         const timeSinceFirst = Date.now() - connection.firstConnectedAt.getTime();
         const hoursSinceFirst = Math.round(timeSinceFirst / (1000 * 60 * 60));
-        
+
         logger.info(`[Baileys] 🔄 RECONEXÃO detectada para ${connectionId}`);
         logger.info(`[Baileys] ⏰ Primeira conexão foi há ${hoursSinceFirst} horas (${connection.firstConnectedAt.toISOString()})`);
         logger.info(`[Baileys] 💡 Sincronização será acionada automaticamente pelo handleConnectionUpdate`);
@@ -3710,7 +3740,7 @@ class BaileysManager {
         if (!conn.authData || typeof conn.authData !== 'string' || conn.authData.trim() === '') {
           return false;
         }
-        
+
         try {
           const authData = JSON.parse(conn.authData, BufferJSON.reviver);
           return !!(authData.creds && authData.creds.me && authData.creds.me.id);
@@ -3726,11 +3756,11 @@ class BaileysManager {
         try {
           logger.info(`[Baileys] 🔌 Reconnecting ${connection.name} (${connection.phoneNumber}) - ID: ${connection.id}...`);
           logger.info(`[Baileys] 📊 Previous status: ${connection.status}`);
-          
+
           // ✅ Usar manualReconnect para tentar reconectar sem gerar QR code
           // Isso usa as credenciais salvas para reconectar automaticamente
           const result = await this.manualReconnect(connection.id);
-          
+
           if (result.status === 'already_connected' || result.status === 'connecting' || result.status === 'reconnecting') {
             logger.info(`[Baileys] ✅ Reconnection initiated for ${connection.name} - status: ${result.status}`);
           } else {
@@ -3738,14 +3768,14 @@ class BaileysManager {
           }
         } catch (error: any) {
           logger.error(`[Baileys] ❌ Failed to reconnect ${connection.id} (${connection.name}):`, error?.message || error);
-          
+
           // Marcar como desconectado em caso de erro
           await this.prisma.whatsAppConnection.update({
             where: { id: connection.id },
             data: { status: 'disconnected' },
-          }).catch(() => {});
+          }).catch(() => { });
         }
-        
+
         // ✅ Aguardar um pouco entre reconexões para não sobrecarregar
         await new Promise(resolve => setTimeout(resolve, 2000));
       }
@@ -3763,25 +3793,25 @@ class BaileysManager {
   async syncConversationMessages(connectionId: string, phoneNumber: string, limit: number = 50): Promise<boolean> {
     try {
       let client = this.clients.get(connectionId);
-      
+
       // Verificação robusta: status E socket realmente conectado
       if (!client || client.status !== 'connected') {
         const currentStatus = client?.status || 'not found';
-        
+
         // ❌ NÃO tentar reconectar aqui - pode causar múltiplas tentativas simultâneas
         // Se não estiver conectado, apenas retornar false
         // A reconexão deve ser feita apenas por:
         // 1. attemptReconnection (após desconexão)
         // 2. saveFirstConnectedAt (após primeira conexão)
         // 3. Manual via API
-        
+
         // Reduzir logs repetitivos para status "qr" ou "connecting"
         if (currentStatus === 'qr' || currentStatus === 'connecting') {
           // Log apenas uma vez a cada 10 segundos para evitar spam
           const lastLogKey = `sync_skip_${connectionId}`;
           const lastLogTime = (this as any)[lastLogKey] || 0;
           const now = Date.now();
-          
+
           if (now - lastLogTime > 10000) { // 10 segundos
             logger.debug(`[Baileys] ⏭️ Skipping sync for ${connectionId} - status: ${currentStatus} (will sync after connection)`);
             (this as any)[lastLogKey] = now;
@@ -3790,7 +3820,7 @@ class BaileysManager {
           logger.warn(`[Baileys] ⚠️ Connection ${connectionId} not available (status: ${currentStatus})`);
           logger.warn(`[Baileys] ⏭️ Skipping sync for ${connectionId} - connection not available (will sync after reconnection)`);
         }
-        
+
         return false;
       }
 
@@ -3801,12 +3831,12 @@ class BaileysManager {
         return false;
       }
 
-    if (!client.lastSyncFrom && client.lastDisconnectAt) {
-      client.lastSyncFrom = client.lastDisconnectAt;
-    }
+      if (!client.lastSyncFrom && client.lastDisconnectAt) {
+        client.lastSyncFrom = client.lastDisconnectAt;
+      }
 
       const jid = phoneNumber.includes('@') ? phoneNumber : `${phoneNumber}@s.whatsapp.net`;
-      
+
       // ✅ Log do período de sincronização esperado
       if (client.lastSyncFrom) {
         const syncWindowMinutes = (Date.now() - client.lastSyncFrom.getTime()) / 1000 / 60;
@@ -3819,58 +3849,58 @@ class BaileysManager {
       try {
         // ESTRATÉGIA ROBUSTA DE SINCRONIZAÇÃO:
         // Usa presence updates múltiplos para forçar WhatsApp a enviar mensagens pendentes
-        
+
         logger.info(`[Baileys] 🚀 Starting robust sync for ${phoneNumber}...`);
-        
+
         // Método 1: Marcar presença disponível
         await client.socket.sendPresenceUpdate('available', jid);
         await new Promise(resolve => setTimeout(resolve, 300));
-        
+
         // Método 2: Simular digitação (ativa sincronização mais agressiva do WhatsApp)
         await client.socket.sendPresenceUpdate('composing', jid);
         await new Promise(resolve => setTimeout(resolve, 1000)); // ✅ Aumentar tempo para dar mais chance
-        
+
         // Método 3: Pausar digitação
         await client.socket.sendPresenceUpdate('paused', jid);
         await new Promise(resolve => setTimeout(resolve, 300));
-        
+
         // Método 4: Marcar disponível novamente (ciclo completo)
         await client.socket.sendPresenceUpdate('available', jid);
         await new Promise(resolve => setTimeout(resolve, 200));
-        
+
         // ✅ Método 5: Repetir ciclo uma vez mais para maior confiabilidade
         await client.socket.sendPresenceUpdate('composing', jid);
         await new Promise(resolve => setTimeout(resolve, 500));
         await client.socket.sendPresenceUpdate('paused', jid);
         await new Promise(resolve => setTimeout(resolve, 200));
         await client.socket.sendPresenceUpdate('available', jid);
-        
+
         logger.info(`[Baileys] ✅ ROBUST sync triggers sent for ${phoneNumber} (2 ciclos completos)`);
         logger.info(`[Baileys] 📨 WhatsApp should send missing messages via events (processed by handleIncomingMessages)`);
         logger.info(`[Baileys] ⏳ Monitor logs for 'messaging-history.set' or 'messages.upsert' events`);
-        
+
         // A sincronização real acontece via eventos que são capturados
         // por handleIncomingMessages() quando o WhatsApp responde aos presence updates
-        
+
         return true;
       } catch (error: any) {
         // Verificar se erro é "Connection Closed"
-        const isConnectionClosed = error?.message?.includes('Connection Closed') || 
-                                   error?.output?.payload?.message?.includes('Connection Closed');
-        
+        const isConnectionClosed = error?.message?.includes('Connection Closed') ||
+          error?.output?.payload?.message?.includes('Connection Closed');
+
         if (isConnectionClosed) {
           logger.warn(`[Baileys] ⚠️ Connection Closed detected for ${connectionId} - marking as disconnected`);
-          
+
           // Marcar como desconectado no banco
           await this.updateConnectionStatus(connectionId, 'disconnected');
           this.emitStatus(connectionId, 'disconnected');
-          
+
           // Tentar reconectar
           logger.info(`[Baileys] 🔄 Attempting to reconnect ${connectionId} after Connection Closed...`);
           try {
             await this.createClient(connectionId);
             logger.info(`[Baileys] ✅ Reconnected ${connectionId} after Connection Closed`);
-            
+
             // Não tentar sync novamente agora (deixar para próxima execução)
             return false;
           } catch (reconnectError) {
@@ -3878,9 +3908,9 @@ class BaileysManager {
             return false;
           }
         }
-        
+
         logger.error(`[Baileys] ❌ Error in robust sync:`, error);
-        
+
         // Fallback: tentar apenas presence updates básico (só se não for Connection Closed)
         if (!isConnectionClosed) {
           try {
@@ -3895,7 +3925,7 @@ class BaileysManager {
             return false;
           }
         }
-        
+
         return false;
       }
     } catch (error) {
@@ -3911,7 +3941,7 @@ class BaileysManager {
   async validateMessageIntegrity(conversationId: string): Promise<{ valid: boolean; gaps: number; lastChecked: Date }> {
     try {
       logger.info(`[Baileys] 🔍 Validating message integrity for conversation ${conversationId}...`);
-      
+
       const conversation = await this.prisma.conversation.findUnique({
         where: { id: conversationId },
         include: {
@@ -3930,12 +3960,12 @@ class BaileysManager {
       // Verificar gaps temporais (mais de 5 minutos entre mensagens em conversa ativa)
       let gaps = 0;
       const messages = conversation.messages;
-      
+
       for (let i = 1; i < messages.length; i++) {
         const prevTime = new Date(messages[i - 1].timestamp).getTime();
         const currTime = new Date(messages[i].timestamp).getTime();
         const diffMinutes = (currTime - prevTime) / 1000 / 60;
-        
+
         // Se houver gap maior que 30 minutos, pode ter mensagens perdidas
         if (diffMinutes > 30 && diffMinutes < 1440) { // Menos de 1 dia
           gaps++;
@@ -3944,7 +3974,7 @@ class BaileysManager {
       }
 
       const isValid = gaps === 0;
-      
+
       if (!isValid) {
         logger.warn(`[Baileys] ⚠️ Integrity check failed: ${gaps} gaps found in conversation ${conversationId}`);
         // Triggerar sincronização para recuperar mensagens perdidas
@@ -3967,26 +3997,26 @@ class BaileysManager {
   async syncAllActiveConversations(connectionId: string, messageLimit: number = 50): Promise<number> {
     try {
       logger.info(`[Baileys] 🔄 Syncing all active conversations for ${connectionId} (limit: ${messageLimit})...`);
-      
+
       // VERIFICAÇÃO CRÍTICA: Verificar se conexão está realmente conectada ANTES de sincronizar
       const client = this.clients.get(connectionId);
       if (!client || client.status !== 'connected' || !client.socket) {
         const currentStatus = client?.status || 'not found';
-        
+
         // ❌ NÃO tentar reconectar aqui - pode causar múltiplas tentativas simultâneas
         // Se não estiver conectado, apenas retornar 0
         // A reconexão deve ser feita apenas por:
         // 1. attemptReconnection (após desconexão)
         // 2. saveFirstConnectedAt (após primeira conexão)
         // 3. Manual via API
-        
+
         // Reduzir logs repetitivos para status "qr" ou "connecting"
         if (currentStatus === 'qr' || currentStatus === 'connecting') {
           // Log apenas uma vez a cada 10 segundos para evitar spam
           const lastLogKey = `sync_all_skip_${connectionId}`;
           const lastLogTime = (this as any)[lastLogKey] || 0;
           const now = Date.now();
-          
+
           if (now - lastLogTime > 10000) { // 10 segundos
             logger.debug(`[Baileys] ⏭️ Skipping sync for ${connectionId} - status: ${currentStatus} (will sync after connection)`);
             (this as any)[lastLogKey] = now;
@@ -3995,10 +4025,10 @@ class BaileysManager {
           logger.warn(`[Baileys] ⏭️ Skipping sync for ${connectionId} - connection not available (status: ${currentStatus})`);
           logger.warn(`[Baileys] 💡 Sync will occur automatically after reconnection`);
         }
-        
+
         return 0;
       }
-      
+
       // Buscar todas as conversas ativas
       const conversations = await this.prisma.conversation.findMany({
         where: {
@@ -4019,7 +4049,7 @@ class BaileysManager {
         try {
           const success = await this.syncConversationMessages(connectionId, conv.contact.phoneNumber, messageLimit);
           if (success) syncedCount++;
-          
+
           // Delay entre sincronizações para não sobrecarregar (reduzido para 500ms)
           await new Promise(resolve => setTimeout(resolve, 500));
         } catch (error) {
@@ -4045,7 +4075,7 @@ class BaileysManager {
   async detectAndRecoverGaps(connectionId: string): Promise<{ gapsFound: number; recovered: number }> {
     try {
       logger.info(`[Baileys] 🔍 Starting GAP detection for ${connectionId}...`);
-      
+
       // Buscar conversas ativas com mensagens recentes
       const conversations = await this.prisma.conversation.findMany({
         where: {
@@ -4095,17 +4125,17 @@ class BaileysManager {
         // Se detectou gap, adicionar à queue de sincronização com prioridade ALTA
         if (hasGap) {
           logger.info(`[Baileys] 🔄 GAP detected - adding to sync queue: ${conv.id}...`);
-          
+
           // Importar syncQueueService dinamicamente para evitar circular dependency
           const { syncQueueService } = await import('../services/sync-queue.service.js');
-          
+
           syncQueueService.enqueue({
             connectionId,
             phoneNumber: conv.contact.phoneNumber,
             priority: 'high', // Alta prioridade para gaps
             reason: 'gap_detected',
           });
-          
+
           recovered++; // Contar como "em recuperação"
         }
 
@@ -4135,14 +4165,14 @@ class BaileysManager {
    * - Manualmente via botão/API de reconexão
    * - Após detecção de gaps críticos
    */
-  async syncAllConnections(): Promise<{ 
-    totalConnections: number; 
+  async syncAllConnections(): Promise<{
+    totalConnections: number;
     syncedConversations: number;
     gapsRecovered: number;
   }> {
     try {
       logger.info(`[Baileys] 🔄 Starting GAP DETECTION (all connections)...`);
-      
+
       // Buscar todas as conexões ativas
       const connections = await this.prisma.whatsAppConnection.findMany({
         where: { status: 'connected' },
@@ -4172,7 +4202,7 @@ class BaileysManager {
       }
 
       logger.info(`[Baileys] ✅ GAP DETECTION completed: ${totalGapsRecovered} gaps recovered`);
-      
+
       return {
         totalConnections: connections.length,
         syncedConversations: 0, // Não sincronizamos ativamente (apenas gaps)
@@ -4210,16 +4240,16 @@ class BaileysManager {
       // As mídias do WhatsApp expiram após 7 dias e não podem ser mais baixadas
       // Para mídias recentes que ainda estão no cache, o download acontece automaticamente
       // quando a mensagem é recebida (handleIncomingMessages)
-      
+
       // ✅ A solução recomendada é:
       // 1. Fazer upload para Supabase Storage quando a mídia é recebida (já implementado)
       // 2. Quando redownload é solicitado, verificar se já está no Supabase
       // 3. Se não estiver, a mídia provavelmente expirou e não pode ser recuperada
-      
+
       logger.warn(`[Baileys] ⚠️ Media re-download not directly supported by Baileys`);
       logger.warn(`[Baileys] ⚠️ Mídias do WhatsApp expiram após 7 dias e não podem ser baixadas novamente`);
       logger.warn(`[Baileys] 💡 Recomendação: Fazer upload para Supabase Storage quando a mídia é recebida`);
-      
+
       return null;
     } catch (error) {
       logger.error('[Baileys] ❌ Exception downloading media:', error);
@@ -4273,10 +4303,10 @@ class BaileysManager {
       // ✅ VALIDAR JID
       // JID deve estar no formato: 5511999999999@s.whatsapp.net ou 5511999999999
       const cleanNumber = jid.replace(/\D/g, '');
-      const formattedJid = cleanNumber.includes('@') 
-        ? jid 
+      const formattedJid = cleanNumber.includes('@')
+        ? jid
         : `${cleanNumber}@s.whatsapp.net`;
-      
+
       // Validar formato do JID
       if (!formattedJid.match(/^\d+@s\.whatsapp\.net$/)) {
         throw new Error(`JID inválido: ${formattedJid}. Formato esperado: 5511999999999@s.whatsapp.net`);
@@ -4314,13 +4344,13 @@ class BaileysManager {
       if (typeof audioBuffer === 'string') {
         // ✅ É um caminho de arquivo
         const filePath = audioBuffer;
-        
+
         if (!fs.existsSync(filePath)) {
           throw new Error(`Arquivo de áudio não encontrado: ${filePath}`);
         }
 
         logger.info(`[Baileys] 📁 Lendo arquivo de áudio: ${filePath}`);
-        
+
         // Verificar extensão do arquivo
         const fileExtension = path.extname(filePath).toLowerCase();
         const isOggOpus = fileExtension === '.ogg' || fileExtension === '.opus';
@@ -4328,7 +4358,7 @@ class BaileysManager {
         // ✅ CONVERSÃO AUTOMÁTICA (se necessário e solicitada)
         if (!isOggOpus && options?.autoConvert) {
           logger.info(`[Baileys] 🔄 Arquivo não está em formato OGG/Opus - convertendo automaticamente...`);
-          
+
           try {
             const { convertToOggOpusMono } = await import('../utils/audio-ptt.utils.js');
             const convertedPath = await convertToOggOpusMono(filePath, {
@@ -4337,7 +4367,7 @@ class BaileysManager {
               sampleRate: 16000, // 16kHz padrão para voz
               keepOriginal: true, // Manter arquivo original
             });
-            
+
             logger.info(`[Baileys] ✅ Conversão concluída: ${convertedPath}`);
             finalAudioBuffer = fs.readFileSync(convertedPath);
             tempFilePath = convertedPath; // Marcar para limpeza
@@ -4345,7 +4375,7 @@ class BaileysManager {
           } catch (convertError) {
             const errorMsg = convertError instanceof Error ? convertError.message : String(convertError);
             logger.error(`[Baileys] ❌ Erro ao converter áudio: ${errorMsg}`);
-            
+
             // Tentar usar arquivo original mesmo assim
             logger.warn(`[Baileys] ⚠️ Tentando usar arquivo original sem conversão...`);
             finalAudioBuffer = fs.readFileSync(filePath);
@@ -4412,9 +4442,9 @@ class BaileysManager {
       if (options?.quotedMessage) {
         const stanzaId = options.quotedMessage.stanzaId || options.quotedMessage.messageId;
         logger.info(`[Baileys] 🧷 Preparando reply para mensagem ${stanzaId}`);
-        
+
         const quotedPayload = await this.resolveQuotedMessagePayload(client, formattedJid, options.quotedMessage);
-        
+
         if (quotedPayload) {
           sendOptions = { quoted: quotedPayload };
           logger.info(`[Baileys] 🧷 Quoted payload pronto para stanza ${stanzaId}`);
@@ -4425,7 +4455,7 @@ class BaileysManager {
 
       // ✅ ENVIAR MENSAGEM
       logger.info(`[Baileys] 📤 Enviando áudio PTT para ${formattedJid}...`);
-      
+
       const sent = await client.socket.sendMessage(
         formattedJid,
         audioMessage,
@@ -4433,7 +4463,7 @@ class BaileysManager {
       );
 
       const messageId = sent?.key?.id || undefined;
-      
+
       if (messageId) {
         logger.info(`[Baileys] ✅ Áudio PTT enviado com sucesso! Message ID: ${messageId}`);
       } else {
