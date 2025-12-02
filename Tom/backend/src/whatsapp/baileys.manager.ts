@@ -3302,7 +3302,32 @@ class BaileysManager {
    */
   isConnectionActive(connectionId: string): boolean {
     const client = this.clients.get(connectionId);
-    return client ? client.status === 'connected' : false;
+    
+    if (!client) {
+      return false;
+    }
+    
+    if (client.status !== 'connected') {
+      return false;
+    }
+    
+    // Verificar se o socket realmente está conectado
+    if (!client.socket) {
+      return false;
+    }
+    
+    try {
+      // Verificar estado do WebSocket (readyState: 0=CONNECTING, 1=OPEN, 2=CLOSING, 3=CLOSED)
+      const wsReadyState = (client.socket as any)?.ws?.readyState;
+      if (wsReadyState !== undefined && wsReadyState !== 1) {
+        return false;
+      }
+      
+      return true;
+    } catch (error) {
+      logger.error(`[Baileys] Error checking socket state for ${connectionId}:`, error);
+      return false;
+    }
   }
 
   /**
@@ -3761,12 +3786,15 @@ class BaileysManager {
     try {
       logger.info('[Baileys] 🔄 Reconnecting active connections (backend startup)...');
 
-      // Buscar TODAS as conexões ativas que têm credenciais salvas (authData)
-      // ✅ Independente do status - quando o backend reinicia, todas ficam desconectadas
+      // ✅ Buscar TODAS as conexões que estavam conectadas antes do restart
+      // Critério: status = 'connected' OU tem credenciais válidas (pode ter sido desconectado mas tem credenciais)
       const connectionsToReconnect = await this.prisma.whatsAppConnection.findMany({
         where: {
           isActive: true,
-          authData: { not: null },
+          OR: [
+            { status: 'connected' }, // Estava conectada antes do restart
+            { authData: { not: null } }, // Tem credenciais salvas (pode reconectar)
+          ],
         },
         select: {
           id: true,
@@ -3777,7 +3805,7 @@ class BaileysManager {
         },
       });
 
-      logger.info(`[Baileys] Found ${connectionsToReconnect.length} active connections with saved credentials to reconnect`);
+      logger.info(`[Baileys] Found ${connectionsToReconnect.length} connections to reconnect (status='connected' or has credentials)`);
 
       if (connectionsToReconnect.length === 0) {
         logger.info('[Baileys] No connections to reconnect');
@@ -3800,11 +3828,22 @@ class BaileysManager {
 
       logger.info(`[Baileys] ${connectionsWithValidCreds.length} connections have valid credentials for reconnection`);
 
+      // ✅ IMPORTANTE: Atualizar status no banco para 'disconnected' antes de reconectar
+      // Isso evita inconsistências (status 'connected' mas cliente não existe em memória após restart)
+      for (const connection of connectionsWithValidCreds) {
+        if (connection.status === 'connected') {
+          await this.prisma.whatsAppConnection.update({
+            where: { id: connection.id },
+            data: { status: 'disconnected' },
+          }).catch(err => logger.warn(`[Baileys] Failed to update status for ${connection.id}:`, err));
+          logger.debug(`[Baileys] ✅ Updated status to 'disconnected' for ${connection.id} before reconnection`);
+        }
+      }
+
       // ✅ Reconectar todas as conexões com credenciais válidas
       for (const connection of connectionsWithValidCreds) {
         try {
           logger.info(`[Baileys] 🔌 Reconnecting ${connection.name} (${connection.phoneNumber}) - ID: ${connection.id}...`);
-          logger.info(`[Baileys] 📊 Previous status: ${connection.status}`);
 
           // ✅ Usar manualReconnect para tentar reconectar sem gerar QR code
           // Isso usa as credenciais salvas para reconectar automaticamente

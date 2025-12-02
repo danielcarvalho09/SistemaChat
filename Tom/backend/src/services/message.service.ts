@@ -169,16 +169,56 @@ export class MessageService {
     const formattedContent = content && content.trim() ? `*${userName}:*\n${content}` : '';
 
     // Verificar se a conexão está ativa
-    const isConnectionActive = baileysManager.isConnectionActive(conversation.connectionId);
+    let isConnectionActive = baileysManager.isConnectionActive(conversation.connectionId);
+    
+    // Buscar info da conexão para verificar status no banco
+    const connectionInfo = await this.prisma.whatsAppConnection.findUnique({
+      where: { id: conversation.connectionId },
+      select: { name: true, phoneNumber: true, status: true, authData: true },
+    });
+
+    // Se não está ativa em memória mas o banco diz que está conectado, pode ser que o servidor reiniciou
+    if (!isConnectionActive && connectionInfo?.status === 'connected') {
+      logger.warn(`[MessageService] ⚠️ Connection ${conversation.connectionId} not in memory but DB says 'connected' - checking if needs reconnection...`);
+      
+      // Verificar se tem credenciais válidas para tentar reconectar
+      if (connectionInfo.authData) {
+        try {
+          const { BufferJSON } = await import('@whiskeysockets/baileys');
+          const authDataString = connectionInfo.authData as string;
+          if (authDataString.trim() !== '') {
+            const authData = JSON.parse(authDataString, BufferJSON.reviver);
+            const hasValidCredentials = !!(authData.creds && authData.creds.me && authData.creds.me.id);
+            
+            if (hasValidCredentials) {
+              logger.info(`[MessageService] 🔄 Attempting automatic reconnection for ${conversation.connectionId}...`);
+              try {
+                const { WhatsAppService } = await import('./whatsapp.service.js');
+                const whatsappService = new WhatsAppService();
+                await whatsappService.connectConnection(conversation.connectionId);
+                
+                // Aguardar um pouco e verificar novamente
+                await new Promise(resolve => setTimeout(resolve, 2000));
+                isConnectionActive = baileysManager.isConnectionActive(conversation.connectionId);
+                
+                if (isConnectionActive) {
+                  logger.info(`[MessageService] ✅ Connection restored after automatic reconnection`);
+                } else {
+                  logger.warn(`[MessageService] ⚠️ Connection still not active after reconnection attempt`);
+                }
+              } catch (reconnectError) {
+                logger.error(`[MessageService] ❌ Error during automatic reconnection:`, reconnectError);
+              }
+            }
+          }
+        } catch (parseError) {
+          logger.warn(`[MessageService] ⚠️ Could not parse authData for reconnection:`, parseError);
+        }
+      }
+    }
 
     if (!isConnectionActive) {
       logger.error(`❌ Connection ${conversation.connectionId} is not active. Cannot send message.`);
-
-      // Buscar info da conexão
-      const connectionInfo = await this.prisma.whatsAppConnection.findUnique({
-        where: { id: conversation.connectionId },
-        select: { name: true, phoneNumber: true, status: true },
-      });
 
       throw new Error(
         `WhatsApp connection "${connectionInfo?.name}" (${connectionInfo?.phoneNumber}) is not connected. ` +

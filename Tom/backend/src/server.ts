@@ -105,12 +105,18 @@ async function start() {
     syncQueueService.start();
     logger.info('🔄 Sync queue service started (processes pending syncs)');
 
-    // Reconectar conexões WhatsApp que estavam ativas
-    logger.info('⏳ Aguardando 3 segundos antes de reconectar WhatsApp...');
+    // ✅ Reconectar conexões WhatsApp que estavam ativas ANTES do restart
+    // Isso mantém os clientes "vivos" mesmo após reiniciar o servidor
+    logger.info('⏳ Aguardando 5 segundos antes de reconectar WhatsApp...');
     setTimeout(async () => {
-      logger.info('🔄 Iniciando reconexão automática do WhatsApp...');
-      await baileysManager.reconnectActiveConnections();
-    }, 3000); // Aguarda 3s para garantir que tudo está inicializado
+      logger.info('🔄 Iniciando reconexão automática do WhatsApp (restaurando conexões após restart)...');
+      try {
+        await baileysManager.reconnectActiveConnections();
+        logger.info('✅ Reconexão automática do WhatsApp concluída');
+      } catch (error) {
+        logger.error('❌ Erro na reconexão automática do WhatsApp:', error);
+      }
+    }, 5000); // Aguarda 5s para garantir que tudo está inicializado
 
 
     // Graceful shutdown
