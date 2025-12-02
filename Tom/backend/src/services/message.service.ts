@@ -168,14 +168,35 @@ export class MessageService {
     const userName = user?.name || 'Atendente';
     const formattedContent = content && content.trim() ? `*${userName}:*\n${content}` : '';
 
-    // Verificar se a conexão está ativa
-    let isConnectionActive = baileysManager.isConnectionActive(conversation.connectionId);
-    
     // Buscar info da conexão para verificar status no banco
     const connectionInfo = await this.prisma.whatsAppConnection.findUnique({
       where: { id: conversation.connectionId },
       select: { name: true, phoneNumber: true, status: true, authData: true },
     });
+
+    // Verificar se a conexão está ativa
+    let isConnectionActive = baileysManager.isConnectionActive(conversation.connectionId);
+    
+    // ✅ Se não está ativa, verificar se o cliente existe e qual é o status real
+    if (!isConnectionActive) {
+      const client = baileysManager.getClient(conversation.connectionId);
+      if (client) {
+        logger.warn(`[MessageService] ⚠️ Connection ${conversation.connectionId} client exists but isConnectionActive returned false`);
+        logger.warn(`[MessageService] 📊 Client status: ${client.status}`);
+        logger.warn(`[MessageService] 📊 DB status: ${connectionInfo?.status}`);
+        
+        // Se o cliente está em 'connecting', aguardar um pouco
+        if (client.status === 'connecting') {
+          logger.info(`[MessageService] ⏳ Client is 'connecting' - waiting 3 seconds...`);
+          await new Promise(resolve => setTimeout(resolve, 3000));
+          isConnectionActive = baileysManager.isConnectionActive(conversation.connectionId);
+          
+          if (isConnectionActive) {
+            logger.info(`[MessageService] ✅ Connection became active after waiting`);
+          }
+        }
+      }
+    }
 
     // Se não está ativa em memória mas o banco diz que está conectado, pode ser que o servidor reiniciou
     if (!isConnectionActive && connectionInfo?.status === 'connected') {

@@ -3360,29 +3360,45 @@ class BaileysManager {
     const client = this.clients.get(connectionId);
     
     if (!client) {
+      logger.debug(`[Baileys] isConnectionActive(${connectionId}): No client found`);
       return false;
     }
     
     if (client.status !== 'connected') {
+      logger.debug(`[Baileys] isConnectionActive(${connectionId}): Status is '${client.status}', not 'connected'`);
       return false;
     }
     
     // Verificar se o socket realmente está conectado
     if (!client.socket) {
+      logger.warn(`[Baileys] isConnectionActive(${connectionId}): Client has status 'connected' but no socket`);
       return false;
     }
     
     try {
       // Verificar estado do WebSocket (readyState: 0=CONNECTING, 1=OPEN, 2=CLOSING, 3=CLOSED)
       const wsReadyState = (client.socket as any)?.ws?.readyState;
-      if (wsReadyState !== undefined && wsReadyState !== 1) {
+      
+      // ✅ Se readyState não estiver disponível, assumir que está conectado se status é 'connected'
+      // Isso evita falsos negativos quando o Baileys não expõe o readyState
+      if (wsReadyState === undefined) {
+        logger.debug(`[Baileys] isConnectionActive(${connectionId}): wsReadyState not available, but status is 'connected' - assuming active`);
+        return true;
+      }
+      
+      if (wsReadyState !== 1) {
+        logger.warn(`[Baileys] isConnectionActive(${connectionId}): wsReadyState is ${wsReadyState} (not OPEN/1)`);
         return false;
       }
       
+      logger.debug(`[Baileys] isConnectionActive(${connectionId}): ✅ Connection is active (status: connected, wsReadyState: ${wsReadyState})`);
       return true;
     } catch (error) {
       logger.error(`[Baileys] Error checking socket state for ${connectionId}:`, error);
-      return false;
+      // ✅ Em caso de erro ao verificar, se status é 'connected', assumir que está ativo
+      // Isso evita falsos negativos por erros de verificação
+      logger.warn(`[Baileys] isConnectionActive(${connectionId}): Error checking socket, but status is 'connected' - assuming active`);
+      return true;
     }
   }
 
