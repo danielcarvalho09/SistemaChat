@@ -59,7 +59,7 @@
     "@sentry/node": "^10.22.0",
     "@sentry/profiling-node": "^10.22.0",
     "@supabase/supabase-js": "^2.47.10",
-    "@whiskeysockets/baileys": "^7.0.0-rc.6",
+    "@whiskeysockets/baileys": "^7.0.0-rc.9",
     "bcrypt": "^5.1.1",
     "bullmq": "^5.63.0",
     "cobe": "^0.6.5",

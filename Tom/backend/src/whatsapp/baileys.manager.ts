@@ -88,10 +88,12 @@ class BaileysManager {
   private clients: Map<string, BaileysClient> = new Map();
   private prisma = getPrismaClient();
   private reconnectionLocks: Map<string, { locked: boolean; lockedAt: Date }> = new Map();
+  private clientCreationLocks: Map<string, { locked: boolean; lockedAt: Date }> = new Map();
   private syncRetryQueue: Map<string, IncomingRetryItem> = new Map();
   private readonly MAX_RECONNECT_ATTEMPTS = 5;
   private readonly QR_RESET_DELAY_MS = 2000;
   private readonly LOCK_TIMEOUT_MS = 180000;
+  private readonly CLIENT_CREATION_LOCK_TIMEOUT_MS = 60000; // 60 segundos
   private circuitBreaker: Map<string, { failures: number; lastFailure: Date; state: 'closed' | 'open' | 'half-open' }> = new Map();
   private readonly CIRCUIT_BREAKER_THRESHOLD = 5;
   private readonly CIRCUIT_BREAKER_TIMEOUT = 60000;
@@ -104,18 +106,46 @@ class BaileysManager {
     try {
       logger.info(`[Baileys] 🚀 Creating client for ${connectionId}`);
 
-      // Verificar se cliente já existe e está conectado
-      const existingClient = this.clients.get(connectionId);
-      if (existingClient && existingClient.status === 'connected') {
-        logger.info(`[Baileys] ✅ Client ${connectionId} already connected`);
-        return existingClient;
+      // ✅ CRÍTICO: Verificar se já existe um lock de criação em andamento
+      const existingLock = this.clientCreationLocks.get(connectionId);
+      if (existingLock && existingLock.locked) {
+        const lockAge = Date.now() - existingLock.lockedAt.getTime();
+        if (lockAge > this.CLIENT_CREATION_LOCK_TIMEOUT_MS) {
+          // Lock expirado, remover
+          logger.warn(`[Baileys] ⚠️ Client creation lock expired for ${connectionId} (${Math.round(lockAge / 1000)}s old) - removing`);
+          this.clientCreationLocks.delete(connectionId);
+        } else {
+          // Lock ainda ativo
+          logger.warn(`[Baileys] ⚠️ Client creation already in progress for ${connectionId} (lock age: ${Math.round(lockAge / 1000)}s)`);
+          throw new ClientCreationInProgressError(connectionId);
+        }
       }
 
-      // Remover cliente existente se não estiver conectado
-      if (existingClient && existingClient.status !== 'connected') {
-        logger.info(`[Baileys] Removing disconnected client ${connectionId}`);
+      // ✅ Verificar se cliente já existe e está conectado ou conectando
+      const existingClient = this.clients.get(connectionId);
+      if (existingClient) {
+        if (existingClient.status === 'connected') {
+          logger.info(`[Baileys] ✅ Client ${connectionId} already connected`);
+          return existingClient;
+        }
+        
+        // Se está em 'connecting' ou 'qr', retornar o cliente existente (não criar novo)
+        if (existingClient.status === 'connecting' || existingClient.status === 'qr') {
+          logger.info(`[Baileys] ⏳ Client ${connectionId} already ${existingClient.status} - returning existing client`);
+          return existingClient;
+        }
+        
+        // Se não está conectado, remover antes de criar novo
+        logger.info(`[Baileys] Removing disconnected client ${connectionId} (status: ${existingClient.status})`);
         this.clients.delete(connectionId);
       }
+
+      // ✅ Criar lock ANTES de começar a criar o cliente
+      this.clientCreationLocks.set(connectionId, {
+        locked: true,
+        lockedAt: new Date(),
+      });
+      logger.info(`[Baileys] 🔒 Client creation lock created for ${connectionId}`);
 
       // Carregar ou criar auth state do banco de dados
       logger.info(`[Baileys] 🔑 Carregando credenciais do banco para ${connectionId}...`);
@@ -300,12 +330,23 @@ class BaileysManager {
       // Sincronização periódica leve como backup (funciona independente do frontend)
       this.startPeriodicSync(connectionId);
 
-
+      // ✅ Liberar lock após sucesso
+      this.clientCreationLocks.delete(connectionId);
+      logger.info(`[Baileys] 🔓 Client creation lock released for ${connectionId} (success)`);
 
       logger.info(`[Baileys] ✅ Client created: ${connectionId}`);
       return client;
     } catch (error) {
+      // ✅ Liberar lock em caso de erro
+      this.clientCreationLocks.delete(connectionId);
+      logger.info(`[Baileys] 🔓 Client creation lock released for ${connectionId} (error)`);
+      
       logger.error(`[Baileys] ❌ Error creating client ${connectionId}:`, error);
+
+      // Se for ClientCreationInProgressError, não emitir evento de falha (é esperado)
+      if (error instanceof ClientCreationInProgressError) {
+        throw error; // Re-throw para que o chamador saiba que é esperado
+      }
 
       // Emitir evento de falha
       try {
@@ -483,26 +524,41 @@ class BaileysManager {
 
     // QR Code gerado
     if (qr) {
-      client.qrCode = qr;
-      client.status = 'qr';
-      logger.warn(`[Baileys] ⚠️ ========== QR CODE GERADO ==========`);
-      logger.warn(`[Baileys] 🔗 Connection ID: ${connectionId}`);
-      logger.warn(`[Baileys] 🔑 Tem credenciais salvas: ${client.hasCredentials ? 'SIM' : 'NÃO'}`);
-
-      // ⚠️ AVISO: Se tem credenciais mas ainda gerou QR, pode ser que:
-      // 1. As credenciais estão inválidas/corrompidas
-      // 2. O WhatsApp invalidou a sessão
-      // 3. As credenciais não foram carregadas corretamente
-      if (client.hasCredentials) {
-        logger.error(`[Baileys] ❌ PROBLEMA: Tem credenciais salvas mas QR code foi gerado!`);
-        logger.error(`[Baileys] 💡 Isso indica que as credenciais podem estar inválidas ou corrompidas`);
-        logger.error(`[Baileys] 💡 Verifique se authData no banco está correto`);
-        logger.error(`[Baileys] 💡 Após escanear o QR, as credenciais serão atualizadas`);
-      } else {
-        logger.info(`[Baileys] ✅ QR code gerado (conexão nova - sem credenciais)`);
+      // ✅ CRÍTICO: Verificar se o QR code é diferente do anterior
+      // Isso evita emitir múltiplos QR codes quando o Baileys atualiza o QR
+      if (client.qrCode === qr) {
+        logger.debug(`[Baileys] ⏭️ QR code unchanged for ${connectionId} - skipping emission`);
+        return; // Não emitir QR code duplicado
       }
 
-      logger.info(`[Baileys] 📱 QR Code generated for ${connectionId}`);
+      // ✅ CRÍTICO: Se já está em status 'qr', só atualizar se o QR mudou
+      // Isso evita múltiplas emissões desnecessárias
+      if (client.status === 'qr' && client.qrCode && client.qrCode !== qr) {
+        logger.info(`[Baileys] 🔄 QR code updated for ${connectionId} (previous QR expired)`);
+      } else if (client.status !== 'qr') {
+        logger.warn(`[Baileys] ⚠️ ========== QR CODE GERADO ==========`);
+        logger.warn(`[Baileys] 🔗 Connection ID: ${connectionId}`);
+        logger.warn(`[Baileys] 🔑 Tem credenciais salvas: ${client.hasCredentials ? 'SIM' : 'NÃO'}`);
+
+        // ⚠️ AVISO: Se tem credenciais mas ainda gerou QR, pode ser que:
+        // 1. As credenciais estão inválidas/corrompidas
+        // 2. O WhatsApp invalidou a sessão
+        // 3. As credenciais não foram carregadas corretamente
+        if (client.hasCredentials) {
+          logger.error(`[Baileys] ❌ PROBLEMA: Tem credenciais salvas mas QR code foi gerado!`);
+          logger.error(`[Baileys] 💡 Isso indica que as credenciais podem estar inválidas ou corrompidas`);
+          logger.error(`[Baileys] 💡 Verifique se authData no banco está correto`);
+          logger.error(`[Baileys] 💡 Após escanear o QR, as credenciais serão atualizadas`);
+        } else {
+          logger.info(`[Baileys] ✅ QR code gerado (conexão nova - sem credenciais)`);
+        }
+      }
+
+      // Atualizar QR code e status
+      client.qrCode = qr;
+      client.status = 'qr';
+
+      logger.info(`[Baileys] 📱 QR Code generated/updated for ${connectionId}`);
       await this.emitQRCode(connectionId, qr);
       return;
     }
