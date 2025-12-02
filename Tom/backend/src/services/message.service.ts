@@ -179,7 +179,7 @@ export class MessageService {
 
     // Se não está ativa em memória mas o banco diz que está conectado, pode ser que o servidor reiniciou
     if (!isConnectionActive && connectionInfo?.status === 'connected') {
-      logger.warn(`[MessageService] ⚠️ Connection ${conversation.connectionId} not in memory but DB says 'connected' - checking if needs reconnection...`);
+      logger.warn(`[MessageService] ⚠️ Connection ${conversation.connectionId} not in memory but DB says 'connected' - attempting reconnection...`);
       
       // Verificar se tem credenciais válidas para tentar reconectar
       if (connectionInfo.authData) {
@@ -192,28 +192,61 @@ export class MessageService {
             
             if (hasValidCredentials) {
               logger.info(`[MessageService] 🔄 Attempting automatic reconnection for ${conversation.connectionId}...`);
+              
               try {
-                const { WhatsAppService } = await import('./whatsapp.service.js');
-                const whatsappService = new WhatsAppService();
-                await whatsappService.connectConnection(conversation.connectionId);
+                // ✅ Usar manualReconnect em vez de connectConnection (mais apropriado para reconexão)
+                const reconnectResult = await baileysManager.manualReconnect(conversation.connectionId);
                 
-                // Aguardar um pouco e verificar novamente
-                await new Promise(resolve => setTimeout(resolve, 2000));
-                isConnectionActive = baileysManager.isConnectionActive(conversation.connectionId);
+                logger.info(`[MessageService] 📊 Reconnection result: ${reconnectResult.status} - ${reconnectResult.message}`);
+                
+                // Se já está conectando/reconectando, aguardar mais tempo
+                if (reconnectResult.status === 'connecting' || reconnectResult.status === 'reconnecting') {
+                  logger.info(`[MessageService] ⏳ Connection is ${reconnectResult.status}, waiting up to 10 seconds...`);
+                  
+                  // Aguardar até 10 segundos, verificando a cada 1 segundo
+                  for (let i = 0; i < 10; i++) {
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                    isConnectionActive = baileysManager.isConnectionActive(conversation.connectionId);
+                    
+                    if (isConnectionActive) {
+                      logger.info(`[MessageService] ✅ Connection restored after ${i + 1} seconds`);
+                      break;
+                    }
+                  }
+                } else if (reconnectResult.status === 'already_connected') {
+                  // Se diz que já está conectado, verificar novamente
+                  isConnectionActive = baileysManager.isConnectionActive(conversation.connectionId);
+                  if (!isConnectionActive) {
+                    logger.warn(`[MessageService] ⚠️ Reconnect said 'already_connected' but connection is not active - may need more time`);
+                    await new Promise(resolve => setTimeout(resolve, 2000));
+                    isConnectionActive = baileysManager.isConnectionActive(conversation.connectionId);
+                  }
+                } else {
+                  // Outros status (awaiting_qr, etc) - aguardar um pouco
+                  await new Promise(resolve => setTimeout(resolve, 3000));
+                  isConnectionActive = baileysManager.isConnectionActive(conversation.connectionId);
+                }
                 
                 if (isConnectionActive) {
                   logger.info(`[MessageService] ✅ Connection restored after automatic reconnection`);
                 } else {
-                  logger.warn(`[MessageService] ⚠️ Connection still not active after reconnection attempt`);
+                  logger.warn(`[MessageService] ⚠️ Connection still not active after reconnection attempt (status: ${reconnectResult.status})`);
                 }
-              } catch (reconnectError) {
-                logger.error(`[MessageService] ❌ Error during automatic reconnection:`, reconnectError);
+              } catch (reconnectError: any) {
+                logger.error(`[MessageService] ❌ Error during automatic reconnection:`, reconnectError?.message || reconnectError);
+                // Continuar para verificar se conseguiu conectar mesmo com erro
+                await new Promise(resolve => setTimeout(resolve, 2000));
+                isConnectionActive = baileysManager.isConnectionActive(conversation.connectionId);
               }
+            } else {
+              logger.warn(`[MessageService] ⚠️ Connection has authData but credentials are invalid - cannot auto-reconnect`);
             }
           }
         } catch (parseError) {
           logger.warn(`[MessageService] ⚠️ Could not parse authData for reconnection:`, parseError);
         }
+      } else {
+        logger.warn(`[MessageService] ⚠️ Connection has no authData - cannot auto-reconnect`);
       }
     }
 
