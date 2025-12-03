@@ -73,7 +73,8 @@ async function start() {
     const socketServer = initializeSocketServer(app.server);
     
     // Configurar heartbeat no servidor para manter conexões vivas
-    // Enviar ping do servidor para todos os clientes a cada 15 segundos
+    // Enviar ping do servidor para todos os clientes a cada 30 segundos
+    // Reduzido de 15s para 30s para economizar network usage
     setInterval(() => {
       const io = socketServer.getIO();
       const connectedSockets = io.sockets.sockets;
@@ -85,7 +86,7 @@ async function start() {
       });
       
       logger.debug(`🏓 Server ping enviado para ${connectedSockets.size} clientes`);
-    }, 15000); // 15 segundos
+    }, 30000); // 30 segundos (reduzido de 15s para economizar network usage)
 
     logger.info(`✅ Server running on http://localhost:${config.server.port}`);
     logger.info(`🔌 WebSocket server running on ws://localhost:${config.server.port}`);

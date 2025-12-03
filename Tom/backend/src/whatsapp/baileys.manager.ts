@@ -3297,9 +3297,9 @@ class BaileysManager {
         logger.warn(`[Baileys] ⚠️ Periodic sync error for ${connectionId}:`, error);
         // Não parar sincronização por causa de um erro - continuar tentando
       }
-    }, 300000); // 5 minutos (300000ms)
+    }, 1800000); // 30 minutos (1800000ms) - Reduzido de 5min para 30min para economizar network usage
 
-    logger.info(`[Baileys] ✅ Periodic sync (backup) started for ${connectionId} - runs every 5 minutes`);
+    logger.info(`[Baileys] ✅ Periodic sync (backup) started for ${connectionId} - runs every 30 minutes`);
   }
 
   /**

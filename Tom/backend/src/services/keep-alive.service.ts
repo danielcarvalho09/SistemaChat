@@ -22,7 +22,7 @@ import { URL } from 'url';
 export class KeepAliveService {
   private intervalId: NodeJS.Timeout | null = null;
   private isRunning = false;
-  private readonly INTERVAL_MS = 5 * 60 * 1000; // 5 minutos (menor que 15min do Railway)
+  private readonly INTERVAL_MS = 10 * 60 * 1000; // 10 minutos (menor que 15min do Railway) - Reduzido de 5min para 10min para economizar network usage
 
   /**
    * Inicia o serviço de keep-alive

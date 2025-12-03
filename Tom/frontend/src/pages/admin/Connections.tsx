@@ -251,7 +251,29 @@ export function Connections() {
   const fetchConnections = async () => {
     try {
       const response = await api.get('/connections');
-      setConnections(response.data.data || []);
+      const fetchedConnections = response.data.data || [];
+      
+      // ✅ IMPORTANTE: Não sobrescrever status de conexões que estão conectando/conectadas
+      // se ainda estiverem em estado de conexão ativa no frontend
+      setConnections((prevConnections) => {
+        return fetchedConnections.map((fetched: Connection) => {
+          const existing = prevConnections.find(c => c.id === fetched.id);
+          
+          // Se existe uma conexão no estado anterior e está conectando ou conectada,
+          // manter o status do estado anterior se o banco diz que está desconectada
+          // (pode ser um problema de sincronização)
+          if (existing && (existing.status === 'connecting' || existing.status === 'connected')) {
+            // Se o banco diz desconectado mas o frontend diz conectado/conectando,
+            // manter o status do frontend (mais recente)
+            if (fetched.status === 'disconnected') {
+              console.warn(`⚠️ Status mismatch para ${fetched.id}: Frontend=${existing.status}, Banco=disconnected - mantendo status do frontend`);
+              return existing;
+            }
+          }
+          
+          return fetched;
+        });
+      });
     } catch (error) {
       console.error('Erro ao carregar conexões:', error);
     } finally {
