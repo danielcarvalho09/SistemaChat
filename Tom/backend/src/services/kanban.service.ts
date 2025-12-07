@@ -286,6 +286,11 @@ export class KanbanService {
             timestamp: true,
           },
         },
+        conversationTags: {
+          include: {
+            tag: true,
+          },
+        },
         _count: {
           select: { messages: true },
         },

@@ -10,13 +10,14 @@ import {
   useDroppable,
   useDraggable,
 } from '@dnd-kit/core';
-import { Plus, Trash2, X, Users as UsersIcon } from 'lucide-react';
+import { Plus, Trash2, X, Users as UsersIcon, MessageSquare, ChevronRight } from 'lucide-react';
 import { api } from '../../lib/api';
 import { toast } from 'sonner';
 import { GlassButton } from '../../components/ui/glass-button';
 import { formatPhoneNumber } from '../../utils/formatPhone';
-import { MessageModal } from '../../components/kanban/MessageModal';
+import { MessageSidebar } from '../../components/kanban/MessageSidebar';
 import { useAuthStore } from '../../store/authStore';
+import { useNavigate } from 'react-router-dom';
 
 interface KanbanStage {
   id: string;
@@ -49,6 +50,17 @@ interface Message {
   timestamp: string;
 }
 
+interface Tag {
+  id: string;
+  name: string;
+  color: string;
+}
+
+interface ConversationTag {
+  id: string;
+  tag: Tag;
+}
+
 interface KanbanConversation {
   id: string;
   contact: Contact;
@@ -56,6 +68,7 @@ interface KanbanConversation {
   lastMessageAt: string;
   unreadCount: number;
   messages?: Message[];
+  conversationTags?: ConversationTag[];
   _count: {
     messages: number;
   };
@@ -98,6 +111,8 @@ export function Kanban() {
   const [newStageColor, setNewStageColor] = useState('#3B82F6');
   const [selectedConversation, setSelectedConversation] = useState<KanbanConversation | null>(null);
   const [selectedUserId, setSelectedUserId] = useState<string | undefined>(undefined); // Para admin ver kanban de outros usuários
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const navigate = useNavigate();
 
   const isAdmin = user?.roles?.some(role => role.name === 'admin') || false;
 
@@ -398,96 +413,100 @@ export function Kanban() {
           onDragStart={handleDragStart}
           onDragEnd={handleDragEnd}
         >
-          <div className="flex gap-4 h-full min-w-max">
+          <div className="flex gap-6 h-full min-w-max">
             {board.map((column) => (
               <div
                 key={column.stage.id}
-                className="flex flex-col w-80 bg-white shadow-sm border border-gray-300"
+                className="flex flex-col w-80"
               >
-                {/* Column Header */}
-                <div
-                  className="p-4 border-b border-gray-200"
-                  style={{ borderTopColor: column.stage.color, borderTopWidth: '4px' }}
-                >
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <div
-                        className="w-3 h-3 rounded-full"
-                        style={{ backgroundColor: column.stage.color }}
-                      />
-                      <h3 className="font-semibold text-gray-900">{column.stage.name}</h3>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm text-gray-600 bg-gray-100 px-2 py-1 rounded-full">
-                        {column.conversations.length}
-                      </span>
-                      {!column.stage.isDefault && (
-                        <button
-                          onClick={() => handleDeleteStage(column.stage.id)}
-                          className="text-red-500 hover:text-red-700 p-1"
-                          title="Deletar coluna"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                  {column.stage.description && (
-                    <p className="text-sm text-gray-600 mt-1">{column.stage.description}</p>
-                  )}
+                {/* Column Header - Nome da etapa */}
+                <div className="mb-2">
+                  <h3 className="text-sm font-medium text-gray-900 mb-2">{column.stage.name}</h3>
+                  {/* Barra colorida */}
+                  <div
+                    className="h-1 rounded-full"
+                    style={{ backgroundColor: column.stage.color }}
+                  />
                 </div>
 
                 {/* Cards Container - Droppable */}
                 <DroppableColumn id={column.stage.id}>
-                  <div className="flex-1 overflow-y-auto p-3 space-y-3 min-h-[200px] max-h-[calc(100vh-260px)]">
+                  <div className="flex-1 overflow-y-auto space-y-3 min-h-[200px] max-h-[calc(100vh-260px)]">
                     {column.conversations.map((conversation) => (
                       <DraggableCard key={conversation.id} id={conversation.id}>
-                        <div 
-                          className="relative bg-gray-50 border border-gray-200 p-4 hover:shadow-md transition-shadow cursor-pointer"
-                          onClick={(e) => {
-                            // Prevenir que o drag seja acionado ao clicar
-                            e.stopPropagation();
-                            setSelectedConversation(conversation);
-                          }}
-                        >
-                          {/* Contact Info */}
-                          <div className="flex items-start justify-between mb-2">
-                            <div className="flex-1">
-                              <h4 className="font-medium text-gray-900 truncate">
-                                {conversation.contact.name || 'Sem nome'}
-                              </h4>
-                              <p className="text-sm text-gray-600 truncate">
-                                {formatPhoneNumber(conversation.contact.phoneNumber)}
-                              </p>
-                            </div>
-                            {conversation.unreadCount > 0 && (
-                              <span className="bg-red-500 text-white text-xs px-2 py-1 rounded-full">
-                                {conversation.unreadCount}
-                              </span>
+                        <div className="relative bg-white rounded-lg p-4 hover:shadow-md transition-shadow">
+                          {/* Seta superior direita */}
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedConversation(conversation);
+                              setSidebarOpen(true);
+                            }}
+                            className="absolute top-2 right-2 text-gray-600 hover:text-gray-900 transition-colors"
+                          >
+                            <ChevronRight className="w-4 h-4" />
+                          </button>
+
+                          {/* Foto do contato - centralizada, levemente para cima */}
+                          <div className="flex justify-center mb-3 -mt-2">
+                            {conversation.contact.avatar ? (
+                              <img
+                                src={conversation.contact.avatar}
+                                alt={conversation.contact.name || 'Contato'}
+                                className="w-16 h-16 rounded-full object-cover"
+                              />
+                            ) : (
+                              <div className="w-16 h-16 rounded-full bg-gray-300 flex items-center justify-center text-gray-600 font-medium text-lg">
+                                {(conversation.contact.name || conversation.contact.phoneNumber).charAt(0).toUpperCase()}
+                              </div>
                             )}
                           </div>
 
-                          {/* Última Mensagem */}
+                          {/* Nome pequeno em cinza */}
+                          <h4 className="text-xs text-gray-600 text-center mb-2 truncate">
+                            {conversation.contact.name || formatPhoneNumber(conversation.contact.phoneNumber)}
+                          </h4>
+
+                          {/* Resumo da conversa em azul institucional */}
                           {conversation.messages && conversation.messages.length > 0 && (
-                            <div className="mt-2 p-2 bg-white text-xs">
-                              <span className="text-gray-700 line-clamp-2">
-                                {conversation.messages[0].content}
-                              </span>
+                            <p className="text-xs text-[#0066CC] text-center mb-3 line-clamp-2 px-2">
+                              {conversation.messages[0].content}
+                            </p>
+                          )}
+
+                          {/* Tags em retângulos cinzas */}
+                          {conversation.conversationTags && conversation.conversationTags.length > 0 && (
+                            <div className="flex flex-wrap gap-1 justify-center mb-3">
+                              {conversation.conversationTags.map((ct) => (
+                                <span
+                                  key={ct.id}
+                                  className="px-2 py-0.5 text-xs bg-gray-200 text-gray-700 rounded"
+                                >
+                                  {ct.tag.name}
+                                </span>
+                              ))}
                             </div>
                           )}
 
-                          {/* Stats */}
-                          <div className="flex items-center gap-4 text-sm text-gray-600 mt-2">
-                            <div className="flex items-center gap-1">
-                              <span>{formatTime(conversation.lastMessageAt)}</span>
-                            </div>
+                          {/* Botão WhatsApp inferior direito */}
+                          <div className="flex justify-end">
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                navigate(`/dashboard?conversation=${conversation.id}`);
+                              }}
+                              className="p-2 bg-[#25D366] text-white rounded-full hover:bg-[#128C7E] transition-colors"
+                              title="Abrir conversa"
+                            >
+                              <MessageSquare className="w-4 h-4" />
+                            </button>
                           </div>
                         </div>
                       </DraggableCard>
                     ))}
 
                     {column.conversations.length === 0 && (
-                      <div className="text-center text-gray-400 py-8">
+                      <div className="text-center text-gray-400 py-8 text-sm">
                         Nenhuma conversa
                       </div>
                     )}
@@ -558,14 +577,17 @@ export function Kanban() {
         </div>
       )}
 
-      {/* Modal de Mensagem */}
+      {/* Sidebar de Mensagem */}
       {selectedConversation && (
-        <MessageModal
+        <MessageSidebar
           conversation={selectedConversation}
-          onClose={() => setSelectedConversation(null)}
-          onMessageSent={() => {
+          isOpen={sidebarOpen}
+          onClose={() => {
+            setSidebarOpen(false);
             setSelectedConversation(null);
-            loadBoard(); // Recarregar o board após enviar mensagem
+          }}
+          onMessageSent={() => {
+            loadBoard();
           }}
         />
       )}

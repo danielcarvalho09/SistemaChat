@@ -1,5 +1,5 @@
 import { Outlet } from 'react-router-dom';
-import { MessageSquare, Columns3, CalendarDays, LogOut, Settings } from 'lucide-react';
+import { MessageSquare, Columns3, CalendarDays, LogOut, Settings, MessageCircle } from 'lucide-react';
 import { useAuthStore } from '../../store/authStore';
 import { Sidebar, SidebarBody, SidebarLink } from '../../components/ui/sidebar';
 import { useState } from 'react';
@@ -28,6 +28,11 @@ export function DashboardLayout() {
       label: 'Agenda',
       href: '/dashboard/agenda',
       icon: <CalendarDays className="text-gray-700 h-5 w-5 flex-shrink-0" />,
+    },
+    {
+      label: 'Mensagens Prontas',
+      href: '/dashboard/quick-messages',
+      icon: <MessageCircle className="text-gray-700 h-5 w-5 flex-shrink-0" />,
     },
   ];
 
