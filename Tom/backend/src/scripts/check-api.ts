@@ -18,7 +18,7 @@ async function checkApi() {
             return;
         }
 
-        const loginData = await loginRes.json();
+        const loginData = await loginRes.json() as any;
         console.log('Login Response:', JSON.stringify(loginData, null, 2));
 
         const token = loginData.data?.tokens?.accessToken;

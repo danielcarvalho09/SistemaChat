@@ -31,7 +31,7 @@ async function checkMessages() {
         const connections = await prisma.whatsAppConnection.findMany();
         console.log(`\n🔍 Active Connections: ${connections.length}`);
         connections.forEach(conn => {
-            console.log(`- ${conn.name}: ${conn.status} (Last seen: ${conn.lastSeenAt})`);
+            console.log(`- ${conn.name}: ${conn.status}`);
         });
 
     } catch (error) {

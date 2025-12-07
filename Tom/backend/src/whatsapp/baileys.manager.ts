@@ -1550,7 +1550,7 @@ class BaileysManager {
         // AUTOCURA INSTANTANEA: Se processou com sucesso (ou falhou mas tentou),
         // garante que o status esta como conectado.
         // O Daniel esqueceu que se estamos processando mensagens, OBVIO que estamos conectados.
-        if (client.status !== 'connected') {
+        if (client && client.status !== 'connected') {
           logger.warn(`[Baileys] ⚡ Zap instantâneo: Processando mensagem em conexão '${client.status}'. Corrigindo...`);
           client.status = 'connected';
           client.lastDisconnectAt = undefined;
