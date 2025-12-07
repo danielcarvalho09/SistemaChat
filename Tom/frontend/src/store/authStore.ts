@@ -29,8 +29,9 @@ const buildUser = (email: string, name?: string): User => {
   };
 };
 
-const applyUserHeaders = (user: User | null) => {
-  if (user) {
+const applyUserHeaders = (user: User | null, token: string | null = null) => {
+  if (user && token) {
+    api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
     api.defaults.headers.common['X-User-Email'] = user.email;
     if (user.name) {
       api.defaults.headers.common['X-User-Name'] = user.name;
@@ -38,6 +39,7 @@ const applyUserHeaders = (user: User | null) => {
       delete api.defaults.headers.common['X-User-Name'];
     }
   } else {
+    delete api.defaults.headers.common['Authorization'];
     delete api.defaults.headers.common['X-User-Email'];
     delete api.defaults.headers.common['X-User-Name'];
   }
@@ -45,6 +47,7 @@ const applyUserHeaders = (user: User | null) => {
 
 interface AuthState {
   user: User | null;
+  token: string | null;
   isAuthenticated: boolean;
   isLoading: boolean;
   error: string | null;
@@ -61,6 +64,7 @@ export const useAuthStore = create<AuthState>()(
   persist(
     (set, get) => ({
       user: null,
+      token: null,
       isAuthenticated: false,
       isLoading: false,
       error: null,
@@ -70,8 +74,10 @@ export const useAuthStore = create<AuthState>()(
         try {
           const response = await api.post('/auth/login', { email, password: _password });
           // ✅ Processar resposta do backend com roles reais
-          if (response.data?.data?.user) {
+          if (response.data?.data?.user && response.data?.data?.tokens?.accessToken) {
             const backendUser = response.data.data.user;
+            const accessToken = response.data.data.tokens.accessToken;
+
             const user: User = {
               id: backendUser.id,
               email: backendUser.email,
@@ -83,9 +89,11 @@ export const useAuthStore = create<AuthState>()(
               createdAt: backendUser.createdAt || new Date().toISOString(),
               updatedAt: backendUser.updatedAt || new Date().toISOString(),
             };
-            applyUserHeaders(user);
+
+            applyUserHeaders(user, accessToken);
             set({
               user,
+              token: accessToken,
               isAuthenticated: true,
               isLoading: false,
             });
@@ -97,9 +105,10 @@ export const useAuthStore = create<AuthState>()(
         }
         // Fallback: usar buildUser apenas se backend não retornar dados
         const user = buildUser(email);
-        applyUserHeaders(user);
+        applyUserHeaders(user, null); // No token in fallback
         set({
           user,
+          token: null,
           isAuthenticated: true,
           isLoading: false,
         });
@@ -219,13 +228,14 @@ export const useAuthStore = create<AuthState>()(
       storage: createJSONStorage(() => sessionStorage),
       partialize: (state) => ({
         user: state.user,
+        token: state.token,
         isAuthenticated: state.isAuthenticated,
       }),
       onRehydrateStorage: () => (state, error) => {
-        if (!error && state?.user) {
-          applyUserHeaders(state.user);
+        if (!error && state?.user && state?.token) {
+          applyUserHeaders(state.user, state.token);
         } else {
-          applyUserHeaders(null);
+          applyUserHeaders(null, null);
         }
       },
     }

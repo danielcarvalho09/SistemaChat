@@ -97,19 +97,18 @@ export function ConnectionStatus() {
         }
       });
 
-      // Olha so, eventos do WhatsApp! Quem diria que precisavamos ouvir eles?
       socket.on('whatsapp_connecting', () => {
-        console.log('WhatsApp conectando... (finalmente)');
+        console.log('WhatsApp conectando...');
         checkConnections();
       });
 
       socket.on('whatsapp_connected', () => {
-        console.log('WhatsApp conectado! Aleluia.');
+        console.log('WhatsApp conectado');
         checkConnections();
       });
 
       socket.on('whatsapp_disconnected', () => {
-        console.warn('WhatsApp caiu. Classico.');
+        console.warn('WhatsApp desconectado');
         checkConnections();
       });
 

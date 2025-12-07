@@ -39,6 +39,7 @@ export class ConversationService {
 
     const skip = (page - 1) * limit;
     const isAdmin = userRoles.includes('admin');
+    logger.info(`[DEBUG] listConversations: userId=${userId}, roles=${JSON.stringify(userRoles)}, isAdmin=${isAdmin}`);
 
     // Construir filtros
     const where: any = {};
@@ -138,6 +139,9 @@ export class ConversationService {
     }
     // Se andConditions.length === 0 (admin sem filtros), where fica vazio {} = retorna todas as conversas
 
+    // Debug: Log final where clause
+    logger.info(`[ConversationService] listConversations: isAdmin=${isAdmin}, roles=${JSON.stringify(userRoles)}, where=${JSON.stringify(where)}`);
+
     try {
       // ✅ Log do where clause para debug (apenas em desenvolvimento)
       if (process.env.NODE_ENV !== 'production') {
@@ -177,6 +181,13 @@ export class ConversationService {
         this.prisma.conversation.count({ where }),
       ]);
 
+      logger.info(`[ConversationService] Found ${conversations.length} conversations (total: ${total}) for user ${userId} (admin: ${isAdmin})`);
+      if (conversations.length > 0) {
+        logger.info(`[ConversationService] CreateAt of first: ${conversations[0]?.createdAt}`);
+      } else {
+        logger.warn(`[ConversationService] ⚠️ No conversations found with where clause: ${JSON.stringify(where)}`);
+      }
+
       return {
         data: conversations.map((conv) => {
           try {
@@ -186,7 +197,7 @@ export class ConversationService {
             // Retornar conversa básica em caso de erro
             return {
               id: conv.id,
-              contact: {
+              contact: conv.contact ? {
                 id: conv.contact.id,
                 phoneNumber: conv.contact.phoneNumber,
                 name: conv.contact.name || null,
@@ -194,8 +205,16 @@ export class ConversationService {
                 avatar: conv.contact.avatar || null,
                 email: conv.contact.email || null,
                 tags: conv.contact.tags || [],
+              } : {
+                id: 'unknown',
+                phoneNumber: 'Unknown',
+                name: 'Unknown Contact',
+                pushName: null,
+                avatar: null,
+                email: null,
+                tags: [],
               },
-              connection: {
+              connection: conv.connection ? {
                 id: conv.connection.id,
                 name: conv.connection.name,
                 phoneNumber: conv.connection.phoneNumber,
@@ -205,6 +224,16 @@ export class ConversationService {
                 isActive: conv.connection.isActive,
                 createdAt: conv.connection.createdAt.toISOString(),
                 updatedAt: conv.connection.updatedAt.toISOString(),
+              } : {
+                id: 'unknown',
+                name: 'Unknown Connection',
+                phoneNumber: '',
+                status: 'disconnected',
+                avatar: null,
+                lastConnected: null,
+                isActive: false,
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
               },
               department: null,
               assignedUser: null,

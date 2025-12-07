@@ -37,7 +37,7 @@ export async function dashboardRoutes(fastify: FastifyInstance) {
             const [totalUsers, totalDepartments, totalConnections] = await Promise.all([
                 prisma.user.count(),
                 prisma.department.count(),
-                prisma.connection.count(),
+                prisma.whatsAppConnection.count(),
             ]);
 
             return reply.send({

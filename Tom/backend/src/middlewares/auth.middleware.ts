@@ -1,6 +1,7 @@
 import { FastifyRequest, FastifyReply } from 'fastify';
 import { resolveRequestUser } from '../services/public-user.service.js';
 import { PUBLIC_USER_RESPONSE } from '../constants/public-user.js';
+import { logger } from '../config/logger.js';
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -42,37 +43,26 @@ export const authenticate = async (
   if (authHeader && authHeader.startsWith('Bearer ')) {
     const token = authHeader.split(' ')[1];
     try {
-      console.log('🔐 [AuthMiddleware] Token received. Verifying...');
+      logger.info('🔐 [AuthMiddleware] Token received. Verifying...');
       // Import dinâmico circular ou lazy
       const { verifyAccessToken } = await import('../utils/jwt.js');
       const decoded = verifyAccessToken(token);
 
-      console.log('✅ [AuthMiddleware] Token verified. Role:', decoded.roles);
+      logger.info(`✅ [AuthMiddleware] Token verified. Roles: ${JSON.stringify(decoded.roles)}`);
 
       request.user = {
         userId: decoded.userId,
         email: decoded.email || '',
         roles: decoded.roles || [],
-        permissions: decoded.permissions || ['*'],
+        permissions: ['*'], // Default permissions
       };
       return; // Autenticado com sucesso via Token
     } catch (error) {
-      console.error('❌ [AuthMiddleware] Token verification failed:', error);
-      // Token inválido ou expirado - continuar para fallback (ou lançar erro?)
-      // Se enviou token e falhou, melhor falhar a requisição do que cair em usuário público
-      // Mas para manter compatibilidade, vamos logar e deixar cair no fallback por enquanto,
-      // ou lançar erro se foi explicitamente tentado auth.
-      // Vamos assumir que se mandou token, quer usar token.
-
-      // Mas o frontend pode mandar token expirado e esperar refresh?
-      // O frontend deve lidar com 401.
-      // Porem, se falhar aqui, o proximo passo é Public User.
-      // Vamos deixar cair no Public User APENAS se não for rota protegida estritamente?
-      // authenticate é usado em rotas protegidas.
-
-      // VAMOS PRIORIZAR O TOKEN.
-      // Se o token falhar, não deve logar como Public User.
-      // Mas vou deixar o fallback por segurança se o token for malformado, mas se for expirado, o verify lança erro.
+      logger.error('❌ [AuthMiddleware] Token verification failed:', error);
+      // Se um token foi fornecido mas é inválido/expirado, devemos rejeitar a requisição
+      // ao invés de cair silenciosamente no fallback de public-user
+      // Isso estava causando admins serem tratados como public-user
+      throw new Error('Invalid or expired token');
     }
   }
 

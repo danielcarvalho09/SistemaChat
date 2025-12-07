@@ -56,7 +56,18 @@ export class WhatsAppService {
   async listConnections() {
     try {
       const connections = await this.prisma.whatsAppConnection.findMany({
-        include: {
+        select: {
+          id: true,
+          name: true,
+          phoneNumber: true,
+          status: true,
+          isActive: true,
+          isMatriz: true,
+          updatedAt: true,
+          createdAt: true,
+          lastConnected: true,
+          lastDisconnectAt: true,
+          qrCode: true, // Necessário para exibir QR code na listagem se estiver desconectado
           user: {
             select: {
               id: true,
@@ -177,7 +188,7 @@ export class WhatsAppService {
             const authData = JSON.parse(authDataString, BufferJSON.reviver);
             // ✅ Credenciais válidas = têm creds.me.id (já conectou antes)
             hasValidCredentials = !!(authData.creds && authData.creds.me && authData.creds.me.id);
-            
+
             if (hasValidCredentials) {
               const meId = authData.creds.me.id;
               logger.info(`[WhatsApp] ✅ Credenciais VÁLIDAS encontradas para ${connectionId} (me.id: ${meId})`);
@@ -195,11 +206,11 @@ export class WhatsAppService {
       // ✅ Se tem credenciais válidas e está desconectada, usar reconexão automática
       if (hasValidCredentials && (connection.status === 'disconnected' || !connection.status)) {
         logger.info(`[WhatsApp] 🔄 Conexão ${connectionId} tem credenciais válidas - usando reconexão automática...`);
-        
+
         try {
           const reconnectResult = await baileysManager.manualReconnect(connectionId);
           logger.info(`[WhatsApp] ✅ Reconexão automática iniciada para ${connectionId}: ${reconnectResult.status}`);
-          
+
           return {
             connectionId,
             status: reconnectResult.status,
@@ -216,10 +227,10 @@ export class WhatsAppService {
       // Se não tem credenciais válidas ou reconexão falhou, criar cliente normalmente
       // Criar cliente Baileys (QR Code será emitido via Socket.IO)
       logger.info(`[WhatsApp] Connecting ${connectionId}...`);
-      
+
       try {
         await baileysManager.createClient(connectionId);
-        
+
         return {
           connectionId,
           status: 'connecting',
@@ -235,7 +246,7 @@ export class WhatsAppService {
             message: 'Conexão já está em andamento. Aguarde alguns segundos...',
           };
         }
-        
+
         // Outros erros devem ser propagados
         logger.error(`[WhatsApp] Error connecting ${connectionId}:`, error);
         throw error;

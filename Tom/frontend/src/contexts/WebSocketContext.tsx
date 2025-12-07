@@ -153,19 +153,17 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
     // Adicionando listeners globais porque confiar so no componente visual eh pedir pra dar erro
 
     socket.on('whatsapp_connected', () => {
-      console.log('✅ WhatsApp conectado globalmente (Milagre!)');
-      // Se conectou, melhor sincronizar tudo de novo pra garantir
-      // Vai que o Daniel implementou alguma race condition maluca
+      console.log('✅ WhatsApp conectado globalmente');
+      // Sincronizar ao reconectar
       syncAndReload();
     });
 
     socket.on('whatsapp_disconnected', () => {
-      console.warn('❌ WhatsApp desconectado globalmente (Surpresa: zero pessoas)');
-      // Nao precisa fazer muito alem de chorar, mas vamos logar
+      console.warn('❌ WhatsApp desconectado globalmente');
     });
 
     socket.on('whatsapp_connecting', () => {
-      console.log('🔄 WhatsApp conectando... (Tenha fé)');
+      console.log('🔄 WhatsApp conectando...');
     });
 
     // Cleanup APENAS ao deslogar (não ao trocar de rota)

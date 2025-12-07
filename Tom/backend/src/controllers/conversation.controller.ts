@@ -28,17 +28,27 @@ export class ConversationController {
       const params = validate(conversationFilterSchema, request.query);
       const userId = request.user!.userId;
       const userRoles = request.user!.roles;
+      logger.info(`DEBUG: Controller listConversations called userId=${userId} roles=${JSON.stringify(userRoles)}`);
+      /* Reverting mock */
 
-      const conversations = await this.conversationService.listConversations(userId, userRoles, {
-        ...params,
-        status: params.status as ConversationStatus | undefined,
-      });
+      try {
+        const conversations = await this.conversationService.listConversations(userId, userRoles, {
+          ...params,
+          status: params.status as ConversationStatus | undefined,
+        });
 
-      return reply.status(200).send({
-        success: true,
-        data: conversations.data,
-        pagination: conversations.pagination,
-      });
+        return reply.status(200).send({
+          success: true,
+          data: conversations.data,
+          pagination: conversations.pagination,
+        });
+      } catch (error: any) {
+        // Return error details for debugging
+        return reply.status(500).send({
+          message: error.message,
+          stack: error.stack
+        });
+      }
     } catch (error: any) {
       logger.error('[ConversationController] Error in listConversations:', error);
       return reply.status(500).send({
@@ -236,7 +246,7 @@ export class ConversationController {
     try {
       const { conversationId } = request.params;
       const body = request.body as any;
-      logger.info('[sendMessage] Raw request body:', { 
+      logger.info('[sendMessage] Raw request body:', {
         body: request.body,
         conversationId,
         hasMediaUrl: !!body?.mediaUrl,
@@ -244,20 +254,20 @@ export class ConversationController {
         messageType: body?.messageType,
         content: body?.content,
       });
-      
+
       let data;
       try {
         // Passar o body diretamente - o schema vai lidar com undefined/null
         logger.info('[sendMessage] Request body before validation:', JSON.stringify(request.body));
-        
+
         data = validate(sendMessageSchema, request.body);
-        
-        logger.info('[sendMessage] ✅ Validation successful:', { 
-          conversationId, 
-          userId: request.user!.userId, 
+
+        logger.info('[sendMessage] ✅ Validation successful:', {
+          conversationId,
+          userId: request.user!.userId,
           content: data.content?.substring(0, 50) + (data.content && data.content.length > 50 ? '...' : ''),
           contentLength: data.content?.length || 0,
-          messageType: data.messageType, 
+          messageType: data.messageType,
           hasMediaUrl: !!data.mediaUrl,
           mediaUrl: data.mediaUrl?.substring(0, 100) || 'none',
           hasQuotedMessage: !!data.quotedMessageId,
@@ -265,7 +275,7 @@ export class ConversationController {
       } catch (validationError: any) {
         // Importar ZodError para verificar tipo
         const { ZodError } = await import('zod');
-        
+
         const errorDetails = {
           errorMessage: validationError?.message || 'Unknown validation error',
           errorName: validationError?.name,
@@ -274,9 +284,9 @@ export class ConversationController {
           bodyKeys: request.body ? Object.keys(request.body) : [],
           conversationId,
         };
-        
+
         logger.error('[sendMessage] ❌ Validation failed:', errorDetails);
-        
+
         // Se for ZodError, extrair detalhes específicos
         if (validationError instanceof ZodError || (validationError?.issues && Array.isArray(validationError.issues))) {
           const zodErrors = (validationError.issues || []).map((err: any) => ({
@@ -284,10 +294,10 @@ export class ConversationController {
             message: err.message || 'Validation error',
             code: err.code || 'custom_error',
           }));
-          
+
           logger.error('[sendMessage] ❌ Zod validation errors:', zodErrors);
           logger.error('[sendMessage] ❌ Full Zod error:', JSON.stringify(validationError, null, 2));
-          
+
           return reply.status(400).send({
             success: false,
             statusCode: 400,
@@ -296,7 +306,7 @@ export class ConversationController {
             receivedBody: request.body,
           });
         }
-        
+
         // Retornar erro genérico de validação
         return reply.status(400).send({
           success: false,
@@ -306,7 +316,7 @@ export class ConversationController {
           receivedBody: request.body,
         });
       }
-      
+
       const userId = request.user!.userId;
       const userRoles = request.user!.roles;
 
