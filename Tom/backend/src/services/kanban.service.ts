@@ -286,7 +286,7 @@ export class KanbanService {
             timestamp: true,
           },
         },
-        conversationTags: {
+        tags: {
           include: {
             tag: true,
           },

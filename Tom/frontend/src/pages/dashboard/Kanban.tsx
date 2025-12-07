@@ -68,7 +68,7 @@ interface KanbanConversation {
   lastMessageAt: string;
   unreadCount: number;
   messages?: Message[];
-  conversationTags?: ConversationTag[];
+  tags?: ConversationTag[];
   _count: {
     messages: number;
   };
@@ -475,9 +475,9 @@ export function Kanban() {
                           )}
 
                           {/* Tags em retângulos cinzas */}
-                          {conversation.conversationTags && conversation.conversationTags.length > 0 && (
+                          {conversation.tags && conversation.tags.length > 0 && (
                             <div className="flex flex-wrap gap-1 justify-center mb-3">
-                              {conversation.conversationTags.map((ct) => (
+                              {conversation.tags.map((ct) => (
                                 <span
                                   key={ct.id}
                                   className="px-2 py-0.5 text-xs bg-gray-200 text-gray-700 rounded"
