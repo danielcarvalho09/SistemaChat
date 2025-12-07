@@ -53,29 +53,9 @@ export function AdminDashboard() {
 
   const fetchStats = async () => {
     try {
-      // Simular dados - você pode criar um endpoint /stats no backend
-      const [conversations, users, departments, connections] = await Promise.all([
-        api.get('/conversations'),
-        api.get('/users'),
-        api.get('/departments'),
-        api.get('/connections'),
-      ]);
-
-      const conversationsData = conversations.data.data || [];
-      
-      setStats({
-        totalConversations: conversationsData.length,
-        activeConversations: conversationsData.filter((c: any) => c.status !== 'resolved').length,
-        totalUsers: users.data.data?.length || 0,
-        totalDepartments: departments.data.data?.length || 0,
-        totalConnections: connections.data.data?.length || 0,
-        avgResponseTime: 5.2,
-        conversationsByStatus: {
-          waiting: conversationsData.filter((c: any) => c.status === 'waiting').length,
-          in_progress: conversationsData.filter((c: any) => c.status === 'in_progress').length,
-          resolved: conversationsData.filter((c: any) => c.status === 'resolved').length,
-        },
-      });
+      // Utilizar novo endpoint otimizado
+      const { data } = await api.get('/dashboard/stats');
+      setStats(data);
     } catch (error) {
       console.error('Erro ao carregar estatísticas:', error);
     } finally {

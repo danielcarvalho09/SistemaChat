@@ -7,7 +7,28 @@ let currentDatabaseUrl: string | null = null;
 
 export const getPrismaClient = (): PrismaClient => {
   if (!prisma) {
+    // Modificar URL para otimizar pool
+    const url = process.env.DATABASE_URL;
+    let datasources;
+
+    if (url) {
+      const hasParams = url.includes('?');
+      const separator = hasParams ? '&' : '?';
+      // Forçar limite de 20 conexões e 20s de timeout no pool
+      const newUrl = url.includes('connection_limit')
+        ? url
+        : `${url}${separator}connection_limit=20&pool_timeout=20`;
+
+      datasources = {
+        db: {
+          url: newUrl
+        }
+      };
+      logger.info(`🔌 Prisma Pool Configured: Limit=20, Timeout=20s`);
+    }
+
     prisma = new PrismaClient({
+      datasources,
       log: [
         { level: 'query', emit: 'event' },
         { level: 'error', emit: 'event' },
@@ -48,11 +69,11 @@ export const connectDatabase = async (): Promise<void> => {
     }
 
     logger.info('🔌 Conectando ao banco de dados cloud...');
-    
+
     const client = getPrismaClient();
     await client.$connect();
     await client.$queryRaw`SELECT 1`;
-    
+
     currentDatabaseUrl = process.env.DATABASE_URL;
     logger.info('✅ Database connected successfully (Supabase Cloud)');
   } catch (error) {

@@ -66,12 +66,17 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(cors, {
     origin: (origin, callback) => {
       const allowedOrigins = config.security.corsOrigin;
-      
+
       // Permitir requisições sem origin (mobile apps, Postman, etc)
       if (!origin) {
         return callback(null, true);
       }
-      
+
+      // ✅ EM DESENVOLVIMENTO: Permitir qualquer localhost
+      if (config.server.isDevelopment && origin.includes('localhost')) {
+        return callback(null, true);
+      }
+
       // Verificar se a origin está na lista permitida
       if (allowedOrigins.includes(origin) || allowedOrigins.includes('*')) {
         callback(null, true);
@@ -120,7 +125,7 @@ export async function buildApp(): Promise<FastifyInstance> {
     attachFieldsToBody: false, // Não anexar campos ao body
     throwFileSizeLimit: false, // Não lançar erro automaticamente, vamos tratar manualmente
   });
-  
+
   // Hook para logar requests de upload antes do multipart processar
   app.addHook('onRequest', async (request, reply) => {
     if (request.url.includes('/upload') && request.method === 'POST') {
@@ -133,25 +138,25 @@ export async function buildApp(): Promise<FastifyInstance> {
       });
     }
   });
-  
+
   logger.info('✅ Multipart plugin registered for file uploads');
 
   // Função auxiliar para configurar headers de arquivos estáticos
   const setStaticHeaders = (res: any, filePath: string) => {
-      // Configurar CORS para arquivos estáticos
-      const allowedOrigin = Array.isArray(config.security.corsOrigin) 
-        ? config.security.corsOrigin[0] 
-        : config.security.corsOrigin;
-      res.setHeader('Access-Control-Allow-Origin', allowedOrigin);
-      res.setHeader('Access-Control-Allow-Credentials', 'true');
-      res.setHeader('X-Content-Type-Options', 'nosniff');
-      
-      // Configurar MIME types corretos
+    // Configurar CORS para arquivos estáticos
+    const allowedOrigin = Array.isArray(config.security.corsOrigin)
+      ? config.security.corsOrigin[0]
+      : config.security.corsOrigin;
+    res.setHeader('Access-Control-Allow-Origin', allowedOrigin);
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+
+    // Configurar MIME types corretos
     if (filePath.endsWith('.pdf')) {
-        res.setHeader('Content-Type', 'application/pdf')
+      res.setHeader('Content-Type', 'application/pdf')
       res.setHeader('Content-Disposition', 'inline; filename="' + filePath.split('/').pop() + '"')
     } else if (filePath.endsWith('.txt')) {
-        res.setHeader('Content-Type', 'text/plain; charset=utf-8')
+      res.setHeader('Content-Type', 'text/plain; charset=utf-8')
     } else if (filePath.match(/\.(jpg|jpeg|png|gif|webp)$/i)) {
       const ext = filePath.split('.').pop()?.toLowerCase();
       const mimeTypes: Record<string, string> = {
@@ -167,7 +172,7 @@ export async function buildApp(): Promise<FastifyInstance> {
         res.setHeader('Content-Type', 'image/png'); // fallback
       }
     } else if (filePath.endsWith('.mp4')) {
-        res.setHeader('Content-Type', 'video/mp4')
+      res.setHeader('Content-Type', 'video/mp4')
     } else if (filePath.match(/\.(ogg|oga)$/i)) {
       res.setHeader('Content-Type', 'audio/ogg; codecs=opus')
     } else if (filePath.match(/\.(mp3|mpeg)$/i)) {
@@ -178,18 +183,18 @@ export async function buildApp(): Promise<FastifyInstance> {
       res.setHeader('Content-Type', 'audio/mp4')
     } else if (filePath.match(/\.(docx?|xlsx?|pptx?)$/i)) {
       const ext = filePath.split('.').pop()?.toLowerCase()
-        const mimeTypes: Record<string, string> = {
-          'doc': 'application/msword',
-          'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-          'xls': 'application/vnd.ms-excel',
-          'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-          'ppt': 'application/vnd.ms-powerpoint',
-          'pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation'
-        }
-        if (ext && mimeTypes[ext]) {
-          res.setHeader('Content-Type', mimeTypes[ext])
-        }
+      const mimeTypes: Record<string, string> = {
+        'doc': 'application/msword',
+        'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        'xls': 'application/vnd.ms-excel',
+        'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'ppt': 'application/vnd.ms-powerpoint',
+        'pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation'
       }
+      if (ext && mimeTypes[ext]) {
+        res.setHeader('Content-Type', mimeTypes[ext])
+      }
+    }
   };
 
   // Servir arquivos estáticos (secure-uploads)
@@ -205,7 +210,7 @@ export async function buildApp(): Promise<FastifyInstance> {
     index: false, // Não servir index.html como padrão
     serve: true,
   });
-  
+
   logger.info('✅ Static file server registered for /secure-uploads/');
 
   // Swagger/OpenAPI Documentation
@@ -253,33 +258,33 @@ export async function buildApp(): Promise<FastifyInstance> {
       // Extrair filename da URL (remover /uploads/ do início)
       const urlPath = request.url.replace(/^\/uploads\//, '');
       const fullPath = path.join(process.cwd(), 'secure-uploads', urlPath);
-      
+
       logger.debug(`[Static] Serving file from /uploads/: ${urlPath}`);
       logger.debug(`[Static] Full path: ${fullPath}`);
-      
+
       // Verificar se arquivo existe
       if (!fs.existsSync(fullPath)) {
         logger.warn(`[Static] File not found: ${fullPath}`);
         return reply.status(404).send({ error: 'File not found', path: fullPath });
       }
-      
+
       const stats = fs.statSync(fullPath);
       if (!stats.isFile()) {
         logger.warn(`[Static] Path is not a file: ${fullPath}`);
         return reply.status(404).send({ error: 'Not a file' });
       }
-      
+
       // ✅ VALIDAÇÃO: Verificar se arquivo não está vazio
       if (stats.size === 0) {
         logger.error(`[Static] ❌ File is empty: ${fullPath}`);
         return reply.status(500).send({ error: 'File is empty' });
       }
-      
+
       logger.info(`[Static] ✅ Serving file: ${urlPath} (${stats.size} bytes)`);
-      
+
       // Configurar headers
       setStaticHeaders(reply.raw, fullPath);
-      
+
       // Enviar arquivo usando stream
       const fileStream = fs.createReadStream(fullPath);
       return reply.send(fileStream);
@@ -305,7 +310,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   app.addHook('onResponse', async (request, reply) => {
     const responseTime = reply.getHeader('x-response-time') || '0';
     const responseTimeMs = typeof responseTime === 'string' ? responseTime : '0';
-    
+
     logger.info(
       `${request.method} ${request.url} ${reply.statusCode} - ${responseTimeMs}ms`,
       {
