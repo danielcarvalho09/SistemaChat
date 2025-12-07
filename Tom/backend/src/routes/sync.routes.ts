@@ -88,11 +88,10 @@ export async function syncRoutes(fastify: FastifyInstance) {
    * POST /api/v1/sync/all
    */
   fastify.post('/all', { preHandler: [authenticate] }, async (request: FastifyRequest, reply: FastifyReply) => {
-    let prisma: any = null;
     try {
-      const { PrismaClient } = await import('@prisma/client');
-      prisma = new PrismaClient();
-      
+      const { getPrismaClient } = await import('../config/database.js');
+      const prisma = getPrismaClient();
+
       // Buscar todas as conexões ativas
       const connections = await prisma.whatsAppConnection.findMany({
         where: { status: 'connected' },
@@ -100,7 +99,6 @@ export async function syncRoutes(fastify: FastifyInstance) {
       });
 
       if (connections.length === 0) {
-        await prisma.$disconnect();
         return reply.send({
           success: true,
           message: 'No active connections to sync',
@@ -108,27 +106,33 @@ export async function syncRoutes(fastify: FastifyInstance) {
         });
       }
 
-      // Sincronizar cada conexão
+      // Sincronizar cada conexão em paralelo
       const { baileysManager } = await import('../whatsapp/baileys.manager.js');
-      let totalSynced = 0;
-      const errors: Array<{ connectionId: string; error: string }> = [];
 
-      for (const connection of connections) {
+      logger.info(`[Sync] Starting parallel sync for ${connections.length} connections...`);
+
+      const results = await Promise.allSettled(connections.map(async (connection) => {
         try {
           logger.info(`[Sync] Syncing connection ${connection.id} (${connection.name || connection.phoneNumber})...`);
           const synced = await baileysManager.syncAllActiveConversations(connection.id);
-          totalSynced += synced;
           logger.info(`[Sync] Connection ${connection.id} synced ${synced} conversations`);
-        } catch (connectionError: any) {
-          logger.error(`[Sync] Error syncing connection ${connection.id}:`, connectionError);
-          errors.push({
-            connectionId: connection.id,
-            error: connectionError.message || 'Unknown error',
-          });
+          return { connectionId: connection.id, synced };
+        } catch (err: any) {
+          logger.error(`[Sync] Error syncing connection ${connection.id}:`, err);
+          throw { connectionId: connection.id, error: err.message || 'Unknown error' };
         }
-      }
+      }));
 
-      await prisma.$disconnect();
+      let totalSynced = 0;
+      const errors: Array<{ connectionId: string; error: string }> = [];
+
+      results.forEach(result => {
+        if (result.status === 'fulfilled') {
+          totalSynced += result.value.synced;
+        } else {
+          errors.push(result.reason);
+        }
+      });
 
       return reply.send({
         success: true,
@@ -139,16 +143,7 @@ export async function syncRoutes(fastify: FastifyInstance) {
       });
     } catch (error: any) {
       logger.error('[Sync] Error syncing all:', error);
-      logger.error('[Sync] Error stack:', error instanceof Error ? error.stack : 'No stack');
-      
-      if (prisma) {
-        try {
-          await prisma.$disconnect();
-        } catch (disconnectError) {
-          logger.error('[Sync] Error disconnecting Prisma:', disconnectError);
-        }
-      }
-      
+
       return reply.status(500).send({
         success: false,
         message: error.message || 'Error syncing all conversations',
@@ -165,7 +160,7 @@ export async function syncRoutes(fastify: FastifyInstance) {
   fastify.post('/full-system', async (request: FastifyRequest, reply: FastifyReply) => {
     try {
       logger.info('🚀 FULL SYSTEM SYNC requested (via cronjob POST)');
-      
+
       const { baileysManager } = await import('../whatsapp/baileys.manager.js');
       const result = await baileysManager.syncAllConnections();
 
@@ -197,7 +192,7 @@ export async function syncRoutes(fastify: FastifyInstance) {
   fastify.get('/full-system', async (request: FastifyRequest, reply: FastifyReply) => {
     try {
       logger.info('🚀 FULL SYSTEM SYNC requested (via cronjob GET)');
-      
+
       const { baileysManager } = await import('../whatsapp/baileys.manager.js');
       const result = await baileysManager.syncAllConnections();
 
@@ -256,7 +251,7 @@ export async function syncRoutes(fastify: FastifyInstance) {
     try {
       const { PrismaClient } = await import('@prisma/client');
       const prisma = new PrismaClient();
-      
+
       const connections = await prisma.whatsAppConnection.findMany({
         where: { status: 'connected' },
       });
@@ -305,48 +300,48 @@ export async function syncRoutes(fastify: FastifyInstance) {
    * GET /api/v1/sync/status
    */
   fastify.get('/status', { preHandler: [authenticate] }, async (request: FastifyRequest, reply: FastifyReply) => {
-  try {
-    const { PrismaClient } = await import('@prisma/client');
-    const prisma = new PrismaClient();
+    try {
+      const { PrismaClient } = await import('@prisma/client');
+      const prisma = new PrismaClient();
 
-    // Contar mensagens com e sem externalId
-    const totalMessages = await prisma.message.count();
-    const messagesWithExternalId = await prisma.message.count({
-      where: { externalId: { not: null } },
-    });
-    const messagesWithoutExternalId = totalMessages - messagesWithExternalId;
+      // Contar mensagens com e sem externalId
+      const totalMessages = await prisma.message.count();
+      const messagesWithExternalId = await prisma.message.count({
+        where: { externalId: { not: null } },
+      });
+      const messagesWithoutExternalId = totalMessages - messagesWithExternalId;
 
-    // Contar conversas ativas
-    const activeConversations = await prisma.conversation.count({
-      where: { status: { in: ['waiting', 'in_progress'] } },
-    });
+      // Contar conversas ativas
+      const activeConversations = await prisma.conversation.count({
+        where: { status: { in: ['waiting', 'in_progress'] } },
+      });
 
-    await prisma.$disconnect();
+      await prisma.$disconnect();
 
-    // Obter estatísticas da queue
-    const { syncQueueService } = await import('../services/sync-queue.service.js');
-    const queueStats = syncQueueService.getStats();
+      // Obter estatísticas da queue
+      const { syncQueueService } = await import('../services/sync-queue.service.js');
+      const queueStats = syncQueueService.getStats();
 
-    return reply.send({
-      success: true,
-      data: {
-        totalMessages,
-        messagesWithExternalId,
-        messagesWithoutExternalId,
-        activeConversations,
-        syncPercentage: totalMessages > 0 
-          ? Math.round((messagesWithExternalId / totalMessages) * 100) 
-          : 0,
-        syncQueue: queueStats,
-      },
-    });
-  } catch (error: any) {
-    logger.error('Error getting sync status:', error);
-    return reply.status(500).send({
-      success: false,
-      message: error.message || 'Erro ao obter status',
-    });
-  }
+      return reply.send({
+        success: true,
+        data: {
+          totalMessages,
+          messagesWithExternalId,
+          messagesWithoutExternalId,
+          activeConversations,
+          syncPercentage: totalMessages > 0
+            ? Math.round((messagesWithExternalId / totalMessages) * 100)
+            : 0,
+          syncQueue: queueStats,
+        },
+      });
+    } catch (error: any) {
+      logger.error('Error getting sync status:', error);
+      return reply.status(500).send({
+        success: false,
+        message: error.message || 'Erro ao obter status',
+      });
+    }
   });
 
   /**
@@ -367,7 +362,7 @@ export async function syncRoutes(fastify: FastifyInstance) {
       return reply.status(500).send({
         success: false,
         message: error.message || 'Error getting queue stats',
-    });
-  }
+      });
+    }
   });
 }

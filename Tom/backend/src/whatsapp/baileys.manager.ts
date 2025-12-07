@@ -128,13 +128,13 @@ class BaileysManager {
           logger.info(`[Baileys] ✅ Client ${connectionId} already connected`);
           return existingClient;
         }
-        
+
         // Se está em 'connecting' ou 'qr', retornar o cliente existente (não criar novo)
         if (existingClient.status === 'connecting' || existingClient.status === 'qr') {
           logger.info(`[Baileys] ⏳ Client ${connectionId} already ${existingClient.status} - returning existing client`);
           return existingClient;
         }
-        
+
         // Se não está conectado, remover antes de criar novo
         logger.info(`[Baileys] Removing disconnected client ${connectionId} (status: ${existingClient.status})`);
         this.clients.delete(connectionId);
@@ -340,7 +340,7 @@ class BaileysManager {
       // ✅ Liberar lock em caso de erro
       this.clientCreationLocks.delete(connectionId);
       logger.info(`[Baileys] 🔓 Client creation lock released for ${connectionId} (error)`);
-      
+
       logger.error(`[Baileys] ❌ Error creating client ${connectionId}:`, error);
 
       // Se for ClientCreationInProgressError, não emitir evento de falha (é esperado)
@@ -1546,6 +1546,20 @@ class BaileysManager {
           processedIndex,
           totalMessages
         );
+
+        // AUTOCURA INSTANTANEA: Se processou com sucesso (ou falhou mas tentou),
+        // garante que o status esta como conectado.
+        // O Daniel esqueceu que se estamos processando mensagens, OBVIO que estamos conectados.
+        if (client.status !== 'connected') {
+          logger.warn(`[Baileys] ⚡ Zap instantâneo: Processando mensagem em conexão '${client.status}'. Corrigindo...`);
+          client.status = 'connected';
+          client.lastDisconnectAt = undefined;
+          // Nao vamos esperar o await aqui pra nao travar o processamento de mensagens
+          this.updateConnectionStatus(connectionId, 'connected').catch(e =>
+            logger.error('Erro ao salvar status instantaneo:', e)
+          );
+          this.emitStatus(connectionId, 'connected');
+        }
 
         if (messageProcessed) {
           syncStats.processed++;
@@ -3071,6 +3085,31 @@ class BaileysManager {
         if (lastReceived) {
           const minutesSinceLastMessage = (now.getTime() - lastReceived.getTime()) / 1000 / 60;
           logger.debug(`[Baileys] 💓 Keepalive ${connectionId} - Last message: ${minutesSinceLastMessage.toFixed(1)}min ago`);
+
+          // PREVENCAO DE ZUMBI TIPO 1: Memoria Conectada vs Banco Desconectado
+          // Se estamos "conectados" e recebendo mensagens recentemente, vamos garantir
+          // que o banco e o frontend saibam disso. O Daniel as vezes esquece de avisar.
+          if (minutesSinceLastMessage < 2) {
+            // Força atualização periodica (a cada 20s) se tiver ativo
+            this.updateConnectionStatus(connectionId, 'connected').catch(() => { });
+            this.emitStatus(connectionId, 'connected');
+          }
+
+          // AUTOCURA: Se recebeu mensagem recentemente (< 2 min) mas esta como desconectado,
+          // significa que o Daniel fez lambanca no gerenciamento de estado.
+          // Vamos corrigir o status na marra.
+          if (currentClient.status === 'disconnected' && minutesSinceLastMessage < 2) {
+            logger.warn(`[Baileys] 🧟 ZOMBIE CONNECTION KILLED: ${connectionId} estava 'disconnected' mas recebeu mensagens ha ${minutesSinceLastMessage.toFixed(1)}min.`);
+            logger.warn(`[Baileys] 🚑 Aplicando desfibrilador no status...`);
+
+            currentClient.status = 'connected';
+            currentClient.lastDisconnectAt = undefined;
+            this.updateConnectionStatus(connectionId, 'connected').catch(e =>
+              logger.error('Erro ao salvar o milagre no banco:', e)
+            );
+            this.emitStatus(connectionId, 'connected');
+          }
+
         } else {
           logger.debug(`[Baileys] 💓 Keepalive ${connectionId} - No messages received yet`);
         }
@@ -3358,39 +3397,39 @@ class BaileysManager {
    */
   isConnectionActive(connectionId: string): boolean {
     const client = this.clients.get(connectionId);
-    
+
     if (!client) {
       logger.debug(`[Baileys] isConnectionActive(${connectionId}): No client found`);
       return false;
     }
-    
+
     if (client.status !== 'connected') {
       logger.debug(`[Baileys] isConnectionActive(${connectionId}): Status is '${client.status}', not 'connected'`);
       return false;
     }
-    
+
     // Verificar se o socket realmente está conectado
     if (!client.socket) {
       logger.warn(`[Baileys] isConnectionActive(${connectionId}): Client has status 'connected' but no socket`);
       return false;
     }
-    
+
     try {
       // Verificar estado do WebSocket (readyState: 0=CONNECTING, 1=OPEN, 2=CLOSING, 3=CLOSED)
       const wsReadyState = (client.socket as any)?.ws?.readyState;
-      
+
       // ✅ Se readyState não estiver disponível, assumir que está conectado se status é 'connected'
       // Isso evita falsos negativos quando o Baileys não expõe o readyState
       if (wsReadyState === undefined) {
         logger.debug(`[Baileys] isConnectionActive(${connectionId}): wsReadyState not available, but status is 'connected' - assuming active`);
         return true;
       }
-      
+
       if (wsReadyState !== 1) {
         logger.warn(`[Baileys] isConnectionActive(${connectionId}): wsReadyState is ${wsReadyState} (not OPEN/1)`);
         return false;
       }
-      
+
       logger.debug(`[Baileys] isConnectionActive(${connectionId}): ✅ Connection is active (status: connected, wsReadyState: ${wsReadyState})`);
       return true;
     } catch (error) {

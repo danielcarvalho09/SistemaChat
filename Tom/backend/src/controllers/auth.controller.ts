@@ -3,6 +3,7 @@ import { validate } from '../utils/validators.js';
 import { loginSchema, registerSchema } from '../utils/validators.js';
 import { resolveRequestUser } from '../services/public-user.service.js';
 import { getPrismaClient } from '../config/database.js';
+import { AuthService } from '../services/auth.service.js';
 
 const prisma = getPrismaClient();
 
@@ -44,33 +45,46 @@ const formatUserResponse = async (email: string, name?: string) => {
 };
 
 export class AuthController {
-  register = async (request: FastifyRequest, reply: FastifyReply) => {
-    const body = validate(registerSchema, request.body) as { email: string; password: string; name: string };
+  private authService = new AuthService();
 
-    const userResponse = await formatUserResponse(body.email, body.name);
+  register = async (request: FastifyRequest, reply: FastifyReply) => {
+    // Pegar IP do x-forwarded-for ou socket
+    const ip = (request.headers['x-forwarded-for'] as string) || request.socket.remoteAddress || '127.0.0.1';
+    const userAgent = request.headers['user-agent'];
+    const fingerprint = (request.headers['x-fingerprint'] as string) || 'browser';
+
+    const body = validate(registerSchema, request.body) as any;
+
+    const result = await this.authService.register(body, {
+      ip,
+      userAgent,
+      fingerprint
+    });
 
     return reply.status(200).send({
       success: true,
-      message: 'Registration disabled (authentication bypassed).',
-      data: {
-        user: userResponse,
-        csrfToken: null,
-      },
+      message: 'Registration successful',
+      data: result,
     });
   };
 
   login = async (request: FastifyRequest, reply: FastifyReply) => {
-    const body = validate(loginSchema, request.body) as { email: string; password: string };
+    const ip = (request.headers['x-forwarded-for'] as string) || request.socket.remoteAddress || '127.0.0.1';
+    const userAgent = request.headers['user-agent'];
+    const fingerprint = (request.headers['x-fingerprint'] as string) || 'browser';
 
-    const userResponse = await formatUserResponse(body.email);
+    const body = validate(loginSchema, request.body) as any;
+
+    const result = await this.authService.login(body, {
+      ip,
+      userAgent,
+      fingerprint
+    });
 
     return reply.status(200).send({
       success: true,
-      message: 'Login disabled (authentication bypassed).',
-      data: {
-        user: userResponse,
-        csrfToken: null,
-      },
+      message: 'Login successful',
+      data: result,
     });
   };
 

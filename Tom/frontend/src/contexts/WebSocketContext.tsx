@@ -9,9 +9,9 @@ interface WebSocketContextType {
   syncMessages: () => Promise<void>;
 }
 
-const WebSocketContext = createContext<WebSocketContextType>({ 
+const WebSocketContext = createContext<WebSocketContextType>({
   isConnected: false,
-  syncMessages: async () => {},
+  syncMessages: async () => { },
 });
 
 export function WebSocketProvider({ children }: { children: React.ReactNode }) {
@@ -19,7 +19,8 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
   const { isAuthenticated } = useAuthStore();
   const [isConnected, setIsConnected] = React.useState(false);
   const hasInitialized = useRef(false);
-  const syncTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  // O Daniel adora deixar variaveis inuteis largadas por ai. Limpando a bagunca.
+  // const syncTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     // Só conectar se estiver autenticado
@@ -36,7 +37,7 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
 
     console.log('🔌 Inicializando WebSocket global...');
     hasInitialized.current = true;
-    
+
     // Conectar ao WebSocket
     const socket = socketService.connect();
 
@@ -59,7 +60,7 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
     socket.on('connect', () => {
       console.log('✅ WebSocket conectado globalmente');
       setIsConnected(true);
-      
+
       // Sincronizar e recarregar ao conectar
       syncAndReload();
     });
@@ -78,17 +79,17 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
     // Escutar novas mensagens
     socket.on('new_message', (data: { conversationId: string; message: Message }) => {
       console.log('📨 Nova mensagem recebida via WebSocket:', data);
-      
+
       if (!data.message?.id) {
         console.error('❌ Mensagem sem ID recebida:', data);
         return;
       }
-      
+
       // Verificar se mensagem já existe
       const { messages } = useConversationStore.getState();
       const conversationMessages = messages[data.conversationId] || [];
       const existingMessage = conversationMessages.find(m => m.id === data.message.id);
-      
+
       if (existingMessage) {
         // Mensagem já existe - atualizar (pode ser mudança de status: sending -> sent)
         console.log('🔄 Mensagem já existe, atualizando status:', {
@@ -103,7 +104,7 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
         addMessage(data.conversationId, data.message);
         console.log('✅ Mensagem adicionada');
       }
-      
+
       // Atualizar timestamp da conversa
       updateConversation(data.conversationId, {
         lastMessageAt: data.message.timestamp || new Date().toISOString(),
@@ -113,10 +114,10 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
     // Escutar novas conversas
     socket.on('new_conversation', (conversation: Conversation) => {
       console.log('🆕 Nova conversa recebida via WebSocket:', conversation);
-      
+
       const { conversations } = useConversationStore.getState();
       const exists = conversations.some(c => c.id === conversation.id);
-      
+
       if (!exists) {
         addConversation(conversation);
         console.log('✅ Conversa adicionada à lista');
@@ -140,12 +141,31 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
     // Escutar status de mensagem
     socket.on('message_status_update', (data: { conversationId: string; messageId: string; status: string }) => {
       console.log('✅ Status de mensagem atualizado via WebSocket:', data);
-      
+
       // Atualizar status da mensagem no store
       if (data.conversationId && data.messageId && data.status) {
         updateMessage(data.conversationId, data.messageId, { status: data.status as any });
         console.log(`✅ Mensagem ${data.messageId} atualizada para status: ${data.status}`);
       }
+    });
+
+    // --- EVENTOS DO WHATSAPP (Que o Daniel "esqueceu") ---
+    // Adicionando listeners globais porque confiar so no componente visual eh pedir pra dar erro
+
+    socket.on('whatsapp_connected', () => {
+      console.log('✅ WhatsApp conectado globalmente (Milagre!)');
+      // Se conectou, melhor sincronizar tudo de novo pra garantir
+      // Vai que o Daniel implementou alguma race condition maluca
+      syncAndReload();
+    });
+
+    socket.on('whatsapp_disconnected', () => {
+      console.warn('❌ WhatsApp desconectado globalmente (Surpresa: zero pessoas)');
+      // Nao precisa fazer muito alem de chorar, mas vamos logar
+    });
+
+    socket.on('whatsapp_connecting', () => {
+      console.log('🔄 WhatsApp conectando... (Tenha fé)');
     });
 
     // Cleanup APENAS ao deslogar (não ao trocar de rota)
@@ -159,7 +179,12 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
       socketService.off('conversation_update');
       socketService.off('conversation_assigned');
       socketService.off('message_status_update');
-      
+
+      // Limpar os novos eventos tambem, senao vira bagunca
+      socketService.off('whatsapp_connected');
+      socketService.off('whatsapp_disconnected');
+      socketService.off('whatsapp_connecting');
+
       // Só desconectar se usuário deslogou
       if (!isAuthenticated) {
         socketService.disconnect();
