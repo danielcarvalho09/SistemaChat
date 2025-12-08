@@ -44,11 +44,13 @@ export function ChatArea({ conversationId, onToggleDetails }: ChatAreaProps) {
 
   useEffect(() => {
     if (conversationId) {
-      fetchMessages(conversationId);
+      // ✅ Buscar mensagens apenas quando a conversa muda (force = true)
+      // O WebSocket vai atualizar em tempo real, então não precisa buscar constantemente
+      fetchMessages(conversationId, true); // force = true apenas quando muda de conversa
       // Limpar contador de não lidas ao abrir a conversa
       clearUnread(conversationId);
     }
-  }, [conversationId, fetchMessages, clearUnread]);
+  }, [conversationId]); // Remover fetchMessages e clearUnread das dependências
 
   useEffect(() => {
     setReplyingTo(null);
@@ -195,7 +197,7 @@ export function ChatArea({ conversationId, onToggleDetails }: ChatAreaProps) {
         <div className="flex items-center gap-2">
           <ConversationTagMenu 
             conversationId={conversationId}
-            onTagsChange={() => fetchConversations()}
+            onTagsChange={() => fetchConversations(false)} // WebSocket já atualiza, usar cache
           />
           <Button 
             variant="ghost" 
@@ -242,7 +244,7 @@ export function ChatArea({ conversationId, onToggleDetails }: ChatAreaProps) {
                     onClick={async () => {
                       try {
                         await updateConversationStatus(conversationId, 'resolved');
-                        fetchConversations();
+                        fetchConversations(false); // WebSocket já atualiza, usar cache
                         setShowMenu(false);
                         alert('Conversa finalizada com sucesso');
                       } catch (error) {
@@ -261,7 +263,7 @@ export function ChatArea({ conversationId, onToggleDetails }: ChatAreaProps) {
                     onClick={async () => {
                       try {
                         await updateConversationStatus(conversationId, 'waiting');
-                        fetchConversations();
+                        fetchConversations(false); // WebSocket já atualiza, usar cache
                         setShowMenu(false);
                         alert('Conversa voltou para Aguardando');
                       } catch (error) {
@@ -301,7 +303,7 @@ export function ChatArea({ conversationId, onToggleDetails }: ChatAreaProps) {
           <ObservationCard 
             observation={conversation.internalNotes}
             conversationId={conversationId}
-            onUpdate={() => fetchConversations()}
+            onUpdate={() => fetchConversations(false)} // WebSocket já atualiza, usar cache
             isHighlighted={highlightObservation}
           />
         </div>

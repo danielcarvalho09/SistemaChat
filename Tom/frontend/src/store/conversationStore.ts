@@ -11,6 +11,11 @@ interface ConversationState {
   filter: 'all' | 'waiting' | 'in_progress' | 'resolved' | 'mine';
   searchQuery: string;
   typingUsers: Record<string, string[]>; // conversationId -> userIds
+  
+  // Cache para evitar requisições duplicadas
+  lastFetchTime: number; // Timestamp da última busca
+  isFetching: boolean; // Flag para evitar múltiplas requisições simultâneas
+  fetchPromise: Promise<void> | null; // Promise da requisição em andamento
 
   // Actions
   setConversations: (conversations: Conversation[]) => void;
@@ -30,7 +35,7 @@ interface ConversationState {
   setError: (error: string | null) => void;
   
   // API Actions
-  fetchConversations: () => Promise<void>;
+  fetchConversations: (force?: boolean) => Promise<void>;
   fetchMessages: (conversationId: string) => Promise<void>;
   sendMessage: (conversationId: string, content: string) => Promise<void>;
   updateConversationStatus: (conversationId: string, status: string) => Promise<void>;
@@ -46,6 +51,9 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
   filter: 'all',
   searchQuery: '',
   typingUsers: {},
+  lastFetchTime: 0,
+  isFetching: false,
+  fetchPromise: null,
 
   setConversations: (conversations) => {
     set({ conversations });
@@ -202,71 +210,115 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
   },
 
   // API Actions
-  fetchConversations: async () => {
-    const currentConversations = get().conversations;
-    console.log(`🔄 fetchConversations: Carregando conversas... (atualmente: ${currentConversations.length} conversas)`);
+  fetchConversations: async (force: boolean = false) => {
+    const state = get();
+    const currentConversations = state.conversations;
+    const now = Date.now();
+    const CACHE_DURATION_MS = 10000; // 10 segundos de cache
+    const timeSinceLastFetch = now - state.lastFetchTime;
     
-    set({ isLoading: true, error: null });
-    try {
-      const response = await api.get('/conversations');
-      const newConversations = response.data.data || [];
-      
-      console.log(`📥 fetchConversations: API retornou ${newConversations.length} conversas`);
-      
-      // ✅ Preservar conversas existentes se a API retornar vazio (evitar desaparecimento)
-      if (newConversations.length === 0 && currentConversations.length > 0) {
-        console.warn('⚠️ API retornou array vazio, mas temos conversas locais. Preservando conversas existentes para evitar desaparecimento.');
-        set({ isLoading: false });
-        return; // Não atualizar se API retornou vazio mas temos conversas locais
-      }
-      
-      // ✅ Se API retornou menos conversas do que temos localmente, fazer merge inteligente
-      // (preservar conversas locais que não estão na resposta da API)
-      if (newConversations.length > 0 && currentConversations.length > newConversations.length) {
-        console.warn(`⚠️ API retornou ${newConversations.length} conversas, mas temos ${currentConversations.length} localmente. Fazendo merge...`);
-        
-        // Criar mapa das novas conversas por ID
-        const newConversationsMap = new Map(newConversations.map(c => [c.id, c]));
-        
-        // Preservar conversas locais que não estão na resposta da API
-        const preservedConversations = currentConversations.filter(c => !newConversationsMap.has(c.id));
-        
-        // Combinar: novas conversas (atualizadas) + conversas preservadas (que não vieram da API)
-        const mergedConversations = [...newConversations, ...preservedConversations];
-        
-        console.log(`✅ fetchConversations: Merge completo - ${newConversations.length} novas + ${preservedConversations.length} preservadas = ${mergedConversations.length} total`);
-        set({ conversations: mergedConversations, isLoading: false });
-        return;
-      }
-      
-      // ✅ Se API retornou conversas, atualizar normalmente
-      if (newConversations.length > 0) {
-        console.log(`✅ fetchConversations: Atualizando com ${newConversations.length} conversas`);
-        set({ conversations: newConversations, isLoading: false });
-      } else {
-        // Se API retornou vazio E não temos conversas locais, está tudo bem (primeira carga)
-        console.log('ℹ️ fetchConversations: API retornou vazio e não há conversas locais (primeira carga)');
-        set({ conversations: [], isLoading: false });
-      }
-    } catch (error: any) {
-      console.error('❌ Erro ao carregar conversas:', error);
-      // ✅ Em caso de erro, preservar conversas existentes ao invés de limpar
-      if (currentConversations.length > 0) {
-        console.warn(`⚠️ Erro ao buscar conversas, preservando ${currentConversations.length} conversas existentes`);
-        set({ error: error.message || 'Erro ao carregar conversas', isLoading: false });
-        return; // Preservar conversas existentes em caso de erro
-      }
-      // Só limpar se não houver conversas existentes
-      console.log('ℹ️ Erro ao buscar conversas e não há conversas locais, limpando estado');
-      set({ error: error.message || 'Erro ao carregar conversas', isLoading: false, conversations: [] });
+    // ✅ Se já está buscando, retornar a promise existente (evitar requisições duplicadas)
+    if (state.isFetching && state.fetchPromise) {
+      console.log('⏭️ fetchConversations: Já existe uma requisição em andamento, aguardando...');
+      return state.fetchPromise;
     }
+    
+    // ✅ Se não for forçado e a última busca foi recente, não buscar novamente
+    if (!force && timeSinceLastFetch < CACHE_DURATION_MS && currentConversations.length > 0) {
+      console.log(`⏭️ fetchConversations: Cache ainda válido (${Math.round(timeSinceLastFetch/1000)}s atrás), usando dados locais`);
+      return;
+    }
+    
+    console.log(`🔄 fetchConversations: Carregando conversas... (atualmente: ${currentConversations.length} conversas, force: ${force})`);
+    
+    set({ isLoading: true, error: null, isFetching: true });
+    
+    // Criar promise para evitar requisições duplicadas
+    const fetchPromise = (async () => {
+      try {
+        const response = await api.get('/conversations');
+        const newConversations = response.data.data || [];
+        
+        console.log(`📥 fetchConversations: API retornou ${newConversations.length} conversas`);
+        
+        // ✅ Preservar conversas existentes se a API retornar vazio (evitar desaparecimento)
+        if (newConversations.length === 0 && currentConversations.length > 0) {
+          console.warn('⚠️ API retornou array vazio, mas temos conversas locais. Preservando conversas existentes para evitar desaparecimento.');
+          set({ isLoading: false, isFetching: false, fetchPromise: null, lastFetchTime: now });
+          return;
+        }
+        
+        // ✅ Se API retornou menos conversas do que temos localmente, fazer merge inteligente
+        // (preservar conversas locais que não estão na resposta da API)
+        if (newConversations.length > 0 && currentConversations.length > newConversations.length) {
+          console.warn(`⚠️ API retornou ${newConversations.length} conversas, mas temos ${currentConversations.length} localmente. Fazendo merge...`);
+          
+          // Criar mapa das novas conversas por ID
+          const newConversationsMap = new Map(newConversations.map(c => [c.id, c]));
+          
+          // Preservar conversas locais que não estão na resposta da API
+          const preservedConversations = currentConversations.filter(c => !newConversationsMap.has(c.id));
+          
+          // Combinar: novas conversas (atualizadas) + conversas preservadas (que não vieram da API)
+          const mergedConversations = [...newConversations, ...preservedConversations];
+          
+          console.log(`✅ fetchConversations: Merge completo - ${newConversations.length} novas + ${preservedConversations.length} preservadas = ${mergedConversations.length} total`);
+          set({ conversations: mergedConversations, isLoading: false, isFetching: false, fetchPromise: null, lastFetchTime: now });
+          return;
+        }
+        
+        // ✅ Se API retornou conversas, atualizar normalmente
+        if (newConversations.length > 0) {
+          console.log(`✅ fetchConversations: Atualizando com ${newConversations.length} conversas`);
+          set({ conversations: newConversations, isLoading: false, isFetching: false, fetchPromise: null, lastFetchTime: now });
+        } else {
+          // Se API retornou vazio E não temos conversas locais, está tudo bem (primeira carga)
+          console.log('ℹ️ fetchConversations: API retornou vazio e não há conversas locais (primeira carga)');
+          set({ conversations: [], isLoading: false, isFetching: false, fetchPromise: null, lastFetchTime: now });
+        }
+      } catch (error: any) {
+        console.error('❌ Erro ao carregar conversas:', error);
+        // ✅ Em caso de erro, preservar conversas existentes ao invés de limpar
+        if (currentConversations.length > 0) {
+          console.warn(`⚠️ Erro ao buscar conversas, preservando ${currentConversations.length} conversas existentes`);
+          set({ error: error.message || 'Erro ao carregar conversas', isLoading: false, isFetching: false, fetchPromise: null });
+          return;
+        }
+        // Só limpar se não houver conversas existentes
+        console.log('ℹ️ Erro ao buscar conversas e não há conversas locais, limpando estado');
+        set({ error: error.message || 'Erro ao carregar conversas', isLoading: false, conversations: [], isFetching: false, fetchPromise: null });
+      }
+    })();
+    
+    // Armazenar promise para evitar requisições duplicadas
+    set({ fetchPromise });
+    
+    return fetchPromise;
   },
 
-  fetchMessages: async (conversationId: string) => {
+  fetchMessages: async (conversationId: string, force: boolean = false) => {
+    const state = get();
+    const existingMessages = state.messages[conversationId] || [];
+    const now = Date.now();
+    const CACHE_DURATION_MS = 5000; // 5 segundos de cache para mensagens
+    
+    // ✅ Se já tem mensagens e não é forçado, verificar cache
+    if (!force && existingMessages.length > 0) {
+      // Verificar se há timestamp da última busca (poderia adicionar ao estado se necessário)
+      // Por enquanto, se já tem mensagens e não é forçado, não buscar novamente
+      // O WebSocket vai atualizar em tempo real
+      console.log(`⏭️ fetchMessages: Já existem ${existingMessages.length} mensagens para ${conversationId}, usando cache (WebSocket atualiza em tempo real)`);
+      return;
+    }
+    
     try {
+      console.log(`🔄 fetchMessages: Carregando mensagens para conversa ${conversationId}...`);
       const response = await api.get(`/conversations/${conversationId}/messages`);
-      get().setMessages(conversationId, response.data.data || []);
+      const fetchedMessages = response.data.data || [];
+      console.log(`📥 fetchMessages: API retornou ${fetchedMessages.length} mensagens para ${conversationId}`);
+      get().setMessages(conversationId, fetchedMessages);
     } catch (error: any) {
+      console.error(`❌ Erro ao carregar mensagens para ${conversationId}:`, error);
       set({ error: error.message || 'Erro ao carregar mensagens' });
     }
   },

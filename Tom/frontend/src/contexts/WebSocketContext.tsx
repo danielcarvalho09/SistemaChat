@@ -68,7 +68,7 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
         // Esperar 2 segundos para sincronização completar
         await new Promise(resolve => setTimeout(resolve, 2000));
         // Recarregar lista de conversas para pegar mensagens sincronizadas
-        await fetchConversations();
+        await fetchConversations(false); // Usar cache - WebSocket já atualiza em tempo real
         console.log('✅ Conversas recarregadas após sincronização');
       } catch (error) {
         console.error('❌ Erro ao recarregar após sincronização:', error);
@@ -156,7 +156,7 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
     // Escutar atribuição de conversa
     socket.on('conversation_assigned', (data: { conversationId: string; userId: string }) => {
       console.log('👤 Conversa atribuída via WebSocket:', data);
-      fetchConversations();
+      fetchConversations(false); // WebSocket já atualiza, usar cache
     });
 
     // Escutar status de mensagem
@@ -234,7 +234,7 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
   const syncMessages = async () => {
     try {
       console.log('🔄 Sincronização manual iniciada...');
-      await fetchConversations();
+      await fetchConversations(false); // Usar cache
       console.log('✅ Sincronização manual completa');
     } catch (error) {
       console.error('❌ Erro na sincronização manual:', error);

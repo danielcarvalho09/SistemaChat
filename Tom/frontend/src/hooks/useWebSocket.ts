@@ -76,7 +76,7 @@ export function useWebSocket() {
     // Escutar atribuição de conversa
     socketService.on('conversation_assigned', (data: { conversationId: string; userId: string }) => {
       console.log('👤 Conversa atribuída via WebSocket:', data);
-      fetchConversations(); // Recarregar lista
+      fetchConversations(false); // WebSocket já atualiza, usar cache
     });
 
     // Escutar status de mensagem

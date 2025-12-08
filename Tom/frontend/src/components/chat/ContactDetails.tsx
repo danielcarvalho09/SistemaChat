@@ -129,7 +129,7 @@ export function ContactDetails({ conversationId, onClose }: ContactDetailsProps)
             onTransfer={() => {
               setShowTransferModal(false);
               // Recarregar lista de conversas para atualizar dados
-              fetchConversations();
+              fetchConversations(false); // WebSocket já atualiza, usar cache
             }}
           />
         )}

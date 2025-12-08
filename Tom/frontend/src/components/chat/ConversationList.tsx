@@ -19,12 +19,14 @@ export function ConversationList({
   const [statusFilter, setStatusFilter] = useState<string>('all'); // Mostrar todas por padrão
 
   useEffect(() => {
-    fetchConversations();
-  }, [fetchConversations]);
+    // ✅ Carregar apenas uma vez ao montar o componente
+    // O WebSocket vai atualizar em tempo real, então não precisa buscar constantemente
+    fetchConversations(true); // force = true apenas na primeira carga
+  }, []); // Remover fetchConversations das dependências para evitar loops
 
   const handleAcceptConversation = () => {
-    // Recarregar conversas após aceitar
-    fetchConversations();
+    // WebSocket já atualiza em tempo real, não precisa buscar novamente
+    // fetchConversations(false); // Removido - WebSocket cuida da atualização
   };
 
   const filteredConversations = conversations.filter((conv) => {
@@ -75,7 +77,7 @@ export function ConversationList({
           <Button
             variant="outline"
             size="icon"
-            onClick={() => fetchConversations()}
+            onClick={() => fetchConversations(true)} // Botão manual do usuário - force=true
             disabled={isLoading}
             title="Recarregar conversas"
             className="border-gray-300 bg-white text-gray-900 hover:bg-gray-100"
