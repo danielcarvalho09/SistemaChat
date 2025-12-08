@@ -1032,13 +1032,15 @@ class BaileysManager {
       const lastDisconnectAt = connection?.lastDisconnectAt;
 
       // ✅ LÓGICA DE SINCRONIZAÇÃO:
-      // 1. Primeira conexão (sem firstConnectedAt): Não processar histórico antigo
+      // 1. Primeira conexão (sem firstConnectedAt): Processar histórico (deduplicação vai pular duplicatas)
       // 2. Reconexão (com lastDisconnectAt): Processar apenas desde lastDisconnectAt
       // 3. Mensagens em tempo real (notify): Sempre processar
 
+      // ✅ CORRIGIDO: Permitir processar histórico mesmo na primeira conexão
+      // A deduplicação por externalId vai garantir que não dupliquemos mensagens
       if (!firstConnectedAt && type === 'history') {
-        logger.info(`[Baileys] ⏭️ Skipping history sync - primeira conexão (sem firstConnectedAt)`);
-        return;
+        logger.info(`[Baileys] 📜 Processing history sync on first connection - deduplication will skip existing messages`);
+        // Não retornar - continuar processamento
       }
 
       // ✅ IMPORTANTE: Atualizar client.lastSyncFrom com lastDisconnectAt para filtro correto
@@ -1223,10 +1225,11 @@ class BaileysManager {
           messageTimestamp = new Date(Number(msg.key.messageTimestamp) * 1000);
         }
 
-        // ✅ FILTRO CRÍTICO: Durante sincronização após reconexão, processar apenas mensagens desde lastDisconnectAt
+        // ✅ FILTRO AJUSTADO: Durante sincronização após reconexão, processar apenas mensagens desde lastDisconnectAt
         // syncWindowStart = lastDisconnectAt (momento em que conexão caiu)
         // Isso garante que apenas mensagens perdidas durante desconexão sejam recuperadas
-        if (syncWindowStart && (type === 'history' || type === 'append')) {
+        // ✅ CORRIGIDO: Aplicar filtro apenas se for reconexão (não primeira conexão)
+        if (syncWindowStart && firstConnectedAt && (type === 'history' || type === 'append')) {
           if (messageTimestamp && messageTimestamp < syncWindowStart) {
             logger.debug(
               `[Baileys] ⏭️ Skipping message before lastDisconnectAt (${messageTimestamp.toISOString()} < ${syncWindowStart.toISOString()})`
@@ -1243,25 +1246,15 @@ class BaileysManager {
         // ===== FILTROS =====
 
         // 0. Filtrar mensagens MUITO antigas (anteriores à primeira conexão - margem de segurança)
-        // ✅ CORRIGIDO: Processar TODAS mensagens desde firstConnectedAt
+        // ✅ CORRIGIDO: Processar TODAS mensagens (deduplicação vai pular duplicatas)
+        // Removido filtro de firstConnectedAt para permitir sincronizar histórico completo
         // A deduplicação (por externalId) vai pular mensagens já sincronizadas automaticamente
-        // Isso garante que mensagens perdidas durante desconexão sejam recuperadas
-        if (firstConnectedAt && type === 'history') {
-          if (!messageTimestamp) {
-            // Mensagem sem timestamp - processar (pode ser recente)
-            logger.debug(`[Baileys] ✅ Processing message without timestamp (will deduplicate if exists)`);
-          } else {
-            // ✅ CORRIGIDO: Usar firstConnectedAt como limite mínimo (sem margem negativa)
-            // Processar todas mensagens desde a primeira conexão
-            // Deduplicação vai pular as que já existem
-            if (messageTimestamp < firstConnectedAt) {
-              logger.debug(`[Baileys] ⏭️ Skipping message from ${messageTimestamp.toISOString()} (before first connection at ${firstConnectedAt.toISOString()})`);
-              syncStats.skipped++;
-              continue;
-            } else {
-              logger.debug(`[Baileys] ✅ Processing message from ${messageTimestamp.toISOString()} (since first connection, will deduplicate if exists)`);
-            }
-          }
+        // Isso garante que conversas antigas possam ser sincronizadas
+        if (!messageTimestamp && type === 'history') {
+          // Mensagem sem timestamp - processar (pode ser recente ou antiga)
+          logger.debug(`[Baileys] ✅ Processing message without timestamp (will deduplicate if exists)`);
+        } else if (messageTimestamp) {
+          logger.debug(`[Baileys] ✅ Processing message from ${messageTimestamp.toISOString()} (will deduplicate if exists)`);
         }
 
         // 1. Filtrar STATUS do WhatsApp

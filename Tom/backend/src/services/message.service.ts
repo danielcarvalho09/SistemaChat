@@ -576,24 +576,8 @@ export class MessageService {
     }
   ): Promise<void> {
     try {
-      // 🔒 DEDUPLICAÇÃO: Verificar se mensagem já foi processada
-      // ✅ IMPORTANTE: Isso garante que mensagens já sincronizadas sejam puladas durante reconexão
-      // Permite sincronizar desde firstConnectedAt sem duplicar mensagens existentes
-      if (externalId) {
-        const existingMessage = await this.prisma.message.findFirst({
-          where: {
-            externalId,
-            connectionId,
-          },
-        });
-
-        if (existingMessage) {
-          logger.debug(`[MessageService] ⏭️ Message ${externalId} already exists (deduplication), skipping`);
-          return; // Não processar duplicata
-        }
-      } else {
-        logger.warn(`[MessageService] ⚠️ Message without externalId received from ${from} - cannot deduplicate`);
-      }
+      // ✅ DEDUPLICAÇÃO REMOVIDA DAQUI - será feita depois de buscar/criar conversa
+      // Isso garante que conversas só sejam criadas quando realmente houver mensagem nova
       // Verificar se é um grupo
       const isGroup = from.endsWith('@g.us');
 
@@ -655,6 +639,26 @@ export class MessageService {
         });
         logger.info(`[MessageService] 📝 Updated pushName for ${phoneNumber}: ${pushName}`);
         contact.pushName = pushName; // Atualizar objeto em memória
+      }
+
+      // ✅ DEDUPLICAÇÃO ANTECIPADA: Verificar se mensagem já existe ANTES de criar/buscar conversa
+      // Isso evita criar conversas sem mensagens
+      if (externalId) {
+        const existingMessageCheck = await this.prisma.message.findFirst({
+          where: {
+            externalId,
+            connectionId,
+          },
+          select: {
+            id: true,
+            conversationId: true,
+          },
+        });
+
+        if (existingMessageCheck) {
+          logger.debug(`[MessageService] ⏭️ Message ${externalId} already exists (early deduplication), skipping conversation creation`);
+          return; // Não processar duplicata - não criar conversa
+        }
       }
 
       // 🔍 Buscar conversa existente para este contato e conexão
