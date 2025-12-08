@@ -19,8 +19,10 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
   const { isAuthenticated } = useAuthStore();
   const [isConnected, setIsConnected] = React.useState(false);
   const hasInitialized = useRef(false);
-  // O Daniel adora deixar variaveis inuteis largadas por ai. Limpando a bagunca.
-  // const syncTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const lastWhatsAppConnectionState = useRef<Map<string, 'connected' | 'disconnected'>>(new Map()); // Rastrear estado anterior de cada conexão
+  const syncInProgress = useRef(false); // Flag para evitar múltiplas sincronizações simultâneas
+  const lastSyncTime = useRef<number>(0); // Timestamp da última sincronização
+  const SYNC_COOLDOWN_MS = 30000; // 30 segundos de cooldown entre sincronizações
 
   useEffect(() => {
     // Só conectar se estiver autenticado
@@ -42,7 +44,24 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
     const socket = socketService.connect();
 
     // Função para sincronizar mensagens e recarregar conversas
-    const syncAndReload = async () => {
+    // SÓ sincroniza se realmente houver uma reconexão (mudança de estado desconectado -> conectado)
+    const syncAndReload = async (connectionId?: string, isReconnection: boolean = false) => {
+      // Evitar múltiplas sincronizações simultâneas
+      if (syncInProgress.current) {
+        console.log('⏭️ Sincronização já em andamento, ignorando...');
+        return;
+      }
+
+      // Cooldown: não sincronizar se já sincronizou há menos de 30 segundos
+      const timeSinceLastSync = Date.now() - lastSyncTime.current;
+      if (timeSinceLastSync < SYNC_COOLDOWN_MS && !isReconnection) {
+        console.log(`⏭️ Sincronização recente (${Math.round(timeSinceLastSync/1000)}s atrás), ignorando...`);
+        return;
+      }
+
+      syncInProgress.current = true;
+      lastSyncTime.current = Date.now();
+
       try {
         console.log('🔄 Sincronizando e recarregando conversações...');
         // Aguardar sincronização pelo socketService (já acontece automaticamente)
@@ -53,6 +72,8 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
         console.log('✅ Conversas recarregadas após sincronização');
       } catch (error) {
         console.error('❌ Erro ao recarregar após sincronização:', error);
+      } finally {
+        syncInProgress.current = false;
       }
     };
 
@@ -152,14 +173,33 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
     // --- EVENTOS DO WHATSAPP (Que o Daniel "esqueceu") ---
     // Adicionando listeners globais porque confiar so no componente visual eh pedir pra dar erro
 
-    socket.on('whatsapp_connected', () => {
-      console.log('✅ WhatsApp conectado globalmente');
-      // Sincronizar ao reconectar
-      syncAndReload();
+    socket.on('whatsapp_connected', (data?: { connectionId: string } | string) => {
+      // Suportar tanto objeto quanto string (compatibilidade)
+      const connectionId = typeof data === 'string' ? data : (data?.connectionId || 'unknown');
+      console.log('✅ WhatsApp conectado globalmente:', connectionId);
+      
+      // ✅ CRÍTICO: Só sincronizar se realmente houver uma RECONEXÃO
+      // (mudança de estado: desconectado -> conectado)
+      const previousState = lastWhatsAppConnectionState.current.get(connectionId);
+      
+      if (previousState === 'disconnected' || previousState === undefined) {
+        // Realmente é uma reconexão - sincronizar
+        console.log('🔄 Reconexão detectada, sincronizando...');
+        lastWhatsAppConnectionState.current.set(connectionId, 'connected');
+        syncAndReload(connectionId, true); // isReconnection = true
+      } else {
+        // Já estava conectado - apenas atualizar estado, SEM sincronizar
+        console.log('ℹ️ WhatsApp já estava conectado, apenas atualizando estado (sem sincronizar)');
+        lastWhatsAppConnectionState.current.set(connectionId, 'connected');
+      }
     });
 
-    socket.on('whatsapp_disconnected', () => {
-      console.warn('❌ WhatsApp desconectado globalmente');
+    socket.on('whatsapp_disconnected', (data?: { connectionId: string } | string) => {
+      // Suportar tanto objeto quanto string (compatibilidade)
+      const connectionId = typeof data === 'string' ? data : (data?.connectionId || 'unknown');
+      console.warn('❌ WhatsApp desconectado globalmente:', connectionId);
+      // Atualizar estado para desconectado
+      lastWhatsAppConnectionState.current.set(connectionId, 'disconnected');
     });
 
     socket.on('whatsapp_connecting', () => {

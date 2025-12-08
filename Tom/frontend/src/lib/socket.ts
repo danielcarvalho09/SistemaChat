@@ -321,22 +321,31 @@ class SocketService {
 
   /**
    * Inicia sincronização automática periódica
-   * ESTRATÉGIA DUPLA:
-   * 1. WebSocket sync a cada 30s (se conectado)
-   * 2. Polling de fallback a cada 15s (SEMPRE funciona, mesmo em background)
+   * ESTRATÉGIA OTIMIZADA:
+   * 1. WebSocket sync a cada 2 minutos (se conectado) - reduzido de 30s
+   * 2. Polling de fallback a cada 60s (SEMPRE funciona, mesmo em background) - reduzido de 10s
+   * 
+   * NOTA: Sincronização periódica foi reduzida porque:
+   * - WebSocket já recebe mensagens em tempo real via eventos
+   * - Sincronização só é necessária em reconexões ou quando há muito tempo sem sync
    */
   private startSyncInterval(): void {
     this.stopSyncInterval();
     
-    // Sincronizar a cada 30 segundos via WebSocket
+    // Sincronizar a cada 2 minutos via WebSocket (reduzido de 30s)
+    // Isso é apenas uma garantia - mensagens já chegam via eventos em tempo real
     this.syncInterval = setInterval(() => {
       if (this.socket?.connected) {
-        console.log('🔄 Sincronização WebSocket periódica...');
-        this.syncAllMessages().catch(err => {
-          console.error('❌ Erro na sincronização periódica:', err);
-        });
+        const timeSinceLastSync = Date.now() - this.lastSyncTime;
+        // Só sincronizar se passou mais de 1 minuto desde a última sync
+        if (timeSinceLastSync > 60000) {
+          console.log('🔄 Sincronização WebSocket periódica (garantia)...');
+          this.syncAllMessages().catch(err => {
+            console.error('❌ Erro na sincronização periódica:', err);
+          });
+        }
       }
-    }, 30000); // 30 segundos
+    }, 120000); // 2 minutos (aumentado de 30s)
     
     // POLLING DE FALLBACK - funciona SEMPRE, mesmo sem WebSocket
     this.startPolling();
@@ -346,41 +355,37 @@ class SocketService {
    * Polling de fallback - funciona mesmo quando WebSocket está morto
    * Usa HTTP simples para sincronizar
    * CRUCIAL para funcionar em background
-   * VERSÃO AGRESSIVA E ROBUSTA
+   * VERSÃO OTIMIZADA: Só sincroniza quando realmente necessário
    */
   private startPolling(): void {
     this.stopPolling();
     
-    // POLLING AGRESSIVO: a cada 10 segundos (mais rápido para pegar mensagens)
-    // SEMPRE funciona, mesmo com navegador em background (HTTP não é pausado)
+    // POLLING OTIMIZADO: a cada 5 minutos
+    // Só sincroniza se WebSocket estiver offline OU se passou muito tempo sem sync
     this.pollingInterval = setInterval(async () => {
       const timeSinceLastSync = Date.now() - this.lastSyncTime;
       const isConnected = this.socket?.connected || false;
       
-      // ESTRATÉGIA 1: Se passou muito tempo sem sync, forçar (mesmo com WebSocket conectado)
-      if (timeSinceLastSync > 15000) { // 15 segundos sem sync
-        console.log(`📡 POLLING: Sem sync há ${Math.round(timeSinceLastSync/1000)}s - forçando...`);
-        await this.syncAllMessages();
-        return;
-      }
-      
-      // ESTRATÉGIA 2: Se WebSocket offline, polling vira o método principal
+      // ESTRATÉGIA 1: Se WebSocket offline, polling vira o método principal
       if (!isConnected) {
         console.log('📡 POLLING: WebSocket offline - modo fallback ativo');
         await this.syncAllMessages();
         return;
       }
       
-      // ESTRATÉGIA 3: Polling periódico mesmo conectado (redundância)
-      // A cada 3 ciclos (30 segundos), forçar sync via HTTP para garantir
-      const cycleCount = Math.floor((Date.now() - this.lastSyncTime) / 10000);
-      if (cycleCount >= 3) {
-        console.log('📡 POLLING: Sync de redundância (garantia a cada 30s)');
+      // ESTRATÉGIA 2: Se passou MUITO tempo sem sync (mais de 5 minutos), forçar
+      // Isso garante que mesmo se o WebSocket estiver "zumbi", ainda sincroniza
+      if (timeSinceLastSync > 300000) { // 5 minutos sem sync
+        console.log(`📡 POLLING: Sem sync há ${Math.round(timeSinceLastSync/1000)}s - forçando...`);
         await this.syncAllMessages();
+        return;
       }
-    }, 10000); // 10 segundos (mais agressivo)
+      
+      // Se WebSocket está conectado e sincronizou recentemente, não fazer nada
+      // (evitar sincronizações desnecessárias)
+    }, 300000); // 5 minutos (300000ms)
     
-    console.log('✅ Polling agressivo iniciado (a cada 10s)');
+    console.log('✅ Polling otimizado iniciado (a cada 5 minutos, apenas se necessário)');
   }
 
   private stopPolling(): void {
