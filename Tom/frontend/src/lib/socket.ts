@@ -17,6 +17,8 @@ class SocketService {
   private pollingInterval: NodeJS.Timeout | null = null;
   private lastSyncTime: number = Date.now();
   private forceSyncOnNextVisible: boolean = false;
+  private rateLimitCooldownUntil: number = 0; // Timestamp até quando não deve sincronizar devido a rate limit
+  private isSyncing: boolean = false; // Flag para evitar múltiplas sincronizações simultâneas
 
   connect(token: string): Socket {
     this.token = token;
@@ -55,10 +57,22 @@ class SocketService {
       this.startHeartbeat();
       this.startSyncInterval();
       
-      // Sincronizar mensagens imediatamente ao conectar/reconectar
-      this.syncAllMessages().catch(err => {
-        console.error('❌ Erro ao sincronizar mensagens ao conectar:', err);
-      });
+      // Sincronizar mensagens ao conectar/reconectar (apenas se não estiver em cooldown)
+      // Verificar se realmente é uma reconexão (última sync há mais de 1 minuto)
+      const timeSinceLastSync = Date.now() - this.lastSyncTime;
+      const isInRateLimitCooldown = Date.now() < this.rateLimitCooldownUntil;
+      
+      if (!isInRateLimitCooldown && timeSinceLastSync > 60000) { // Só sincronizar se passou mais de 1 minuto
+        console.log('🔄 WebSocket conectado - sincronizando...');
+        this.syncAllMessages().catch(err => {
+          console.error('❌ Erro ao sincronizar mensagens ao conectar:', err);
+        });
+      } else if (isInRateLimitCooldown) {
+        const remainingMinutes = Math.ceil((this.rateLimitCooldownUntil - Date.now()) / 1000 / 60);
+        console.log(`⏭️ WebSocket conectado mas em cooldown (${remainingMinutes}min restantes) - pulando sincronização`);
+      } else {
+        console.log('ℹ️ WebSocket conectado mas sincronização recente - não é necessário sincronizar');
+      }
     });
 
     this.socket.on('disconnect', (reason) => {
@@ -86,10 +100,22 @@ class SocketService {
     this.socket.on('reconnect', (attemptNumber) => {
       console.log(`✅ Reconectado após ${attemptNumber} tentativas`);
       this.reconnectAttempts = 0;
-      // Sincronizar ao reconectar
-      this.syncAllMessages().catch(err => {
-        console.error('❌ Erro ao sincronizar após reconexão:', err);
-      });
+      
+      // Sincronizar ao reconectar (apenas se não estiver em cooldown)
+      const timeSinceLastSync = Date.now() - this.lastSyncTime;
+      const isInRateLimitCooldown = Date.now() < this.rateLimitCooldownUntil;
+      
+      if (!isInRateLimitCooldown && timeSinceLastSync > 60000) { // Só sincronizar se passou mais de 1 minuto
+        console.log('🔄 WebSocket reconectado - sincronizando...');
+        this.syncAllMessages().catch(err => {
+          console.error('❌ Erro ao sincronizar após reconexão:', err);
+        });
+      } else if (isInRateLimitCooldown) {
+        const remainingMinutes = Math.ceil((this.rateLimitCooldownUntil - Date.now()) / 1000 / 60);
+        console.log(`⏭️ WebSocket reconectado mas em cooldown (${remainingMinutes}min restantes) - pulando sincronização`);
+      } else {
+        console.log('ℹ️ WebSocket reconectado mas sincronização recente - não é necessário sincronizar');
+      }
     });
 
     this.socket.on('reconnect_attempt', (attemptNumber) => {
@@ -152,81 +178,51 @@ class SocketService {
         console.log(`⏱️  Tempo desde última sync: ${Math.round(timeSinceLastSync/1000)}s`);
         console.log(`🏓 Tempo desde último pong: ${Math.round(timeSinceLastPong/1000)}s`);
         
-        // ESTRATÉGIA AGRESSIVA DE RECONEXÃO
+        // ESTRATÉGIA OTIMIZADA DE RECONEXÃO (sem sincronizações múltiplas)
         if (!this.socket?.connected) {
-          console.log('🔄 WebSocket DESCONECTADO - reconectando IMEDIATAMENTE...');
+          console.log('🔄 WebSocket DESCONECTADO - reconectando...');
           this.socket?.connect();
         } else if (timeSinceLastPong > 30000) {
           // Conexão zumbi detectada (mais de 30s sem pong)
-          console.warn('⚠️⚠️ CONEXÃO ZUMBI DETECTADA - forçando reconexão completa...');
+          console.warn('⚠️ CONEXÃO ZUMBI DETECTADA - forçando reconexão completa...');
           this.socket?.disconnect();
           setTimeout(() => this.socket?.connect(), 500);
-        } else if (timeSinceLastSync > 60000) {
-          // Muito tempo sem sync (mais de 1 minuto)
-          console.warn('⚠️ Muito tempo sem sync - verificando saúde da conexão...');
-          // Forçar ping para testar conexão
+        } else if (timeSinceLastPong > 60000) {
+          // Muito tempo sem pong - apenas ping para testar conexão
+          console.log('⚠️ Muito tempo sem pong - testando conexão...');
           if (this.socket?.connected) {
             this.socket.emit('ping');
           }
         }
         
-        // SINCRONIZAÇÃO TRIPLA AGRESSIVA ao voltar
-        console.log('🔄🔄🔄 Iniciando SINCRONIZAÇÃO TRIPLA...');
+        // Sincronização única e condicional ao voltar (apenas se necessário e não estiver em cooldown)
+        const timeSinceLastSync = Date.now() - this.lastSyncTime;
+        const isInRateLimitCooldown = Date.now() < this.rateLimitCooldownUntil;
         
-        // Sync 1: IMEDIATA
-        this.syncAllMessages().catch(err => {
-          console.error('❌ Erro na sync imediata:', err);
-        });
-        
-        // Sync 2: Após 1 segundo (garantia)
-        setTimeout(() => {
-          console.log('🔄 Sync 2/3 (1s após voltar)...');
+        if (!isInRateLimitCooldown && timeSinceLastSync > 300000) { // Só sincronizar se passou mais de 5 minutos
+          console.log('🔄 Página voltou ao foco - sincronizando (última sync há mais de 5min)...');
           this.syncAllMessages().catch(err => {
-            console.error('❌ Erro na sync 2:', err);
+            console.error('❌ Erro na sincronização:', err);
           });
-        }, 1000);
-        
-        // Sync 3: Após 3 segundos (garantia final)
-        setTimeout(() => {
-          console.log('🔄 Sync 3/3 FINAL (3s após voltar)...');
-          this.syncAllMessages().catch(err => {
-            console.error('❌ Erro na sync final:', err);
-          });
-        }, 3000);
+        } else if (isInRateLimitCooldown) {
+          const remainingCooldown = Math.ceil((this.rateLimitCooldownUntil - Date.now()) / 1000 / 60);
+          console.log(`⏭️ Em cooldown de rate limit (${remainingCooldown}min restantes) - pulando sincronização`);
+        } else {
+          console.log('ℹ️ Sincronização recente, não é necessário sincronizar novamente');
+        }
         
         // Limpar flag de forçar sync
         this.forceSyncOnNextVisible = false;
         
       } else {
-        console.log('🌙🌙🌙 PÁGINA INDO PARA BACKGROUND 🌙🌙🌙');
-        console.log('⚠️ BROWSERS podem pausar timers JavaScript após alguns minutos');
-        console.log('✅ POLLING HTTP continuará (não é pausado pelos browsers)');
-        console.log('✅ Cronjob externo garantirá sincronização mesmo com app fechado');
+        console.log('🌙 Página indo para background');
+        // Não sincronizar ao ir para background - o polling cuidará disso
+        // Marcar para verificar quando voltar (mas sem forçar sync imediata)
+        this.forceSyncOnNextVisible = false;
         
-        // Marcar para forçar sync quando voltar
-        this.forceSyncOnNextVisible = true;
-        
-        // SINCRONIZAÇÃO DUPLA antes de ir para background
-        console.log('🔄 Sincronizando antes de pausar...');
-        
-        // Sync 1: Imediata
-        this.syncAllMessages().catch(err => {
-          console.error('❌ Erro ao sincronizar antes de background:', err);
-        });
-        
-        // Sync 2: Após 500ms (garantia)
-        setTimeout(() => {
-          this.syncAllMessages().catch(err => {
-            console.error('❌ Erro na sync de garantia antes de background:', err);
-          });
-        }, 500);
-        
-        // Enviar múltiplos pings antes de pausar (manter conexão viva)
+        // Apenas um ping para manter conexão viva
         if (this.socket?.connected) {
-          console.log('🏓 Enviando pings extras antes de pausar...');
           this.socket.emit('ping');
-          setTimeout(() => this.socket?.emit('ping'), 200);
-          setTimeout(() => this.socket?.emit('ping'), 400);
         }
       }
     };
@@ -332,20 +328,22 @@ class SocketService {
   private startSyncInterval(): void {
     this.stopSyncInterval();
     
-    // Sincronizar a cada 2 minutos via WebSocket (reduzido de 30s)
+    // Sincronizar a cada 10 minutos via WebSocket (aumentado para evitar rate limit)
     // Isso é apenas uma garantia - mensagens já chegam via eventos em tempo real
     this.syncInterval = setInterval(() => {
       if (this.socket?.connected) {
         const timeSinceLastSync = Date.now() - this.lastSyncTime;
-        // Só sincronizar se passou mais de 1 minuto desde a última sync
-        if (timeSinceLastSync > 60000) {
+        const isInRateLimitCooldown = Date.now() < this.rateLimitCooldownUntil;
+        
+        // Só sincronizar se passou mais de 10 minutos desde a última sync e não está em cooldown
+        if (!isInRateLimitCooldown && timeSinceLastSync > 600000) { // 10 minutos
           console.log('🔄 Sincronização WebSocket periódica (garantia)...');
           this.syncAllMessages().catch(err => {
             console.error('❌ Erro na sincronização periódica:', err);
           });
         }
       }
-    }, 120000); // 2 minutos (aumentado de 30s)
+    }, 600000); // 10 minutos (aumentado de 2 minutos para evitar rate limit)
     
     // POLLING DE FALLBACK - funciona SEMPRE, mesmo sem WebSocket
     this.startPolling();
@@ -362,9 +360,18 @@ class SocketService {
     
     // POLLING OTIMIZADO: a cada 5 minutos
     // Só sincroniza se WebSocket estiver offline OU se passou muito tempo sem sync
+    // E respeita cooldown de rate limit
     this.pollingInterval = setInterval(async () => {
       const timeSinceLastSync = Date.now() - this.lastSyncTime;
       const isConnected = this.socket?.connected || false;
+      const isInRateLimitCooldown = Date.now() < this.rateLimitCooldownUntil;
+      
+      // Se está em cooldown de rate limit, não fazer nada
+      if (isInRateLimitCooldown) {
+        const remainingMinutes = Math.ceil((this.rateLimitCooldownUntil - Date.now()) / 1000 / 60);
+        console.log(`📡 POLLING: Em cooldown de rate limit (${remainingMinutes}min restantes) - pulando`);
+        return;
+      }
       
       // ESTRATÉGIA 1: Se WebSocket offline, polling vira o método principal
       if (!isConnected) {
@@ -373,10 +380,11 @@ class SocketService {
         return;
       }
       
-      // ESTRATÉGIA 2: Se passou MUITO tempo sem sync (mais de 5 minutos), forçar
+      // ESTRATÉGIA 2: Se passou MUITO tempo sem sync (mais de 10 minutos), forçar
       // Isso garante que mesmo se o WebSocket estiver "zumbi", ainda sincroniza
-      if (timeSinceLastSync > 300000) { // 5 minutos sem sync
-        console.log(`📡 POLLING: Sem sync há ${Math.round(timeSinceLastSync/1000)}s - forçando...`);
+      // Aumentado para 10 minutos para evitar rate limit
+      if (timeSinceLastSync > 600000) { // 10 minutos sem sync
+        console.log(`📡 POLLING: Sem sync há ${Math.round(timeSinceLastSync/1000/60)}min - forçando...`);
         await this.syncAllMessages();
         return;
       }
@@ -407,6 +415,21 @@ class SocketService {
    * FUNCIONA VIA HTTP - NÃO DEPENDE DE WEBSOCKET
    */
   private async syncAllMessages(): Promise<void> {
+    // Evitar múltiplas sincronizações simultâneas
+    if (this.isSyncing) {
+      console.log('⏭️ Sincronização já em andamento, ignorando...');
+      return;
+    }
+
+    // Verificar se está em cooldown de rate limit
+    if (Date.now() < this.rateLimitCooldownUntil) {
+      const remainingMinutes = Math.ceil((this.rateLimitCooldownUntil - Date.now()) / 1000 / 60);
+      console.log(`⏭️ Em cooldown de rate limit (${remainingMinutes}min restantes) - pulando sincronização`);
+      return;
+    }
+
+    this.isSyncing = true;
+    
     try {
       this.lastSyncTime = Date.now();
       
@@ -416,9 +439,32 @@ class SocketService {
       
       // Se estava marcado para forçar sync, limpar flag
       this.forceSyncOnNextVisible = false;
-    } catch (error) {
-      // Silenciar erro se não autenticado ou sem permissão
-      console.debug('Sincronização ignorada:', error);
+      
+      // Resetar cooldown de rate limit em caso de sucesso
+      this.rateLimitCooldownUntil = 0;
+    } catch (error: any) {
+      // Tratar erro 429 (Too Many Requests)
+      if (error?.response?.status === 429) {
+        const retryAfter = error?.response?.data?.message || '';
+        // Extrair minutos do retry message (ex: "retry in 9 minutes")
+        const match = retryAfter.match(/(\d+)\s*minute/i);
+        const minutes = match ? parseInt(match[1]) : 10; // Default 10 minutos se não conseguir extrair
+        const cooldownMs = minutes * 60 * 1000;
+        
+        this.rateLimitCooldownUntil = Date.now() + cooldownMs;
+        console.warn(`⚠️ Rate limit atingido - cooldown de ${minutes} minutos ativado`);
+        console.warn(`⏭️ Próxima sincronização permitida em ${minutes} minutos`);
+        
+        // Não tentar sincronizar novamente durante o cooldown
+        return;
+      }
+      
+      // Silenciar outros erros (não autenticado, sem permissão, etc)
+      if (error?.response?.status !== 401 && error?.response?.status !== 403) {
+        console.debug('Sincronização ignorada:', error);
+      }
+    } finally {
+      this.isSyncing = false;
     }
   }
 
@@ -470,8 +516,17 @@ class SocketService {
   /**
    * Força sincronização manual completa
    * Pública para uso em componentes
+   * Respeita rate limit mesmo quando chamada manualmente
    */
   async forceSyncNow(): Promise<void> {
+    const isInRateLimitCooldown = Date.now() < this.rateLimitCooldownUntil;
+    
+    if (isInRateLimitCooldown) {
+      const remainingMinutes = Math.ceil((this.rateLimitCooldownUntil - Date.now()) / 1000 / 60);
+      console.warn(`⚠️ Sincronização manual bloqueada - em cooldown de rate limit (${remainingMinutes}min restantes)`);
+      throw new Error(`Rate limit ativo. Aguarde ${remainingMinutes} minutos.`);
+    }
+    
     console.log('🔄 Sincronização MANUAL forçada...');
     await this.syncAllMessages();
     console.log('✅ Sincronização manual completa');
