@@ -254,7 +254,15 @@ export class KanbanService {
         },
       },
       include: {
-        contact: true,
+        contact: {
+          select: {
+            id: true,
+            name: true,
+            phoneNumber: true,
+            pushName: true,
+            avatar: true,
+          },
+        },
         assignedUser: {
           select: {
             id: true,
@@ -361,7 +369,15 @@ export class KanbanService {
       where: { id: conversationId },
       data: { kanbanStageId: toStageId },
       include: {
-        contact: true,
+        contact: {
+          select: {
+            id: true,
+            name: true,
+            phoneNumber: true,
+            pushName: true,
+            avatar: true,
+          },
+        },
         assignedUser: {
           select: {
             id: true,

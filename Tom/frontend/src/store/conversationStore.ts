@@ -203,12 +203,62 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
 
   // API Actions
   fetchConversations: async () => {
+    const currentConversations = get().conversations;
+    console.log(`🔄 fetchConversations: Carregando conversas... (atualmente: ${currentConversations.length} conversas)`);
+    
     set({ isLoading: true, error: null });
     try {
       const response = await api.get('/conversations');
-      set({ conversations: response.data.data || [], isLoading: false });
+      const newConversations = response.data.data || [];
+      
+      console.log(`📥 fetchConversations: API retornou ${newConversations.length} conversas`);
+      
+      // ✅ Preservar conversas existentes se a API retornar vazio (evitar desaparecimento)
+      if (newConversations.length === 0 && currentConversations.length > 0) {
+        console.warn('⚠️ API retornou array vazio, mas temos conversas locais. Preservando conversas existentes para evitar desaparecimento.');
+        set({ isLoading: false });
+        return; // Não atualizar se API retornou vazio mas temos conversas locais
+      }
+      
+      // ✅ Se API retornou menos conversas do que temos localmente, fazer merge inteligente
+      // (preservar conversas locais que não estão na resposta da API)
+      if (newConversations.length > 0 && currentConversations.length > newConversations.length) {
+        console.warn(`⚠️ API retornou ${newConversations.length} conversas, mas temos ${currentConversations.length} localmente. Fazendo merge...`);
+        
+        // Criar mapa das novas conversas por ID
+        const newConversationsMap = new Map(newConversations.map(c => [c.id, c]));
+        
+        // Preservar conversas locais que não estão na resposta da API
+        const preservedConversations = currentConversations.filter(c => !newConversationsMap.has(c.id));
+        
+        // Combinar: novas conversas (atualizadas) + conversas preservadas (que não vieram da API)
+        const mergedConversations = [...newConversations, ...preservedConversations];
+        
+        console.log(`✅ fetchConversations: Merge completo - ${newConversations.length} novas + ${preservedConversations.length} preservadas = ${mergedConversations.length} total`);
+        set({ conversations: mergedConversations, isLoading: false });
+        return;
+      }
+      
+      // ✅ Se API retornou conversas, atualizar normalmente
+      if (newConversations.length > 0) {
+        console.log(`✅ fetchConversations: Atualizando com ${newConversations.length} conversas`);
+        set({ conversations: newConversations, isLoading: false });
+      } else {
+        // Se API retornou vazio E não temos conversas locais, está tudo bem (primeira carga)
+        console.log('ℹ️ fetchConversations: API retornou vazio e não há conversas locais (primeira carga)');
+        set({ conversations: [], isLoading: false });
+      }
     } catch (error: any) {
-      set({ error: error.message || 'Erro ao carregar conversas', isLoading: false });
+      console.error('❌ Erro ao carregar conversas:', error);
+      // ✅ Em caso de erro, preservar conversas existentes ao invés de limpar
+      if (currentConversations.length > 0) {
+        console.warn(`⚠️ Erro ao buscar conversas, preservando ${currentConversations.length} conversas existentes`);
+        set({ error: error.message || 'Erro ao carregar conversas', isLoading: false });
+        return; // Preservar conversas existentes em caso de erro
+      }
+      // Só limpar se não houver conversas existentes
+      console.log('ℹ️ Erro ao buscar conversas e não há conversas locais, limpando estado');
+      set({ error: error.message || 'Erro ao carregar conversas', isLoading: false, conversations: [] });
     }
   },
 

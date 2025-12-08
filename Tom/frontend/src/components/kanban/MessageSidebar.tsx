@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { X, Send, ChevronRight } from 'lucide-react';
+import { X, Send } from 'lucide-react';
 import { api } from '../../lib/api';
 import { toast } from 'sonner';
 
@@ -17,23 +17,66 @@ interface MessageSidebarProps {
       id: string;
       name?: string;
       phoneNumber: string;
+      pushName?: string;
+      avatar?: string;
     };
   };
   isOpen: boolean;
   onClose: () => void;
   onMessageSent?: () => void;
+  cardRef?: React.RefObject<HTMLDivElement> | null; // Referência ao card clicado para posicionamento
 }
 
-export function MessageSidebar({ conversation, isOpen, onClose, onMessageSent }: MessageSidebarProps) {
+export function MessageSidebar({ conversation, isOpen, onClose, onMessageSent, cardRef }: MessageSidebarProps) {
   const [message, setMessage] = useState('');
   const [quickMessages, setQuickMessages] = useState<QuickMessage[]>([]);
   const [sending, setSending] = useState(false);
+  const [position, setPosition] = useState<{ top: number; left: number } | null>(null);
 
   useEffect(() => {
     if (isOpen) {
       loadQuickMessages();
+      // Calcular posição do card flutuante baseado no card clicado
+      if (cardRef?.current) {
+        const rect = cardRef.current.getBoundingClientRect();
+        const cardWidth = 384; // w-96 = 384px
+        const spacing = 12; // Espaçamento entre card e flutuante
+        const padding = 16; // Padding da tela
+        
+        let left = rect.right + spacing;
+        let top = rect.top;
+        
+        // Se o card flutuante sair da tela à direita, posicionar à esquerda do card
+        if (left + cardWidth > window.innerWidth - padding) {
+          left = rect.left - cardWidth - spacing;
+        }
+        
+        // Se ainda sair (card muito à direita), posicionar no lado direito da tela
+        if (left < padding) {
+          left = window.innerWidth - cardWidth - padding;
+        }
+        
+        // Ajustar verticalmente se sair da tela
+        const maxHeight = 600;
+        if (top + maxHeight > window.innerHeight - padding) {
+          top = window.innerHeight - maxHeight - padding;
+        }
+        if (top < padding) {
+          top = padding;
+        }
+        
+        setPosition({ top, left });
+      } else {
+        // Fallback: posicionar no centro da tela
+        setPosition({
+          top: window.innerHeight / 2 - 200,
+          left: window.innerWidth / 2 - 200,
+        });
+      }
+    } else {
+      setPosition(null);
     }
-  }, [isOpen]);
+  }, [isOpen, cardRef]);
 
   const loadQuickMessages = async () => {
     try {
@@ -79,17 +122,48 @@ export function MessageSidebar({ conversation, isOpen, onClose, onMessageSent }:
     }
   };
 
-  if (!isOpen) return null;
+  if (!isOpen || !position) return null;
 
   return (
-    <div className="fixed right-0 top-0 h-full w-96 bg-white shadow-2xl z-[60] flex flex-col border-l border-gray-200">
+    <>
+      {/* Overlay para fechar ao clicar fora */}
+      <div
+        className="fixed inset-0 bg-black bg-opacity-20 z-[59]"
+        onClick={onClose}
+      />
+      {/* Card flutuante */}
+      <div
+        className="fixed w-96 bg-white shadow-2xl z-[60] flex flex-col border border-gray-200 rounded-lg overflow-hidden"
+        style={{
+          top: `${position.top}px`,
+          left: `${position.left}px`,
+          maxHeight: '600px',
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
       {/* Header */}
-      <div className="flex items-center justify-between p-4 border-b border-gray-200">
-        <div className="flex-1">
-          <h3 className="font-semibold text-gray-900">Enviar Mensagem</h3>
-          <p className="text-sm text-gray-600 truncate">
-            {conversation.contact.name || 'Sem nome'}
-          </p>
+      <div className="flex items-center justify-between p-4 border-b border-gray-200 bg-gray-50">
+        <div className="flex items-center gap-3 flex-1 min-w-0">
+          {/* Avatar */}
+          {conversation.contact.avatar ? (
+            <img
+              src={conversation.contact.avatar}
+              alt={conversation.contact.name || 'Contato'}
+              className="w-10 h-10 rounded-full object-cover flex-shrink-0"
+            />
+          ) : (
+            <div className="w-10 h-10 rounded-full bg-gray-300 flex items-center justify-center text-gray-600 font-medium flex-shrink-0">
+              {(conversation.contact.pushName || conversation.contact.name || conversation.contact.phoneNumber).charAt(0).toUpperCase()}
+            </div>
+          )}
+          <div className="flex-1 min-w-0">
+            <h3 className="font-semibold text-gray-900 truncate">
+              {conversation.contact.pushName || conversation.contact.name || 'Sem nome'}
+            </h3>
+            <p className="text-xs text-gray-500 truncate">
+              {conversation.contact.phoneNumber}
+            </p>
+          </div>
         </div>
         <button
           onClick={onClose}
@@ -118,7 +192,7 @@ export function MessageSidebar({ conversation, isOpen, onClose, onMessageSent }:
       )}
 
       {/* Message Input */}
-      <div className="flex-1 flex flex-col p-4">
+      <div className="flex-1 flex flex-col p-4 overflow-y-auto">
         <textarea
           value={message}
           onChange={(e) => setMessage(e.target.value)}
@@ -145,7 +219,8 @@ export function MessageSidebar({ conversation, isOpen, onClose, onMessageSent }:
           )}
         </button>
       </div>
-    </div>
+      </div>
+    </>
   );
 }
 

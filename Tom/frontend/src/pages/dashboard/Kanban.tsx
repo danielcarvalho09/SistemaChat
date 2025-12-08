@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   DndContext,
   DragEndEvent,
@@ -35,6 +35,8 @@ interface Contact {
   id: string;
   name?: string;
   phoneNumber: string;
+  pushName?: string;
+  avatar?: string;
 }
 
 interface AssignedUser {
@@ -112,6 +114,7 @@ export function Kanban() {
   const [selectedConversation, setSelectedConversation] = useState<KanbanConversation | null>(null);
   const [selectedUserId, setSelectedUserId] = useState<string | undefined>(undefined); // Para admin ver kanban de outros usuários
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [selectedCardRef, setSelectedCardRef] = useState<React.RefObject<HTMLDivElement> | null>(null);
   const navigate = useNavigate();
 
   const isAdmin = user?.roles?.some(role => role.name === 'admin') || false;
@@ -434,72 +437,88 @@ export function Kanban() {
                   <div className="flex-1 overflow-y-auto space-y-3 min-h-[200px] max-h-[calc(100vh-260px)]">
                     {column.conversations.map((conversation) => (
                       <DraggableCard key={conversation.id} id={conversation.id}>
-                        <div className="relative bg-white rounded-lg p-4 hover:shadow-md transition-shadow">
+                        <div 
+                          data-card-id={conversation.id}
+                          className="relative bg-white rounded-lg shadow-sm p-4 hover:shadow-md transition-shadow"
+                        >
                           {/* Seta superior direita */}
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
                               setSelectedConversation(conversation);
+                              // Buscar referência do card pelo data attribute
+                              const cardElement = (e.currentTarget.closest('[data-card-id]') as HTMLElement);
+                              if (cardElement) {
+                                setSelectedCardRef({ current: cardElement } as React.RefObject<HTMLDivElement>);
+                              }
                               setSidebarOpen(true);
                             }}
-                            className="absolute top-2 right-2 text-gray-600 hover:text-gray-900 transition-colors"
+                            className="absolute top-2 right-2 text-gray-600 hover:text-gray-900 transition-colors z-10"
                           >
                             <ChevronRight className="w-4 h-4" />
                           </button>
 
-                          {/* Foto do contato - centralizada, levemente para cima */}
-                          <div className="flex justify-center mb-3 -mt-2">
-                            {conversation.contact.avatar ? (
-                              <img
-                                src={conversation.contact.avatar}
-                                alt={conversation.contact.name || 'Contato'}
-                                className="w-16 h-16 rounded-full object-cover"
-                              />
-                            ) : (
-                              <div className="w-16 h-16 rounded-full bg-gray-300 flex items-center justify-center text-gray-600 font-medium text-lg">
-                                {(conversation.contact.name || conversation.contact.phoneNumber).charAt(0).toUpperCase()}
-                              </div>
-                            )}
-                          </div>
-
-                          {/* Nome pequeno em cinza */}
-                          <h4 className="text-xs text-gray-600 text-center mb-2 truncate">
-                            {conversation.contact.name || formatPhoneNumber(conversation.contact.phoneNumber)}
-                          </h4>
-
-                          {/* Resumo da conversa em azul institucional */}
-                          {conversation.messages && conversation.messages.length > 0 && (
-                            <p className="text-xs text-[#0066CC] text-center mb-3 line-clamp-2 px-2">
-                              {conversation.messages[0].content}
-                            </p>
-                          )}
-
-                          {/* Tags em retângulos cinzas */}
-                          {conversation.tags && conversation.tags.length > 0 && (
-                            <div className="flex flex-wrap gap-1 justify-center mb-3">
-                              {conversation.tags.map((ct) => (
-                                <span
-                                  key={ct.id}
-                                  className="px-2 py-0.5 text-xs bg-gray-200 text-gray-700 rounded"
-                                >
-                                  {ct.tag.name}
-                                </span>
-                              ))}
+                          {/* Layout horizontal: Foto à esquerda, conteúdo à direita */}
+                          <div className="flex gap-3">
+                            {/* Foto do contato - lado esquerdo, central levemente para cima */}
+                            <div className="flex-shrink-0 -mt-1">
+                              {conversation.contact.avatar ? (
+                                <img
+                                  src={conversation.contact.avatar}
+                                  alt={conversation.contact.name || 'Contato'}
+                                  className="w-12 h-12 rounded-full object-cover"
+                                />
+                              ) : (
+                                <div className="w-12 h-12 rounded-full bg-gray-300 flex items-center justify-center text-gray-600 font-medium">
+                                  {(conversation.contact.name || conversation.contact.pushName || conversation.contact.phoneNumber).charAt(0).toUpperCase()}
+                                </div>
+                              )}
                             </div>
-                          )}
 
-                          {/* Botão WhatsApp inferior direito */}
-                          <div className="flex justify-end">
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                navigate(`/dashboard?conversation=${conversation.id}`);
-                              }}
-                              className="p-2 bg-[#25D366] text-white rounded-full hover:bg-[#128C7E] transition-colors"
-                              title="Abrir conversa"
-                            >
-                              <MessageSquare className="w-4 h-4" />
-                            </button>
+                            {/* Conteúdo à direita */}
+                            <div className="flex-1 min-w-0">
+                              {/* pushName ao lado do ícone de perfil na parte superior */}
+                              <div className="flex items-center gap-2 mb-2">
+                                <h4 className="text-sm font-medium text-gray-900 truncate">
+                                  {conversation.contact.pushName || conversation.contact.name || formatPhoneNumber(conversation.contact.phoneNumber)}
+                                </h4>
+                              </div>
+
+                              {/* Resumo da conversa embaixo */}
+                              {conversation.messages && conversation.messages.length > 0 && (
+                                <p className="text-xs text-gray-600 mb-2 line-clamp-2">
+                                  {conversation.messages[0].content}
+                                </p>
+                              )}
+
+                              {/* Tags em retângulos cinzas */}
+                              {conversation.tags && conversation.tags.length > 0 && (
+                                <div className="flex flex-wrap gap-1 mb-2">
+                                  {conversation.tags.map((ct) => (
+                                    <span
+                                      key={ct.id}
+                                      className="px-2 py-0.5 text-xs bg-gray-200 text-gray-700 rounded"
+                                    >
+                                      {ct.tag.name}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+
+                              {/* Botão WhatsApp inferior direito */}
+                              <div className="flex justify-end mt-2">
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    navigate(`/dashboard?conversation=${conversation.id}`);
+                                  }}
+                                  className="p-1.5 bg-[#25D366] text-white rounded-full hover:bg-[#128C7E] transition-colors"
+                                  title="Abrir conversa"
+                                >
+                                  <MessageSquare className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            </div>
                           </div>
                         </div>
                       </DraggableCard>
@@ -577,14 +596,16 @@ export function Kanban() {
         </div>
       )}
 
-      {/* Sidebar de Mensagem */}
+      {/* Card Flutuante de Mensagem */}
       {selectedConversation && (
         <MessageSidebar
           conversation={selectedConversation}
           isOpen={sidebarOpen}
+          cardRef={selectedCardRef}
           onClose={() => {
             setSidebarOpen(false);
             setSelectedConversation(null);
+            setSelectedCardRef(null);
           }}
           onMessageSent={() => {
             loadBoard();
