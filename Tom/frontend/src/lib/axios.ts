@@ -16,6 +16,12 @@ export const api: AxiosInstance = axios.create({
 
 api.interceptors.request.use(
   (config) => {
+    // ✅ Adicionar token JWT se existir nos headers padrão do axios
+    // Isso garante que o token seja enviado mesmo se não estiver no config específico
+    if (api.defaults.headers.common['Authorization']) {
+      config.headers['Authorization'] = api.defaults.headers.common['Authorization'];
+    }
+
     const methodsRequiringCsrf = ['POST', 'PUT', 'PATCH', 'DELETE'];
     if (methodsRequiringCsrf.includes(config.method?.toUpperCase() || '')) {
       const csrfToken = getCsrfToken();

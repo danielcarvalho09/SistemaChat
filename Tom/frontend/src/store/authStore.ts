@@ -69,50 +69,54 @@ export const useAuthStore = create<AuthState>()(
       isLoading: false,
       error: null,
 
-      login: async (email: string, _password: string) => {
+      login: async (email: string, password: string) => {
         set({ isLoading: true, error: null });
         try {
-          const response = await api.post('/auth/login', { email, password: _password });
-          // ✅ Processar resposta do backend com roles reais
-          if (response.data?.data?.user && response.data?.data?.tokens?.accessToken) {
-            const backendUser = response.data.data.user;
-            const accessToken = response.data.data.tokens.accessToken;
+          const response = await api.post('/auth/login', { email, password });
+          
+          // Verificar se a resposta foi bem-sucedida
+          if (response.status === 200 && response.data?.success) {
+            // ✅ Processar resposta do backend com roles reais
+            if (response.data?.data?.user && response.data?.data?.tokens?.accessToken) {
+              const backendUser = response.data.data.user;
+              const accessToken = response.data.data.tokens.accessToken;
 
-            const user: User = {
-              id: backendUser.id,
-              email: backendUser.email,
-              name: backendUser.name,
-              avatar: backendUser.avatar,
-              status: backendUser.status || 'online',
-              isActive: backendUser.isActive ?? true,
-              roles: backendUser.roles || [],
-              createdAt: backendUser.createdAt || new Date().toISOString(),
-              updatedAt: backendUser.updatedAt || new Date().toISOString(),
-            };
+              const user: User = {
+                id: backendUser.id,
+                email: backendUser.email,
+                name: backendUser.name,
+                avatar: backendUser.avatar,
+                status: backendUser.status || 'online',
+                isActive: backendUser.isActive ?? true,
+                roles: backendUser.roles || [],
+                createdAt: backendUser.createdAt || new Date().toISOString(),
+                updatedAt: backendUser.updatedAt || new Date().toISOString(),
+              };
 
-            applyUserHeaders(user, accessToken);
-            set({
-              user,
-              token: accessToken,
-              isAuthenticated: true,
-              isLoading: false,
-            });
-            socketService.connect();
-            return;
+              applyUserHeaders(user, accessToken);
+              set({
+                user,
+                token: accessToken,
+                isAuthenticated: true,
+                isLoading: false,
+                error: null,
+              });
+              socketService.connect(accessToken);
+              return;
+            }
           }
-        } catch (error) {
-          /* ignora erros - auth desativada */
+          
+          // Se chegou aqui, a resposta não tem a estrutura esperada
+          throw new Error(response.data?.message || 'Login failed');
+        } catch (error: any) {
+          const errorMessage = error.response?.data?.message || error.message || 'Login failed';
+          set({
+            isLoading: false,
+            error: errorMessage,
+            isAuthenticated: false,
+          });
+          throw error; // Re-lançar para que o componente possa tratar
         }
-        // Fallback: usar buildUser apenas se backend não retornar dados
-        const user = buildUser(email);
-        applyUserHeaders(user, null); // No token in fallback
-        set({
-          user,
-          token: null,
-          isAuthenticated: true,
-          isLoading: false,
-        });
-        socketService.connect();
       },
 
       register: async (email: string, password: string, name: string) => {
