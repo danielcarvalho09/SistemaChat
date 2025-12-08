@@ -11,11 +11,18 @@ export const requireRole = (allowedRoles: string[]) => {
     reply: FastifyReply
   ): Promise<void> => {
     if (!request.user) {
+      logger.warn('[Authorization] No user found in request');
       return reply.status(401).send({
         statusCode: 401,
         message: 'Authentication required',
       });
     }
+
+    logger.info(`[Authorization] Checking roles for user ${request.user.userId}:`, {
+      userRoles: request.user.roles,
+      requiredRoles: allowedRoles,
+      hasRole: request.user.roles.some((role) => allowedRoles.includes(role))
+    });
 
     const hasRole = request.user.roles.some((role) =>
       allowedRoles.includes(role)
@@ -23,12 +30,13 @@ export const requireRole = (allowedRoles: string[]) => {
 
     if (!hasRole) {
       logger.warn(
-        `User ${request.user.userId} attempted to access resource requiring roles: ${allowedRoles.join(', ')}`
+        `[Authorization] User ${request.user.userId} (roles: ${JSON.stringify(request.user.roles)}) attempted to access resource requiring roles: ${allowedRoles.join(', ')}`
       );
       return reply.status(403).send({
         statusCode: 403,
         message: 'Insufficient permissions',
         requiredRoles: allowedRoles,
+        userRoles: request.user.roles,
       });
     }
   };

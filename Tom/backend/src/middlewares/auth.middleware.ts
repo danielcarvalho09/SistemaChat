@@ -48,14 +48,24 @@ export const authenticate = async (
       const { verifyAccessToken } = await import('../utils/jwt.js');
       const decoded = verifyAccessToken(token);
 
-      logger.info(`✅ [AuthMiddleware] Token verified. Roles: ${JSON.stringify(decoded.roles)}`);
+      logger.info(`✅ [AuthMiddleware] Token verified. UserId: ${decoded.userId}, Email: ${decoded.email}, Roles: ${JSON.stringify(decoded.roles)}`);
 
+      // Garantir que roles seja um array
+      const roles = Array.isArray(decoded.roles) ? decoded.roles : (decoded.roles ? [decoded.roles] : []);
+      
       request.user = {
         userId: decoded.userId,
         email: decoded.email || '',
-        roles: decoded.roles || [],
+        roles: roles,
         permissions: ['*'], // Default permissions
       };
+      
+      logger.info(`✅ [AuthMiddleware] User attached to request:`, {
+        userId: request.user.userId,
+        email: request.user.email,
+        roles: request.user.roles
+      });
+      
       return; // Autenticado com sucesso via Token
     } catch (error) {
       logger.error('❌ [AuthMiddleware] Token verification failed:', error);
