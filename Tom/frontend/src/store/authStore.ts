@@ -93,6 +93,9 @@ export const useAuthStore = create<AuthState>()(
                 updatedAt: backendUser.updatedAt || new Date().toISOString(),
               };
 
+              // ✅ Salvar token no localStorage ANTES de aplicar headers
+              localStorage.setItem('accessToken', accessToken);
+              
               applyUserHeaders(user, accessToken);
               set({
                 user,

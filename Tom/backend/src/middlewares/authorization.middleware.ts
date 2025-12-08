@@ -18,27 +18,35 @@ export const requireRole = (allowedRoles: string[]) => {
       });
     }
 
-    logger.info(`[Authorization] Checking roles for user ${request.user.userId}:`, {
+    logger.debug(`[Authorization] Checking roles for user ${request.user.userId}:`, {
+      userEmail: request.user.email,
       userRoles: request.user.roles,
+      userRolesType: typeof request.user.roles,
+      userRolesIsArray: Array.isArray(request.user.roles),
       requiredRoles: allowedRoles,
       hasRole: request.user.roles.some((role) => allowedRoles.includes(role))
     });
 
-    const hasRole = request.user.roles.some((role) =>
+    // Garantir que roles seja um array
+    const userRoles = Array.isArray(request.user.roles) ? request.user.roles : [];
+    
+    const hasRole = userRoles.some((role) =>
       allowedRoles.includes(role)
     );
 
     if (!hasRole) {
       logger.warn(
-        `[Authorization] User ${request.user.userId} (roles: ${JSON.stringify(request.user.roles)}) attempted to access resource requiring roles: ${allowedRoles.join(', ')}`
+        `[Authorization] User ${request.user.userId} (email: ${request.user.email}, roles: ${JSON.stringify(userRoles)}) attempted to access resource requiring roles: ${allowedRoles.join(', ')}`
       );
       return reply.status(403).send({
         statusCode: 403,
         message: 'Insufficient permissions',
         requiredRoles: allowedRoles,
-        userRoles: request.user.roles,
+        userRoles: userRoles,
       });
     }
+    
+    logger.debug(`[Authorization] ✅ User ${request.user.userId} has required role(s): ${allowedRoles.join(', ')}`);
   };
 };
 

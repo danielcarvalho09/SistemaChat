@@ -16,9 +16,12 @@ export const api: AxiosInstance = axios.create({
 
 api.interceptors.request.use(
   (config) => {
-    // ✅ Adicionar token JWT se existir nos headers padrão do axios
-    // Isso garante que o token seja enviado mesmo se não estiver no config específico
-    if (api.defaults.headers.common['Authorization']) {
+    // ✅ Adicionar token JWT do localStorage se existir
+    const token = localStorage.getItem('accessToken');
+    if (token) {
+      config.headers['Authorization'] = `Bearer ${token}`;
+    } else if (api.defaults.headers.common['Authorization']) {
+      // Fallback para headers padrão do axios
       config.headers['Authorization'] = api.defaults.headers.common['Authorization'];
     }
 
