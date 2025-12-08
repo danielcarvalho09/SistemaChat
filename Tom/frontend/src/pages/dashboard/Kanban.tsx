@@ -10,7 +10,7 @@ import {
   useDroppable,
   useDraggable,
 } from '@dnd-kit/core';
-import { Plus, Trash2, X, Users as UsersIcon, ChevronRight } from 'lucide-react';
+import { Plus, Trash2, X, Users as UsersIcon, ChevronRight, User } from 'lucide-react';
 import { api } from '../../lib/api';
 import { toast } from 'sonner';
 import { GlassButton } from '../../components/ui/glass-button';
@@ -473,25 +473,17 @@ export function Kanban() {
 
                           {/* Layout horizontal: Foto à esquerda, conteúdo à direita */}
                           <div className="flex gap-3">
-                            {/* Foto do contato - lado esquerdo, central levemente para cima */}
-                            <div className="flex-shrink-0 -mt-1">
-                              {conversation.contact.avatar ? (
-                                <img
-                                  src={conversation.contact.avatar}
-                                  alt={conversation.contact.name || 'Contato'}
-                                  className="w-12 h-12 rounded-full object-cover"
-                                />
-                              ) : (
-                                <div className="w-12 h-12 rounded-full bg-gray-300 flex items-center justify-center text-gray-600 font-medium">
-                                  {(conversation.contact.name || conversation.contact.pushName || conversation.contact.phoneNumber).charAt(0).toUpperCase()}
-                                </div>
-                              )}
+                            {/* Avatar do contato - lado esquerdo, centralizado verticalmente */}
+                            <div className="flex-shrink-0 flex items-center">
+                              <div className="w-12 h-12 rounded-full bg-white border-2 border-gray-200 flex items-center justify-center">
+                                <User className="w-7 h-7 stroke-[1.5] text-gray-900" />
+                              </div>
                             </div>
 
                             {/* Conteúdo à direita */}
                             <div className="flex-1 min-w-0">
-                              {/* pushName ao lado do ícone de perfil na parte superior */}
-                              <div className="flex items-center gap-2 mb-2">
+                              {/* Nome do contato na parte superior */}
+                              <div className="mb-2">
                                 <h4 className="text-sm font-medium text-gray-900 truncate">
                                   {conversation.contact.pushName || conversation.contact.name || formatPhoneNumber(conversation.contact.phoneNumber)}
                                 </h4>
@@ -504,28 +496,30 @@ export function Kanban() {
                                 </p>
                               )}
 
-                              {/* Tags em retângulos cinzas */}
-                              {conversation.tags && conversation.tags.length > 0 && (
-                                <div className="flex flex-wrap gap-1 mb-2">
-                                  {conversation.tags.map((ct) => (
-                                    <span
-                                      key={ct.id}
-                                      className="px-2 py-0.5 text-xs bg-gray-200 text-gray-700 rounded"
-                                    >
-                                      {ct.tag.name}
-                                    </span>
-                                  ))}
-                                </div>
-                              )}
+                              {/* Tags e ícone WhatsApp alinhados na mesma linha */}
+                              <div className="flex items-center justify-between gap-2">
+                                {/* Tags em retângulos cinzas */}
+                                {conversation.tags && conversation.tags.length > 0 && (
+                                  <div className="flex flex-wrap gap-1 flex-1">
+                                    {conversation.tags.map((ct) => (
+                                      <span
+                                        key={ct.id}
+                                        className="px-2 py-0.5 text-xs bg-gray-200 text-gray-700 rounded"
+                                      >
+                                        {ct.tag.name}
+                                      </span>
+                                    ))}
+                                  </div>
+                                )}
 
-                              {/* Ícone WhatsApp inferior direito */}
-                              <div className="flex justify-end mt-2">
+                                {/* Ícone WhatsApp alinhado com as tags */}
                                 <button
                                   onClick={(e) => {
                                     e.stopPropagation();
+                                    // Redirecionar para a conversa no dashboard
                                     navigate(`/dashboard?conversation=${conversation.id}`);
                                   }}
-                                  className="hover:opacity-80 transition-opacity"
+                                  className="hover:opacity-80 transition-opacity flex-shrink-0"
                                   title="Abrir conversa"
                                 >
                                   <WhatsAppIcon className="w-6 h-6" />
