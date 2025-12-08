@@ -126,14 +126,9 @@ export function MessageSidebar({ conversation, isOpen, onClose, onMessageSent, c
 
   return (
     <>
-      {/* Overlay para fechar ao clicar fora */}
+      {/* Card flutuante - sem overlay escuro */}
       <div
-        className="fixed inset-0 bg-black bg-opacity-20 z-[59]"
-        onClick={onClose}
-      />
-      {/* Card flutuante */}
-      <div
-        className="fixed w-96 bg-white shadow-2xl z-[60] flex flex-col border border-gray-200 rounded-lg overflow-hidden"
+        className="fixed w-96 bg-white shadow-2xl z-50 flex flex-col border border-gray-200 rounded-lg overflow-hidden"
         style={{
           top: `${position.top}px`,
           left: `${position.left}px`,

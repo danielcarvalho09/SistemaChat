@@ -20,9 +20,20 @@ api.interceptors.request.use(
     const token = localStorage.getItem('accessToken');
     if (token) {
       config.headers['Authorization'] = `Bearer ${token}`;
+      // Log apenas para requisições importantes (evitar spam)
+      if (config.url?.includes('/users') || config.url?.includes('/admin')) {
+        console.log('🔐 [Axios] Token sendo enviado para:', config.url);
+      }
     } else if (api.defaults.headers.common['Authorization']) {
       // Fallback para headers padrão do axios
       config.headers['Authorization'] = api.defaults.headers.common['Authorization'];
+      if (config.url?.includes('/users') || config.url?.includes('/admin')) {
+        console.log('🔐 [Axios] Token dos headers padrão sendo usado para:', config.url);
+      }
+    } else {
+      if (config.url?.includes('/users') || config.url?.includes('/admin')) {
+        console.warn('⚠️ [Axios] Nenhum token encontrado para:', config.url);
+      }
     }
 
     const methodsRequiringCsrf = ['POST', 'PUT', 'PATCH', 'DELETE'];

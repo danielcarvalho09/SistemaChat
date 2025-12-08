@@ -439,7 +439,7 @@ export function Kanban() {
                       <DraggableCard key={conversation.id} id={conversation.id}>
                         <div 
                           data-card-id={conversation.id}
-                          className="relative bg-white rounded-lg shadow-sm p-4 hover:shadow-md transition-shadow"
+                          className="relative bg-white rounded-lg border border-gray-300 shadow-sm p-4 hover:shadow-md transition-shadow"
                         >
                           {/* Seta superior direita */}
                           <button

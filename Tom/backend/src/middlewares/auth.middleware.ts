@@ -53,6 +53,15 @@ export const authenticate = async (
       // Garantir que roles seja um array
       const roles = Array.isArray(decoded.roles) ? decoded.roles : (decoded.roles ? [decoded.roles] : []);
       
+      // ✅ Log detalhado das roles para debug
+      logger.info(`🔍 [AuthMiddleware] Roles processing:`, {
+        decodedRoles: decoded.roles,
+        decodedRolesType: typeof decoded.roles,
+        decodedRolesIsArray: Array.isArray(decoded.roles),
+        processedRoles: roles,
+        hasAdmin: roles.includes('admin'),
+      });
+      
       request.user = {
         userId: decoded.userId,
         email: decoded.email || '',
@@ -63,7 +72,9 @@ export const authenticate = async (
       logger.info(`✅ [AuthMiddleware] User attached to request:`, {
         userId: request.user.userId,
         email: request.user.email,
-        roles: request.user.roles
+        roles: request.user.roles,
+        rolesCount: request.user.roles.length,
+        hasAdminRole: request.user.roles.includes('admin'),
       });
       
       return; // Autenticado com sucesso via Token

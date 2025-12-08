@@ -683,12 +683,14 @@ export class MessageService {
           data: {
             phoneNumber,
             name: contactName,
-            pushName: pushName || null, // Salvar pushName do WhatsApp
+            // ✅ Só salvar pushName se for mensagem individual (não grupo) e não for nossa
+            pushName: (!isGroup && !isFromMe && pushName) ? pushName : null,
           },
         });
-        logger.info(`New contact created: ${phoneNumber} (${contactName}) - pushName: ${pushName || 'N/A'}`);
-      } else if (pushName && contact.pushName !== pushName) {
-        // Atualizar pushName se mudou
+        logger.info(`New contact created: ${phoneNumber} (${contactName}) - pushName: ${(!isGroup && !isFromMe && pushName) ? pushName : 'N/A'}`);
+      } else if (!isGroup && !isFromMe && pushName && contact.pushName !== pushName) {
+        // ✅ CORRIGIDO: Só atualizar pushName se for mensagem individual (não grupo) e não for nossa
+        // O pushName deve ser do contato da conversa, não do remetente da última mensagem
         await this.prisma.contact.update({
           where: { id: contact.id },
           data: { pushName },
