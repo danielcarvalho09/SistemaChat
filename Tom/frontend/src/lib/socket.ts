@@ -196,7 +196,7 @@ class SocketService {
         }
         
         // Sincronização única e condicional ao voltar (apenas se necessário e não estiver em cooldown)
-        const timeSinceLastSync = Date.now() - this.lastSyncTime;
+        // timeSinceLastSync já foi declarado acima, reutilizar
         const isInRateLimitCooldown = Date.now() < this.rateLimitCooldownUntil;
         
         if (!isInRateLimitCooldown && timeSinceLastSync > 300000) { // Só sincronizar se passou mais de 5 minutos
