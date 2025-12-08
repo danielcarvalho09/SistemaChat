@@ -69,23 +69,35 @@ export class AuthController {
   };
 
   login = async (request: FastifyRequest, reply: FastifyReply) => {
-    const ip = (request.headers['x-forwarded-for'] as string) || request.socket.remoteAddress || '127.0.0.1';
-    const userAgent = request.headers['user-agent'];
-    const fingerprint = (request.headers['x-fingerprint'] as string) || 'browser';
+    try {
+      const ip = (request.headers['x-forwarded-for'] as string) || request.socket.remoteAddress || '127.0.0.1';
+      const userAgent = request.headers['user-agent'];
+      const fingerprint = (request.headers['x-fingerprint'] as string) || 'browser';
 
-    const body = validate(loginSchema, request.body) as any;
+      const body = validate(loginSchema, request.body) as any;
 
-    const result = await this.authService.login(body, {
-      ip,
-      userAgent,
-      fingerprint
-    });
+      const result = await this.authService.login(body, {
+        ip,
+        userAgent,
+        fingerprint
+      });
 
-    return reply.status(200).send({
-      success: true,
-      message: 'Login successful',
-      data: result,
-    });
+      return reply.status(200).send({
+        success: true,
+        message: 'Login successful',
+        data: result,
+      });
+    } catch (error: any) {
+      // Se for UnauthorizedError, retornar 401
+      if (error.statusCode === 401 || error.message?.includes('Invalid') || error.message?.includes('Unauthorized')) {
+        return reply.status(401).send({
+          success: false,
+          message: error.message || 'Invalid email or password',
+        });
+      }
+      // Re-lançar outros erros para o middleware de erro global tratar
+      throw error;
+    }
   };
 
   refresh = async (request: FastifyRequest, reply: FastifyReply) => {
@@ -122,27 +134,85 @@ export class AuthController {
   };
 
   me = async (request: FastifyRequest, reply: FastifyReply) => {
-    const headerEmail = typeof request.headers['x-user-email'] === 'string'
-      ? request.headers['x-user-email']
-      : undefined;
-    const headerName = typeof request.headers['x-user-name'] === 'string'
-      ? request.headers['x-user-name']
-      : undefined;
+    try {
+      // Primeiro tentar autenticação via JWT token
+      const authHeader = request.headers.authorization;
+      if (authHeader && authHeader.startsWith('Bearer ')) {
+        const token = authHeader.split(' ')[1];
+        try {
+          const { verifyAccessToken } = await import('../utils/jwt.js');
+          const decoded = verifyAccessToken(token);
+          
+          // Buscar usuário pelo ID do token
+          const user = await prisma.user.findUnique({
+            where: { id: decoded.userId },
+            include: {
+              roles: {
+                include: {
+                  role: true,
+                },
+              },
+            },
+          });
 
-    // ✅ FIX: Não usar "public@example.com" como fallback 
-    // Se não tem email no header, retornar erro 401
-    if (!headerEmail) {
+          if (!user) {
+            return reply.status(401).send({
+              success: false,
+              message: 'User not found',
+            });
+          }
+
+          const userResponse = {
+            id: user.id,
+            email: user.email,
+            name: user.name,
+            avatar: user.avatar,
+            status: user.status,
+            isActive: user.isActive,
+            roles: user.roles.map(ur => ({
+              id: ur.role.id,
+              name: ur.role.name,
+              description: ur.role.description,
+            })),
+            createdAt: user.createdAt,
+            updatedAt: user.updatedAt,
+          };
+
+          return reply.status(200).send({
+            success: true,
+            data: userResponse,
+          });
+        } catch (tokenError) {
+          // Token inválido, continuar para verificar headers
+        }
+      }
+
+      // Fallback: Autenticação via Headers (para compatibilidade)
+      const headerEmail = typeof request.headers['x-user-email'] === 'string'
+        ? request.headers['x-user-email']
+        : undefined;
+      const headerName = typeof request.headers['x-user-name'] === 'string'
+        ? request.headers['x-user-name']
+        : undefined;
+
+      if (!headerEmail) {
+        return reply.status(401).send({
+          success: false,
+          message: 'Unauthorized: No authentication provided',
+        });
+      }
+
+      const userResponse = await formatUserResponse(headerEmail, headerName);
+
+      return reply.status(200).send({
+        success: true,
+        data: userResponse,
+      });
+    } catch (error: any) {
       return reply.status(401).send({
         success: false,
-        message: 'Unauthorized: No user email provided',
+        message: error.message || 'Unauthorized',
       });
     }
-
-    const userResponse = await formatUserResponse(headerEmail, headerName);
-
-    return reply.status(200).send({
-      success: true,
-      data: userResponse,
-    });
   };
 }
