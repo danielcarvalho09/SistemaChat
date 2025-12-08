@@ -518,17 +518,17 @@ export function Kanban() {
                                 </div>
                               )}
 
-                              {/* Botão WhatsApp inferior direito */}
+                              {/* Ícone WhatsApp inferior direito */}
                               <div className="flex justify-end mt-2">
                                 <button
                                   onClick={(e) => {
                                     e.stopPropagation();
                                     navigate(`/dashboard?conversation=${conversation.id}`);
                                   }}
-                                  className="p-1.5 bg-gray-100 hover:bg-gray-200 rounded-full transition-colors border border-gray-300"
+                                  className="hover:opacity-80 transition-opacity"
                                   title="Abrir conversa"
                                 >
-                                  <WhatsAppIcon className="w-4 h-4" />
+                                  <WhatsAppIcon className="w-6 h-6" />
                                 </button>
                               </div>
                             </div>
