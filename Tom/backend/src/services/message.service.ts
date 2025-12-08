@@ -581,23 +581,79 @@ export class MessageService {
       // Verificar se é um grupo
       const isGroup = from.endsWith('@g.us');
 
-      // Normalizar número de telefone/ID do grupo
-      const phoneNumber = from.replace('@s.whatsapp.net', '').replace('@g.us', '');
+      // ✅ CORRIGIDO: Normalizar número de telefone/ID do grupo (incluindo @lid)
+      let phoneNumber = from.replace('@s.whatsapp.net', '').replace('@g.us', '').replace('@lid', '');
 
-      // ✅ FILTRO LID: Evitar criar conversas fantasmas para IDs @lid
-      // LIDs (Linked Device IDs) são usados internamente pelo WhatsApp para dispositivos vinculados
-      // Não devemos criar novas conversas para eles, pois duplicam as conversas reais
+      // ✅ FILTRO LID: Resolver número real quando vem com @lid
+      // LIDs (Linked Device IDs) são usados para ofuscar números no WhatsApp Web
+      // Quando uma mensagem vem com @lid, precisamos resolver o número real
       if (from.includes('@lid')) {
-        // Verificar se já existe contato para este LID
-        const existingLidContact = await this.prisma.contact.findUnique({
-          where: { phoneNumber },
-        });
+        // CASO 1: Mensagem enviada pelo próprio sistema (isFromMe = true)
+        // Nesse caso, usar o número da conexão WhatsApp que está enviando
+        if (isFromMe) {
+          try {
+            const connection = await this.prisma.whatsAppConnection.findUnique({
+              where: { id: connectionId },
+              select: { phoneNumber: true },
+            });
 
-        if (!existingLidContact) {
-          logger.warn(`[MessageService] ⚠️ Skipping message from LID ${from} to avoid ghost conversation creation`);
-          return;
+            if (connection?.phoneNumber) {
+              // Usar o número da conexão WhatsApp (já está normalizado)
+              phoneNumber = connection.phoneNumber.replace(/\D/g, ''); // Remover caracteres não numéricos
+              logger.info(`[MessageService] ✅ LID message sent by system (from: ${from}) - resolved to connection number: ${phoneNumber}`);
+            } else {
+              logger.warn(`[MessageService] ⚠️ Could not find connection ${connectionId} for LID resolution`);
+            }
+          } catch (error) {
+            logger.warn(`[MessageService] ⚠️ Error getting connection number for LID:`, error);
+          }
+        } else {
+          // CASO 2: Mensagem recebida (isFromMe = false)
+          // Tentar resolver o número real através do Baileys ou histórico
+          
+          // Primeiro, verificar se já existe contato com este número (sem @lid) no banco
+          const existingContact = await this.prisma.contact.findFirst({
+            where: {
+              OR: [
+                { phoneNumber: phoneNumber },
+                { phoneNumber: { contains: phoneNumber } }, // Buscar parcial também
+              ],
+            },
+          });
+
+          if (existingContact) {
+            // Usar o número do contato existente
+            phoneNumber = existingContact.phoneNumber;
+            logger.info(`[MessageService] ✅ Found existing contact for LID ${from}: ${phoneNumber}`);
+          } else {
+            // Tentar resolver através do histórico de conversas desta conexão
+            // Buscar conversas recentes que possam ter o número real
+            const recentConversation = await this.prisma.conversation.findFirst({
+              where: {
+                connectionId,
+                contact: {
+                  phoneNumber: { contains: phoneNumber.replace(/\D/g, '') },
+                },
+              },
+              include: { contact: true },
+              orderBy: { lastMessageAt: 'desc' },
+            });
+
+            if (recentConversation?.contact) {
+              phoneNumber = recentConversation.contact.phoneNumber;
+              logger.info(`[MessageService] ✅ Found recent conversation for LID ${from}: ${phoneNumber}`);
+            } else {
+              // Última tentativa: usar o número extraído e adicionar código do país se necessário
+              const cleanNumber = phoneNumber.replace(/\D/g, '');
+              if (!cleanNumber.startsWith('55') && cleanNumber.length >= 10) {
+                phoneNumber = `55${cleanNumber}`;
+              } else {
+                phoneNumber = cleanNumber;
+              }
+              logger.warn(`[MessageService] ⚠️ Could not resolve LID ${from}, using extracted/normalized number: ${phoneNumber}`);
+            }
+          }
         }
-        // Se já existe, processar normalmente (pode ser um contato legado ou intencional)
       }
 
       // Buscar ou criar contato
