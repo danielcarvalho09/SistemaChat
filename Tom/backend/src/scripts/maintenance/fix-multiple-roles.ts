@@ -1,5 +1,5 @@
-import { getPrismaClient } from '../config/database.js';
-import { logger } from '../config/logger.js';
+import { getPrismaClient } from '../../config/database.js';
+import { logger } from '../../config/logger.js';
 
 /**
  * Script para corrigir usuários com múltiplas roles
@@ -38,7 +38,7 @@ async function fixMultipleRoles() {
       }
 
       logger.warn(`⚠️ Usuário ${user.email} (${user.id}) tem ${user.roles.length} roles:`);
-      user.roles.forEach(ur => {
+      user.roles.forEach((ur: { role: { name: string }; id: string }) => {
         logger.warn(`   - ${ur.role.name} (${ur.id})`);
       });
 
@@ -62,7 +62,7 @@ async function fixMultipleRoles() {
       logger.info(`   ✅ Mantendo role: ${roleToKeep.role.name}`);
 
       // Remover todas as outras roles
-      const rolesToRemove = user.roles.filter(ur => ur.id !== roleToKeep!.id);
+      const rolesToRemove = user.roles.filter((ur: { id: string }) => ur.id !== roleToKeep!.id);
       
       for (const roleToRemove of rolesToRemove) {
         logger.info(`   🗑️ Removendo role ${roleToRemove.role.name} (${roleToRemove.id})...`);

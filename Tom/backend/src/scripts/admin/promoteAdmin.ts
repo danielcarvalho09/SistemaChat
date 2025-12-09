@@ -1,5 +1,5 @@
-import { getPrismaClient } from '../config/database.js';
-import { logger } from '../config/logger.js';
+import { getPrismaClient } from '../../config/database.js';
+import { logger } from '../../config/logger.js';
 
 /**
  * Script para promover um usuário a admin
@@ -41,7 +41,7 @@ async function promoteToAdmin(email: string) {
     }
 
     // Verificar se já é admin
-    const isAlreadyAdmin = user.roles.some((ur) => ur.role.name === 'admin');
+    const isAlreadyAdmin = user.roles.some((ur: { role: { name: string } }) => ur.role.name === 'admin');
 
     if (isAlreadyAdmin) {
       logger.info('ℹ️  Usuário já é admin');
@@ -75,7 +75,7 @@ async function promoteToAdmin(email: string) {
       },
     });
 
-    const roleNames = updatedUser?.roles.map((ur) => ur.role.name).join(', ');
+    const roleNames = updatedUser?.roles.map((ur: { role: { name: string } }) => ur.role.name).join(', ');
     logger.info(`📋 Roles atuais: ${roleNames}`);
 
   } catch (error) {

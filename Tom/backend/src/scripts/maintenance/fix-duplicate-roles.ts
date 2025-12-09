@@ -1,5 +1,5 @@
-import { getPrismaClient } from '../config/database.js';
-import { logger } from '../config/logger.js';
+import { getPrismaClient } from '../../config/database.js';
+import { logger } from '../../config/logger.js';
 
 /**
  * Script para encontrar e corrigir roles duplicadas em usuários
@@ -90,7 +90,7 @@ async function fixDuplicateRoles() {
 
     let stillDuplicates = 0;
     for (const user of usersAfter) {
-      const roleIds = user.roles.map(ur => ur.roleId);
+      const roleIds = user.roles.map((ur: { roleId: string }) => ur.roleId);
       const uniqueRoleIds = new Set(roleIds);
       if (roleIds.length !== uniqueRoleIds.size) {
         stillDuplicates++;

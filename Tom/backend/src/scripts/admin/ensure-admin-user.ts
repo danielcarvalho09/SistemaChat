@@ -1,5 +1,5 @@
-import { getPrismaClient } from '../config/database.js';
-import { hashPassword } from '../utils/password.js';
+import { getPrismaClient } from '../../config/database.js';
+import { hashPassword } from '../../utils/password.js';
 
 async function ensureAdminUser() {
     const prisma = getPrismaClient();
@@ -91,7 +91,7 @@ async function ensureAdminUser() {
     console.log('\n📋 Final user state:');
     console.log('  Email:', finalUser?.email);
     console.log('  Name:', finalUser?.name);
-    console.log('  Roles:', finalUser?.roles.map(ur => ur.role.name).join(', '));
+    console.log('  Roles:', finalUser?.roles.map((ur: { role: { name: string } }) => ur.role.name).join(', '));
     console.log('\n✅ Admin user is ready!');
 }
 
