@@ -675,11 +675,20 @@ class BaileysManager {
       try {
         const connectionRecord = await this.prisma.whatsAppConnection.findUnique({
           where: { id: connectionId },
-          select: { lastDisconnectAt: true, firstConnectedAt: true },
+          select: { 
+            lastDisconnectAt: true, 
+            firstConnectedAt: true,
+            lastSyncFrom: true,
+            lastSyncTo: true 
+          },
         });
 
         lastDisconnectAt = connectionRecord?.lastDisconnectAt ?? null;
         firstConnectedAt = connectionRecord?.firstConnectedAt ?? null;
+
+        // ✅ CARREGAR lastSyncFrom/lastSyncTo do banco (sobrevive a restarts)
+        const persistedLastSyncFrom = connectionRecord?.lastSyncFrom ?? null;
+        const persistedLastSyncTo = connectionRecord?.lastSyncTo ?? null;
 
         // Verificar se é primeira conexão (não tem firstConnectedAt)
         wasFirstConnection = firstConnectedAt === null;
@@ -689,14 +698,27 @@ class BaileysManager {
           await this.saveFirstConnectedAt(connectionId);
           logger.info(`[Baileys] 📅 Primeira conexão detectada - firstConnectedAt salvo`);
         }
+        
+        // ✅ Restaurar lastSyncFrom do banco se disponível
+        if (persistedLastSyncFrom) {
+          client.lastSyncFrom = persistedLastSyncFrom;
+          client.lastSyncTo = persistedLastSyncTo;
+          logger.info(`[Baileys] 📦 Restored sync window from DB: from ${persistedLastSyncFrom.toISOString()}`);
+        } else {
+          // Fallback: usar lastDisconnectAt
+          client.lastSyncFrom = lastDisconnectAt;
+          client.lastSyncTo = null;
+        }
       } catch (fetchError) {
         logger.warn(`[Baileys] ⚠️ Could not read connection data for ${connectionId}:`, fetchError);
+        // Fallback seguro
+        client.lastDisconnectAt = null;
+        client.lastSyncFrom = null;
+        client.lastSyncTo = null;
       }
 
       // Atualizar client com lastDisconnectAt
       client.lastDisconnectAt = lastDisconnectAt;
-      client.lastSyncFrom = lastDisconnectAt;
-      client.lastSyncTo = null;
 
       // ✅ SINCRONIZAÇÃO: Apenas se for RECONEXÃO (não primeira conexão) E tiver lastDisconnectAt
       if (!wasFirstConnection && lastDisconnectAt) {
@@ -1093,6 +1115,7 @@ class BaileysManager {
           logger.info(`[Baileys] 📦 Processing batch ${batchIndex + 1}/${batches.length} (${batch.length} messages)...`);
 
           // Processar lote (usar mesmo código de processamento)
+          // ✅ Passar lastSyncFrom atualizado do lote anterior
           await this.processMessageBatch(
             connectionId,
             batch,
@@ -1101,6 +1124,12 @@ class BaileysManager {
             syncStats,
             client?.lastSyncFrom ?? null
           );
+
+          // ✅ Atualizar client após cada batch para que próximo batch use lastSyncFrom atualizado
+          const updatedClient = this.clients.get(connectionId);
+          if (updatedClient) {
+            client = updatedClient;
+          }
 
           // Delay entre lotes para evitar sobrecarga
           if (batchIndex < batches.length - 1) {
@@ -1111,6 +1140,13 @@ class BaileysManager {
 
         // Log final
         logger.info(`[Baileys] 📊 Batch processing complete: Total=${syncStats.total}, Processed=${syncStats.processed}, Skipped=${syncStats.skipped}, Errors=${syncStats.errors}`);
+        
+        // ✅ Log do estado final de sincronização
+        const finalClient = this.clients.get(connectionId);
+        if (finalClient?.lastSyncFrom) {
+          logger.info(`[Baileys] 📅 Final sync window: from ${finalClient.lastSyncFrom.toISOString()} to ${finalClient.lastSyncTo?.toISOString() || 'N/A'}`);
+        }
+        
         return; // Sair da função - já processou tudo em lotes
       }
 
@@ -1154,6 +1190,8 @@ class BaileysManager {
 
     const totalMessages = messages?.length || 0;
     let processedIndex = 0;
+    // ✅ Rastrear timestamp mais recente para atualizar lastSyncFrom/lastSyncTo
+    let latestMessageTimestamp: Date | null = null;
 
     for (const msg of messages) {
       processedIndex++;
@@ -1556,6 +1594,13 @@ class BaileysManager {
 
         if (messageProcessed) {
           syncStats.processed++;
+          // ✅ Atualizar timestamp mais recente APENAS se mensagem tem timestamp confiável
+          if (messageTimestamp) {
+            if (!latestMessageTimestamp || messageTimestamp > latestMessageTimestamp) {
+              latestMessageTimestamp = messageTimestamp;
+            }
+          }
+          // ❌ NÃO usar "momento atual" como fallback - pode causar gaps
         } else {
           syncStats.errors++;
         }
@@ -1571,6 +1616,53 @@ class BaileysManager {
 
         // Continuar com próxima mensagem
         continue;
+      }
+    }
+
+    // ✅ ATUALIZAR lastSyncFrom/lastSyncTo após processar batch
+    // Com MARGEM DE SEGURANÇA para lidar com mensagens fora de ordem
+    if (latestMessageTimestamp) {
+      const client = this.clients.get(connectionId);
+      if (client && syncStats.processed > 0) {
+        const previousSyncFrom = client.lastSyncFrom;
+        
+        // ✅ CRÍTICO: Margem de segurança de 5 minutos para evitar gaps
+        // Mensagens podem chegar fora de ordem cronológica
+        const SAFETY_MARGIN_MS = 5 * 60 * 1000; // 5 minutos
+        const safeTimestamp = new Date(latestMessageTimestamp.getTime() - SAFETY_MARGIN_MS);
+        
+        // Atualizar apenas se avançar a janela (evitar retroceder)
+        if (!client.lastSyncFrom || safeTimestamp > client.lastSyncFrom) {
+          client.lastSyncFrom = safeTimestamp;
+          client.lastSyncTo = new Date();
+          
+          logger.debug(`[Baileys] ✅ Sync window updated: from ${client.lastSyncFrom.toISOString()} (with 5min safety margin)`);
+          
+          // ✅ PERSISTIR NO BANCO DE DADOS (crítico para sobreviver a restarts)
+          this.prisma.whatsAppConnection.update({
+            where: { id: connectionId },
+            data: {
+              lastSyncFrom: client.lastSyncFrom,
+              lastSyncTo: client.lastSyncTo
+            }
+          }).catch(err => logger.error(`[Baileys] ❌ Failed to persist sync window:`, err));
+        }
+      }
+    } else if ((type === 'notify' || type === 'append') && syncStats.processed > 0) {
+      // Para mensagens em tempo real, atualizar para momento atual
+      const client = this.clients.get(connectionId);
+      if (client) {
+        const now = new Date();
+        client.lastSyncFrom = now;
+        client.lastSyncTo = now;
+        
+        logger.debug(`[Baileys] ✅ Sync window updated to now: ${now.toISOString()}`);
+        
+        // Persistir no banco
+        this.prisma.whatsAppConnection.update({
+          where: { id: connectionId },
+          data: { lastSyncFrom: now, lastSyncTo: now }
+        }).catch(err => logger.error(`[Baileys] ❌ Failed to persist sync window:`, err));
       }
     }
   }
@@ -4023,8 +4115,18 @@ class BaileysManager {
         return false;
       }
 
-      if (!client.lastSyncFrom && client.lastDisconnectAt) {
-        client.lastSyncFrom = client.lastDisconnectAt;
+      // ✅ Inicializar lastSyncFrom se não existir
+      // Prioridade: lastSyncFrom atualizado > lastDisconnectAt > null (sincronização completa)
+      if (!client.lastSyncFrom) {
+        if (client.lastDisconnectAt) {
+          client.lastSyncFrom = client.lastDisconnectAt;
+          logger.info(`[Baileys] 📅 Initialized lastSyncFrom from lastDisconnectAt: ${client.lastDisconnectAt.toISOString()}`);
+        } else {
+          // Se não tem lastDisconnectAt, usar momento atual menos 1 hora como margem de segurança
+          // Isso garante que busque mensagens das últimas horas mesmo sem histórico de desconexão
+          client.lastSyncFrom = new Date(Date.now() - 60 * 60 * 1000); // 1 hora atrás
+          logger.info(`[Baileys] 📅 Initialized lastSyncFrom to 1 hour ago (no disconnect history): ${client.lastSyncFrom.toISOString()}`);
+        }
       }
 
       const jid = phoneNumber.includes('@') ? phoneNumber : `${phoneNumber}@s.whatsapp.net`;
@@ -4034,6 +4136,7 @@ class BaileysManager {
         const syncWindowMinutes = (Date.now() - client.lastSyncFrom.getTime()) / 1000 / 60;
         logger.info(`[Baileys] 🔄 SYNC requested for ${phoneNumber} on ${connectionId}`);
         logger.info(`[Baileys] 📅 Sync window: desde ${client.lastSyncFrom.toISOString()} (${syncWindowMinutes.toFixed(1)} minutos atrás)`);
+        logger.info(`[Baileys] 🎯 Will fetch messages from this point forward to ensure no gaps`);
       } else {
         logger.info(`[Baileys] 🔄 SYNC requested for ${phoneNumber} on ${connectionId} (sem janela de tempo - sincronização geral)`);
       }
