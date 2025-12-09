@@ -452,7 +452,7 @@ export function Kanban() {
                       <DraggableCard key={conversation.id} id={conversation.id}>
                         <div 
                           data-card-id={conversation.id}
-                          className="relative bg-white rounded-lg border border-gray-300 shadow-sm p-4 hover:shadow-md transition-shadow"
+                          className="relative bg-white rounded-lg border border-gray-300 shadow-sm p-4 hover:shadow-md transition-shadow min-h-[120px]"
                         >
                           {/* Seta superior direita */}
                           <button
@@ -472,7 +472,7 @@ export function Kanban() {
                           </button>
 
                           {/* Layout horizontal: Foto à esquerda, conteúdo à direita */}
-                          <div className="flex gap-3">
+                          <div className="flex gap-3 pb-8">
                             {/* Avatar do contato - lado esquerdo, centralizado verticalmente */}
                             <div className="flex-shrink-0 flex items-center">
                               <div className="w-12 h-12 rounded-full bg-white border-2 border-gray-200 flex items-center justify-center">
@@ -496,37 +496,34 @@ export function Kanban() {
                                 </p>
                               )}
 
-                              {/* Tags e ícone WhatsApp alinhados na mesma linha */}
-                              <div className="flex items-center justify-between gap-2">
-                                {/* Tags em retângulos cinzas */}
-                                {conversation.tags && conversation.tags.length > 0 && (
-                                  <div className="flex flex-wrap gap-1 flex-1">
-                                    {conversation.tags.map((ct) => (
-                                      <span
-                                        key={ct.id}
-                                        className="px-2 py-0.5 text-xs bg-gray-200 text-gray-700 rounded"
-                                      >
-                                        {ct.tag.name}
-                                      </span>
-                                    ))}
-                                  </div>
-                                )}
-
-                                {/* Ícone WhatsApp alinhado com as tags */}
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    // Redirecionar para a conversa no dashboard
-                                    navigate(`/dashboard?conversation=${conversation.id}`);
-                                  }}
-                                  className="hover:opacity-80 transition-opacity flex-shrink-0"
-                                  title="Abrir conversa"
-                                >
-                                  <WhatsAppIcon className="w-6 h-6" />
-                                </button>
-                              </div>
+                              {/* Tags */}
+                              {conversation.tags && conversation.tags.length > 0 && (
+                                <div className="flex flex-wrap gap-1">
+                                  {conversation.tags.map((ct) => (
+                                    <span
+                                      key={ct.id}
+                                      className="px-2 py-0.5 text-xs bg-gray-200 text-gray-700 rounded"
+                                    >
+                                      {ct.tag.name}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
                             </div>
                           </div>
+
+                          {/* Ícone WhatsApp fixo no canto inferior direito */}
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              // Redirecionar para a conversa no dashboard
+                              navigate(`/dashboard?conversation=${conversation.id}`);
+                            }}
+                            className="absolute bottom-2 right-2 hover:opacity-80 transition-opacity z-10"
+                            title="Abrir conversa"
+                          >
+                            <WhatsAppIcon className="w-6 h-6" />
+                          </button>
                         </div>
                       </DraggableCard>
                     ))}
