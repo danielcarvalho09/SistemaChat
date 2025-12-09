@@ -150,6 +150,8 @@ export interface MessageResponse {
   mediaUrl: string | null;
   status: MessageStatus;
   isFromContact: boolean;
+  senderName: string | null;
+  senderPhone: string | null;
   timestamp: Date;
   createdAt: Date;
   quotedMessageId: string | null;

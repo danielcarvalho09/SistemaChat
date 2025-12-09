@@ -569,6 +569,7 @@ export class MessageService {
     externalId?: string,
     pushName?: string | null,
     senderName?: string | null, // ✅ Nome do remetente (para grupos)
+    senderPhone?: string | null, // ✅ Número de telefone do participante (para grupos)
     quotedContext?: {
       stanzaId?: string;
       participant?: string;
@@ -883,6 +884,7 @@ export class MessageService {
           messageType,
           isFromContact: !isFromMe, // true se veio do contato, false se foi enviado pelo sistema
           senderName: senderName || null, // ✅ Nome do remetente (importante para grupos)
+          senderPhone: senderPhone || null, // ✅ Número de telefone do participante (para grupos)
           status: 'delivered',
           mediaUrl,
           externalId: externalId || `generated-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
@@ -1085,6 +1087,8 @@ export class MessageService {
       mediaUrl: message.mediaUrl,
       status: message.status,
       isFromContact: message.isFromContact,
+      senderName: message.senderName || null,
+      senderPhone: message.senderPhone || null,
       timestamp: message.timestamp.toISOString(),
       createdAt: message.createdAt.toISOString(),
       quotedMessageId: message.quotedMessageId || null,

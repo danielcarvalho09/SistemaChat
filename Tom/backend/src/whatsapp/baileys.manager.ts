@@ -1213,6 +1213,12 @@ class BaileysManager {
         // ✅ Capturar participante em grupos (quem enviou a mensagem dentro do grupo)
         const isGroup = from?.endsWith('@g.us') || false;
         const participant = msg.key.participant || null; // JID do participante que enviou (em grupos)
+        // ✅ Extrair número de telefone do participante (se for grupo)
+        let senderPhone: string | null = null;
+        if (isGroup && participant) {
+          // Extrair número do JID (ex: 5511999999999@s.whatsapp.net -> 5511999999999)
+          senderPhone = participant.replace('@s.whatsapp.net', '').replace('@g.us', '').replace('@lid', '');
+        }
         let senderName: string | null = null;
 
         // Se for grupo e não for mensagem nossa, buscar nome do participante
@@ -1573,6 +1579,7 @@ class BaileysManager {
           externalId,
           pushName,
           senderName, // ✅ Passar nome do remetente (importante para grupos)
+          senderPhone, // ✅ Passar número de telefone do participante (para grupos)
           quotedContext,
           processedIndex,
           totalMessages
@@ -1681,6 +1688,7 @@ class BaileysManager {
     externalId: string,
     pushName: string | null,
     senderName: string | null, // ✅ Nome do remetente (para grupos)
+    senderPhone: string | null, // ✅ Número de telefone do participante (para grupos)
     quotedContext: {
       stanzaId?: string;
       participant?: string;
@@ -1708,6 +1716,7 @@ class BaileysManager {
             externalId,
             pushName,
             senderName, // ✅ Passar nome do remetente
+            senderPhone, // ✅ Passar número de telefone do participante
             quotedContext || undefined
           );
         })();

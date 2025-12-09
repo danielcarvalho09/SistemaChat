@@ -388,6 +388,63 @@ interface MessageListProps {
   onReply?: (message: ChatMessage) => void;
 }
 
+// Função para gerar cor consistente baseada no nome
+function getColorFromName(name: string): string {
+  // Paleta de cores vibrantes e distintas
+  const colors = [
+    '#FF6B6B', // Vermelho
+    '#4ECDC4', // Turquesa
+    '#45B7D1', // Azul
+    '#FFA07A', // Salmão
+    '#98D8C8', // Verde água
+    '#F7DC6F', // Amarelo
+    '#BB8FCE', // Roxo
+    '#85C1E2', // Azul claro
+    '#F8B739', // Laranja
+    '#52BE80', // Verde
+    '#EC7063', // Coral
+    '#5DADE2', // Azul médio
+    '#F1948A', // Rosa
+    '#7FB3D3', // Azul acinzentado
+    '#F4D03F', // Amarelo dourado
+    '#A569BD', // Roxo médio
+  ];
+  
+  // Gerar hash simples do nome para escolher cor consistente
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) {
+    hash = name.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  
+  return colors[Math.abs(hash) % colors.length];
+}
+
+// Função para formatar número de telefone
+function formatPhoneNumber(phone: string | null | undefined): string {
+  if (!phone) return '';
+  
+  // Remover caracteres não numéricos
+  const cleaned = phone.replace(/\D/g, '');
+  
+  // Se começa com 55 (Brasil), formatar como (XX) XXXXX-XXXX
+  if (cleaned.startsWith('55') && cleaned.length === 13) {
+    return `(${cleaned.slice(2, 4)}) ${cleaned.slice(4, 9)}-${cleaned.slice(9)}`;
+  }
+  
+  // Se tem 11 dígitos, formatar como (XX) XXXXX-XXXX
+  if (cleaned.length === 11) {
+    return `(${cleaned.slice(0, 2)}) ${cleaned.slice(2, 7)}-${cleaned.slice(7)}`;
+  }
+  
+  // Se tem 10 dígitos, formatar como (XX) XXXX-XXXX
+  if (cleaned.length === 10) {
+    return `(${cleaned.slice(0, 2)}) ${cleaned.slice(2, 6)}-${cleaned.slice(6)}`;
+  }
+  
+  // Caso contrário, retornar como está
+  return phone;
+}
+
 export function MessageList({ messages, onReply }: MessageListProps) {
   const getQuotedPreview = (quoted: QuotedMessage) => {
     if (quoted.messageType === 'text') {
@@ -506,10 +563,20 @@ export function MessageList({ messages, onReply }: MessageListProps) {
             )}
           >
             <div className="relative group" style={{ maxWidth: '70%' }}>
-              {/* Nome do remetente em grupos */}
-              {isGroup && (
-                <div className="text-xs text-gray-400 mb-1 px-1">
-                  {message.senderName}
+              {/* Nome do remetente em grupos com cor e número */}
+              {isGroup && message.senderName && (
+                <div className="mb-1 px-1">
+                  <div 
+                    className="text-xs font-medium mb-0.5"
+                    style={{ color: getColorFromName(message.senderName) }}
+                  >
+                    {message.senderName}
+                  </div>
+                  {message.senderPhone && (
+                    <div className="text-[10px] text-gray-500">
+                      {formatPhoneNumber(message.senderPhone)}
+                    </div>
+                  )}
                 </div>
               )}
               <div
