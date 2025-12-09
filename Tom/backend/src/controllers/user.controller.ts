@@ -8,8 +8,8 @@ import {
   assignUserDepartmentSchema,
   paginationSchema,
 } from '../utils/validators.js';
-import { fixDuplicateRoles } from '../scripts/fix-duplicate-roles.js';
-import { fixMultipleRoles } from '../scripts/fix-multiple-roles.js';
+import { fixDuplicateRoles } from '../scripts/maintenance/fix-duplicate-roles.js';
+import { fixMultipleRoles } from '../scripts/maintenance/fix-multiple-roles.js';
 
 export class UserController {
   private userService = new UserService();

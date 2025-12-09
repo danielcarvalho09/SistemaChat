@@ -13,16 +13,16 @@
     "prisma:migrate": "prisma migrate dev",
     "prisma:migrate:prod": "./migrate-production.sh",
     "prisma:studio": "prisma studio",
-    "clean:connections": "tsx scripts/delete-inactive-connections.ts",
+    "clean:connections": "tsx scripts/maintenance/delete-inactive-connections.ts",
     "seed": "tsx src/utils/runSeed.ts",
     "seed:railway": "node railway-seed.js",
     "deploy:railway": "npx prisma migrate deploy && node railway-seed.js",
-    "promote-admin": "tsx src/utils/promoteAdmin.ts",
+    "promote-admin": "tsx src/scripts/admin/promoteAdmin.ts",
     "lint": "eslint src --ext .ts",
     "lint:fix": "eslint src --ext .ts --fix",
     "format": "prettier --write \"src/**/*.ts\"",
-    "generate:encryption-key": "tsx scripts/generate-encryption-key.ts",
-    "migrate:encrypt-authdata": "tsx scripts/migrate-encrypt-authdata.ts"
+    "generate:encryption-key": "tsx scripts/admin/generate-encryption-key.ts",
+    "migrate:encrypt-authdata": "tsx scripts/migration/migrate-encrypt-authdata.ts"
   },
   "keywords": [
     "whatsapp",
