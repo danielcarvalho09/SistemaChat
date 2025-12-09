@@ -332,7 +332,31 @@ export class ConversationService {
 
     // Aceita conversas em 'waiting' (novas) ou 'transferred' (transferidas)
     if (conversation.status !== 'waiting' && conversation.status !== 'transferred') {
-      throw new ConflictError('Conversation is not available for acceptance');
+      let statusMessage = '';
+      
+      if (conversation.status === 'in_progress') {
+        if (conversation.assignedUserId && conversation.assignedUserId !== userId) {
+          statusMessage = 'Esta conversa já foi aceita por outro atendente';
+        } else if (conversation.assignedUserId === userId) {
+          statusMessage = 'Você já está atendendo esta conversa';
+        } else {
+          statusMessage = 'Conversa já está em atendimento';
+        }
+      } else if (conversation.status === 'resolved') {
+        statusMessage = 'Conversa já foi resolvida';
+      } else if (conversation.status === 'closed') {
+        statusMessage = 'Conversa já foi fechada';
+      } else {
+        statusMessage = `Conversa está com status '${conversation.status}' e não pode ser aceita`;
+      }
+      
+      throw new ConflictError(statusMessage);
+    }
+
+    // Verificar se a conversa já está atribuída a outro usuário (condição de corrida)
+    // Isso pode acontecer se dois usuários tentarem aceitar ao mesmo tempo
+    if (conversation.assignedUserId && conversation.assignedUserId !== userId) {
+      throw new ConflictError('Esta conversa já foi aceita por outro atendente');
     }
 
     // Buscar a conexão e departamento do usuário que está aceitando
@@ -402,9 +426,38 @@ export class ConversationService {
       updateData.firstResponseAt = new Date();
     }
 
-    const updated = await this.prisma.conversation.update({
-      where: { id: conversationId },
+    // ✅ Proteção contra condições de corrida: só atualiza se o status ainda for 'waiting' ou 'transferred'
+    // Isso previne que dois usuários aceitem a mesma conversa simultaneamente
+    const updated = await this.prisma.conversation.updateMany({
+      where: { 
+        id: conversationId,
+        status: {
+          in: ['waiting', 'transferred']
+        }
+      },
       data: updateData,
+    });
+
+    // Se nenhuma linha foi atualizada, significa que a conversa já foi aceita por outro usuário
+    if (updated.count === 0) {
+      // Buscar a conversa atualizada para verificar o status
+      const currentConversation = await this.prisma.conversation.findUnique({
+        where: { id: conversationId },
+        select: { status: true, assignedUserId: true },
+      });
+
+      if (currentConversation?.status === 'in_progress' && currentConversation.assignedUserId !== userId) {
+        throw new ConflictError('Esta conversa já foi aceita por outro atendente');
+      } else if (currentConversation?.status !== 'waiting' && currentConversation?.status !== 'transferred') {
+        throw new ConflictError(`Conversa não está mais disponível para aceitação (status: ${currentConversation?.status})`);
+      } else {
+        throw new ConflictError('Não foi possível aceitar a conversa. Tente novamente.');
+      }
+    }
+
+    // Buscar a conversa atualizada com todos os relacionamentos
+    const updatedConversation = await this.prisma.conversation.findUnique({
+      where: { id: conversationId },
       include: {
         contact: true,
         connection: true,
@@ -423,9 +476,13 @@ export class ConversationService {
       },
     });
 
+    if (!updatedConversation) {
+      throw new NotFoundError('Conversation not found after update');
+    }
+
     logger.info(`Conversation ${conversationId} accepted by user ${userId}`);
 
-    return this.formatConversationResponse(updated);
+    return this.formatConversationResponse(updatedConversation);
   }
 
   /**

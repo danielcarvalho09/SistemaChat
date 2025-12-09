@@ -127,6 +127,10 @@ export class AuthService {
     });
 
     if (userRole) {
+      // Garantir que usuário tenha apenas uma role - remover outras antes de adicionar
+      await this.prisma.userRole.deleteMany({
+        where: { userId: user.id },
+      });
       await this.prisma.userRole.create({
         data: {
           userId: user.id,

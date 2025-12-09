@@ -48,6 +48,11 @@ async function promoteToAdmin(email: string) {
       process.exit(0);
     }
 
+    // Garantir que usuário tenha apenas uma role - remover outras antes de adicionar admin
+    await prisma.userRole.deleteMany({
+      where: { userId: user.id },
+    });
+    
     // Adicionar role admin
     await prisma.userRole.create({
       data: {

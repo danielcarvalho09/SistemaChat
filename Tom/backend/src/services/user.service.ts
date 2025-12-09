@@ -123,13 +123,24 @@ export class UserService {
           },
         });
 
-        // Atribuir role
-        await tx.userRole.create({
-          data: {
+        // Atribuir role (verificar se já existe antes de criar para evitar duplicatas)
+        const existingUserRole = await tx.userRole.findFirst({
+          where: {
             userId: user.id,
             roleId: role.id,
           },
         });
+
+        if (!existingUserRole) {
+          await tx.userRole.create({
+            data: {
+              userId: user.id,
+              roleId: role.id,
+            },
+          });
+        } else {
+          logger.warn(`User ${user.id} already has role ${roleName}, skipping assignment`);
+        }
 
         // Buscar usuário completo com roles
         return await tx.user.findUnique({
@@ -265,6 +276,8 @@ export class UserService {
 
   /**
    * Atribui role a um usuário
+   * IMPORTANTE: Remove todas as outras roles antes de adicionar a nova
+   * Garante que o usuário tenha APENAS UMA role
    */
   async assignRole(userId: string, roleId: string): Promise<void> {
     // Verificar se usuário existe
@@ -285,24 +298,38 @@ export class UserService {
       throw new NotFoundError('Role not found');
     }
 
-    // Verificar se já possui a role
+    // Verificar se já possui essa role e é a única
     const existing = await this.prisma.userRole.findFirst({
       where: { userId, roleId },
     });
 
-    if (existing) {
-      throw new ConflictError('User already has this role');
+    const allUserRoles = await this.prisma.userRole.findMany({
+      where: { userId },
+    });
+
+    if (existing && allUserRoles.length === 1) {
+      logger.info(`User ${userId} already has role ${role.name} as the only role, skipping assignment`);
+      return; // Já tem essa role e é a única, não precisa fazer nada
     }
 
-    // Atribuir role
-    await this.prisma.userRole.create({
-      data: { userId, roleId },
+    // Remover TODAS as roles existentes antes de adicionar a nova
+    // Isso garante que o usuário tenha apenas uma role
+    await this.prisma.$transaction(async (tx) => {
+      // Remover todas as roles
+      await tx.userRole.deleteMany({
+        where: { userId },
+      });
+
+      // Adicionar a nova role
+      await tx.userRole.create({
+        data: { userId, roleId },
+      });
     });
 
     // Invalidar cache
     await cacheDel(`user:${userId}`);
 
-    logger.info(`Role ${role.name} assigned to user ${userId}`);
+    logger.info(`Role ${role.name} assigned to user ${userId} (all other roles removed)`);
   }
 
   /**
@@ -328,7 +355,8 @@ export class UserService {
   }
 
   /**
-   * Atualiza role do usuário (troca entre admin e user)
+   * Atualiza role do usuário (SEMPRE remove todas as outras roles primeiro)
+   * Garante que o usuário tenha APENAS UMA role
    */
   async updateUserRole(userId: string, roleName: 'admin' | 'user' | 'gerente'): Promise<void> {
     // Buscar role pelo nome
@@ -340,20 +368,41 @@ export class UserService {
       throw new NotFoundError(`Role ${roleName} not found`);
     }
 
-    // Remover todas as roles atuais
-    await this.prisma.userRole.deleteMany({
+    // Verificar se usuário já tem essa role e é a única
+    const existingUserRole = await this.prisma.userRole.findFirst({
+      where: { 
+        userId,
+        roleId: newRole.id,
+      },
+    });
+
+    const allUserRoles = await this.prisma.userRole.findMany({
       where: { userId },
     });
 
-    // Atribuir nova role
-    await this.prisma.userRole.create({
-      data: { userId, roleId: newRole.id },
+    // Se já tem a role correta e é a única, não fazer nada
+    if (existingUserRole && allUserRoles.length === 1) {
+      logger.info(`User ${userId} already has role ${roleName} as the only role, no changes needed`);
+      return;
+    }
+
+    // SEMPRE remover todas as roles antes de adicionar a nova (garantir apenas 1 role)
+    await this.prisma.$transaction(async (tx) => {
+      // Remover TODAS as roles existentes
+      await tx.userRole.deleteMany({
+        where: { userId },
+      });
+
+      // Atribuir nova role (única)
+      await tx.userRole.create({
+        data: { userId, roleId: newRole.id },
+      });
     });
 
     // Invalidar cache
     await cacheDel(`user:${userId}`);
 
-    logger.info(`User ${userId} role updated to ${roleName}`);
+    logger.info(`User ${userId} role updated to ${roleName} (all other roles removed)`);
   }
 
   /**
@@ -504,6 +553,24 @@ export class UserService {
    * Formata resposta do usuário
    */
   private formatUserResponse(user: any): UserResponse {
+    // ✅ Remover roles duplicadas usando Map (por roleId)
+    const uniqueRolesMap = new Map<string, { id: string; name: string; description: string | null }>();
+    
+    if (user.roles && Array.isArray(user.roles)) {
+      for (const ur of user.roles) {
+        if (ur.role && ur.role.id) {
+          // Usar roleId como chave para garantir unicidade
+          if (!uniqueRolesMap.has(ur.role.id)) {
+            uniqueRolesMap.set(ur.role.id, {
+              id: ur.role.id,
+              name: ur.role.name,
+              description: ur.role.description,
+            });
+          }
+        }
+      }
+    }
+    
     return {
       id: user.id,
       email: user.email,
@@ -511,11 +578,7 @@ export class UserService {
       avatar: user.avatar,
       status: user.status,
       isActive: user.isActive,
-      roles: user.roles?.map((ur: any) => ({
-        id: ur.role.id,
-        name: ur.role.name,
-        description: ur.role.description,
-      })) || [],
+      roles: Array.from(uniqueRolesMap.values()), // Converter Map para Array
       createdAt: user.createdAt,
       updatedAt: user.updatedAt,
     };

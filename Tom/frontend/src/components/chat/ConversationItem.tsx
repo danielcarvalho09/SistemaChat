@@ -66,8 +66,16 @@ export function ConversationItem({ conversation, isSelected, onClick, onAccept }
       if (onAccept) {
         onAccept(conversation.id);
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Erro ao aceitar conversa:', error);
+      
+      // Mostrar mensagem de erro amigável
+      const errorMessage = error?.response?.data?.message || 
+                          error?.response?.data?.error || 
+                          error?.message || 
+                          'Não foi possível aceitar a conversa. Ela pode já ter sido aceita por outro atendente.';
+      
+      alert(errorMessage);
     } finally {
       setIsAccepting(false);
     }

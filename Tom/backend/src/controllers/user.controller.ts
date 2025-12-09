@@ -8,6 +8,8 @@ import {
   assignUserDepartmentSchema,
   paginationSchema,
 } from '../utils/validators.js';
+import { fixDuplicateRoles } from '../scripts/fix-duplicate-roles.js';
+import { fixMultipleRoles } from '../scripts/fix-multiple-roles.js';
 
 export class UserController {
   private userService = new UserService();
@@ -333,5 +335,45 @@ export class UserController {
       success: true,
       data: departments,
     });
+  };
+
+  /**
+   * POST /api/v1/users/fix-duplicate-roles
+   * Corrige roles duplicadas em todos os usuários (apenas admin)
+   */
+  fixDuplicateRoles = async (request: FastifyRequest, reply: FastifyReply) => {
+    try {
+      await fixDuplicateRoles();
+      return reply.status(200).send({
+        success: true,
+        message: 'Duplicate roles fixed successfully',
+      });
+    } catch (error: any) {
+      return reply.status(500).send({
+        success: false,
+        message: 'Failed to fix duplicate roles',
+        error: error.message,
+      });
+    }
+  };
+
+  /**
+   * POST /api/v1/users/fix-multiple-roles
+   * Corrige usuários com múltiplas roles, mantendo apenas uma (apenas admin)
+   */
+  fixMultipleRoles = async (request: FastifyRequest, reply: FastifyReply) => {
+    try {
+      await fixMultipleRoles();
+      return reply.status(200).send({
+        success: true,
+        message: 'Multiple roles fixed successfully - each user now has only one role',
+      });
+    } catch (error: any) {
+      return reply.status(500).send({
+        success: false,
+        message: 'Failed to fix multiple roles',
+        error: error.message,
+      });
+    }
   };
 }

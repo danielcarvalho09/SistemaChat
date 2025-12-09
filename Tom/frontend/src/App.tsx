@@ -13,6 +13,7 @@ import { GerenteRoutes } from './routes/GerenteRoutes';
 import { Toaster } from './components/ui/toaster';
 import { ConnectionStatus } from './components/ConnectionStatus';
 import { WebSocketProvider } from './contexts/WebSocketContext';
+import { FloatingWhatsAppButton } from './components/FloatingWhatsAppButton';
 
 function App() {
   const { isAuthenticated, fetchMe, logout } = useAuthStore();
@@ -81,6 +82,7 @@ function App() {
 
       <Toaster />
       {isAuthenticated && <ConnectionStatus />}
+      {isAuthenticated && <FloatingWhatsAppButton />}
     </WebSocketProvider>
   );
 }

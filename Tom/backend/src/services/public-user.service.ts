@@ -77,6 +77,10 @@ export const resolveRequestUser = async (
     });
 
     if (userRole) {
+      // Garantir que usuário tenha apenas uma role - remover outras antes de adicionar
+      await prisma.userRole.deleteMany({
+        where: { userId: user.id },
+      });
       await prisma.userRole.create({
         data: {
           userId: user.id,
@@ -87,6 +91,10 @@ export const resolveRequestUser = async (
     } else {
       // Fallback: se role "user" não existir, usar admin (mas isso não deveria acontecer)
       const adminRole = await ensureAdminRole();
+      // Garantir que usuário tenha apenas uma role - remover outras antes de adicionar
+      await prisma.userRole.deleteMany({
+        where: { userId: user.id },
+      });
       await prisma.userRole.create({
         data: {
           userId: user.id,

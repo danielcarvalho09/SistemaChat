@@ -90,4 +90,16 @@ export async function userRoutes(fastify: FastifyInstance) {
   fastify.get('/:userId/departments', {
     handler: userController.getUserDepartments,
   });
+
+  // Corrigir roles duplicadas (apenas admin)
+  fastify.post('/fix-duplicate-roles', {
+    preHandler: [requireAdmin],
+    handler: userController.fixDuplicateRoles,
+  });
+
+  // Corrigir múltiplas roles (apenas admin)
+  fastify.post('/fix-multiple-roles', {
+    preHandler: [requireAdmin],
+    handler: userController.fixMultipleRoles,
+  });
 }
