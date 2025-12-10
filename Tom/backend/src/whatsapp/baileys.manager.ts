@@ -1210,7 +1210,12 @@ class BaileysManager {
         // ✅ Verificar se é grupo OU LID (ambos devem exibir nomes dos remetentes)
         // LID = LinkedIn Device ID (múltiplos usuários podem usar o mesmo @lid)
         // ✅ IDs de grupo: Números que começam com 120363 são SEMPRE grupos do WhatsApp
-        const isGroup = from?.endsWith('@g.us') || from?.includes('@lid') || from?.startsWith('120363') || false;
+        // ✅ IMPORTANTE: Verificar ANTES de remover sufixos
+        const fromStr = from || '';
+        const isGroup = fromStr.endsWith('@g.us') || 
+                       fromStr.includes('@lid') || 
+                       fromStr.startsWith('120363') ||
+                       (fromStr.replace('@s.whatsapp.net', '').replace('@g.us', '').replace('@lid', '').startsWith('120363'));
         const participant = msg.key.participant || null; // JID do participante que enviou (em grupos)
         // ✅ Extrair número de telefone do participante (se for grupo ou LID)
         let senderPhone: string | null = null;
