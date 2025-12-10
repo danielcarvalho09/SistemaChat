@@ -3,6 +3,6 @@ builder = "NIXPACKS"
 buildCommand = "npm install && npx prisma generate && npm run build"
 
 [deploy]
-startCommand = "node create-roles-only.js && node dist/server.js"
+startCommand = "npm run start:with-roles"
 restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 10
