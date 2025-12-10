@@ -552,11 +552,12 @@ export function MessageList({ messages, onReply, contactPhoneNumber }: MessageLi
         // isFromContact = false -> mensagem do agente (direita, verde)
         const isFromMe = !message.isFromContact;
         
-        // Verificar se é grupo: phoneNumber contém @g.us OU há senderName E senderPhone (indica grupo)
-        // Se há senderName e senderPhone, é definitivamente um grupo
-        const isGroup = message.senderName && 
-                        message.senderPhone && 
-                        message.isFromContact;
+        // ✅ Verificar se é grupo: usar contactPhoneNumber (contém @g.us) OU senderName + senderPhone
+        // Prioridade: 1. contactPhoneNumber contém @g.us, 2. senderName + senderPhone presentes
+        const isGroup = (contactPhoneNumber?.includes('@g.us') || false) ||
+                        (message.senderName && 
+                         message.senderPhone && 
+                         message.isFromContact);
         
         return (
           <div
@@ -567,12 +568,13 @@ export function MessageList({ messages, onReply, contactPhoneNumber }: MessageLi
             )}
           >
             <div className="relative group" style={{ maxWidth: '70%' }}>
-              {/* Nome do remetente em grupos com cor e número */}
-              {isGroup && message.senderName && (
+              {/* ✅ Nome do remetente em grupos com cor e número */}
+              {/* Exibir apenas se for grupo E mensagem do contato (não nossa) E tiver senderName */}
+              {isGroup && !isFromMe && message.senderName && (
                 <div className="mb-1 px-1">
                   <div 
                     className="text-xs font-medium mb-0.5"
-                    style={{ color: getColorFromName(message.senderName) }}
+                    style={{ color: getColorFromName(message.senderName || message.senderPhone || '') }}
                   >
                     {message.senderName}
                   </div>
