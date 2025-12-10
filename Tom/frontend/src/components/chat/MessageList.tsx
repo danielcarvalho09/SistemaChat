@@ -551,8 +551,8 @@ export function MessageList({ messages, onReply }: MessageListProps) {
         // isFromContact = false -> mensagem do agente (direita, verde)
         const isFromMe = !message.isFromContact;
         
-        // Verificar se é grupo: usar campo isGroup do contato OU verificar se tem senderName
-        const isGroup = conversation?.contact?.isGroup || (message.senderName && message.isFromContact);
+        // Verificar se é grupo: mensagem tem senderName e é do contato (não do agente)
+        const isGroup = message.senderName && message.isFromContact;
         
         return (
           <div
