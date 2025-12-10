@@ -15,6 +15,7 @@ import { healthRoutes } from './health.routes.js';
 import { aiRoutes } from './ai.routes.js';
 import { quickMessageRoutes } from './quick-message.routes.js';
 import { dashboardRoutes } from './dashboard.routes.js';
+import { funnelRoutes } from './funnel.routes.js';
 import { config } from '../config/env.js';
 
 export async function registerRoutes(fastify: FastifyInstance) {
@@ -39,4 +40,6 @@ export async function registerRoutes(fastify: FastifyInstance) {
   await fastify.register(aiRoutes, { prefix: `${apiPrefix}/ai` });
   await fastify.register(quickMessageRoutes, { prefix: `${apiPrefix}/quick-messages` });
   await fastify.register(dashboardRoutes, { prefix: `${apiPrefix}` });
+  await fastify.register(funnelRoutes, { prefix: `${apiPrefix}/funnels` });
 }
+

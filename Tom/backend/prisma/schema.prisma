@@ -36,6 +36,7 @@ model User {
   notificationPreferences NotificationPreference?
   conversationHistory     ConversationHistory[]
   quickMessages           QuickMessage[]
+  funnels                 Funnel[] // Funis criados pelo usuário
 
   @@index([email])
   @@index([isActive])
@@ -506,6 +507,66 @@ model ConversationTag {
   @@index([conversationId])
   @@index([tagId])
   @@map("conversation_tags")
+}
+
+// ==================== FUNIS INTELIGENTES ====================
+
+model Funnel {
+  id          String   @id @default(uuid())
+  name        String
+  niche       String // Nicho de mercado
+  description String?
+  userId      String // Criador do funil
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relações
+  user   User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  stages FunnelStage[]
+
+  @@index([userId])
+  @@index([isActive])
+  @@map("funnels")
+}
+
+model FunnelStage {
+  id          String   @id @default(uuid())
+  funnelId    String
+  title       String
+  description String?
+  icon        String   @default("circle")
+  color       String   @default("#3B82F6")
+  order       Int // Ordem no fluxo
+  positionX   Float    @default(0) // Posição X no canvas
+  positionY   Float    @default(0) // Posição Y no canvas
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relações
+  funnel          Funnel             @relation(fields: [funnelId], references: [id], onDelete: Cascade)
+  connectionsFrom FunnelConnection[] @relation("FromStage")
+  connectionsTo   FunnelConnection[] @relation("ToStage")
+
+  @@index([funnelId])
+  @@index([order])
+  @@map("funnel_stages")
+}
+
+model FunnelConnection {
+  id          String   @id @default(uuid())
+  fromStageId String
+  toStageId   String
+  label       String? // Label opcional na conexão
+  createdAt   DateTime @default(now())
+
+  // Relações
+  fromStage FunnelStage @relation("FromStage", fields: [fromStageId], references: [id], onDelete: Cascade)
+  toStage   FunnelStage @relation("ToStage", fields: [toStageId], references: [id], onDelete: Cascade)
+
+  @@index([fromStageId])
+  @@index([toStageId])
+  @@map("funnel_connections")
 }
 
 // ==================== BROADCAST E LISTAS DE CONTATOS ====================

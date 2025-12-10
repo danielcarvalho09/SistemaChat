@@ -1,5 +1,5 @@
 import { Outlet } from 'react-router-dom';
-import { MessageSquare, Columns3, CalendarDays, LogOut, Settings, MessageCircle } from 'lucide-react';
+import { MessageSquare, Columns3, CalendarDays, LogOut, Settings, MessageCircle, Sparkles } from 'lucide-react';
 import { useAuthStore } from '../../store/authStore';
 import { Sidebar, SidebarBody, SidebarLink } from '../../components/ui/sidebar';
 import { useState } from 'react';
@@ -13,7 +13,8 @@ export function DashboardLayout() {
   const isAdmin = user?.roles?.some(role => role.name === 'admin') || false;
   const isGerente = user?.roles?.some(role => role.name === 'gerente') || false;
 
-  const links = [
+    // ✅ Links base para todos os usuários
+  const baseLinks = [
     {
       label: 'Conversas',
       href: '/dashboard',
@@ -35,6 +36,16 @@ export function DashboardLayout() {
       icon: <MessageCircle className="text-gray-700 h-5 w-5 flex-shrink-0" />,
     },
   ];
+
+  // ✅ Link de Funis Inteligentes (apenas para admin e gerente)
+  const funnelsLink = {
+    label: 'Funis Inteligentes',
+    href: '/dashboard/funnels',
+    icon: <Sparkles className="text-gray-700 h-5 w-5 flex-shrink-0" />,
+  };
+
+  // ✅ Adicionar Funis Inteligentes se usuário for admin ou gerente
+  const links = (isAdmin || isGerente) ? [...baseLinks, funnelsLink] : baseLinks;
 
   return (
     <div className={cn("flex flex-col md:flex-row bg-white w-full flex-1 overflow-hidden h-screen")}>

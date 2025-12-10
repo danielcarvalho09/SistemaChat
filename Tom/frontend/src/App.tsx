@@ -8,6 +8,7 @@ import { DashboardLayout } from './pages/dashboard/DashboardLayout';
 import { Kanban } from './pages/dashboard/Kanban';
 import { Agenda } from './pages/dashboard/Agenda';
 import { QuickMessages } from './pages/dashboard/QuickMessages';
+import { Funnels } from './pages/dashboard/Funnels';
 import { AdminRoutes } from './routes/AdminRoutes';
 import { GerenteRoutes } from './routes/GerenteRoutes';
 import { Toaster } from './components/ui/toaster';
@@ -57,6 +58,7 @@ function App() {
           <Route path="kanban" element={<Kanban />} />
           <Route path="agenda" element={<Agenda />} />
           <Route path="quick-messages" element={<QuickMessages />} />
+          <Route path="funnels" element={<Funnels />} />
         </Route>
         
         {/* Rotas Admin */}

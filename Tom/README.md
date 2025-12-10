@@ -75,6 +75,8 @@ npm run dev
 - [Guia de Migração Supabase](docs/MIGRACAO_SUPABASE.md) - Como migrar para nova conta Supabase
 - [Script SQL de Replicação](database/replicate-database-schema.sql) - Script completo para replicar schema
 - [Documentação de Segurança](docs/SEGURANCA.md) - Proteções contra XSS, SQL Injection, Command Injection e outras vulnerabilidades
+- [Funis Inteligentes](docs/FUNIS_INTELIGENTES.md) - Sistema de geração automática de funis de vendas com IA
+- [Configuração OpenRouter](backend/OPENROUTER_CONFIG.md) - Como configurar a API do OpenRouter
 
 ## 🛠️ Scripts Úteis
 
@@ -113,10 +115,11 @@ Veja mais detalhes em:
 ## 📦 Tecnologias Principais
 
 - **Backend**: Node.js, TypeScript, Fastify, Prisma, Socket.IO
-- **Frontend**: React, TypeScript, Vite, TailwindCSS, Zustand
+- **Frontend**: React, TypeScript, Vite, TailwindCSS, Zustand, ReactFlow
 - **Banco de Dados**: PostgreSQL (Supabase)
 - **Cache**: Redis
 - **WhatsApp**: Baileys
+- **IA**: OpenRouter + Google Gemini 2.0 Flash (Funis Inteligentes)
 
 ## 🔐 Segurança
 
