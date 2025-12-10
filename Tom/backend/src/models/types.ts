@@ -120,6 +120,7 @@ export interface ContactResponse {
   avatar: string | null;
   email: string | null;
   tags: string[];
+  isGroup: boolean; // ✅ Indica se é um grupo do WhatsApp
 }
 
 export interface AcceptConversationRequest {

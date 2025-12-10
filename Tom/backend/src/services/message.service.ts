@@ -684,20 +684,33 @@ export class MessageService {
           data: {
             phoneNumber,
             name: contactName,
+            isGroup, // ✅ Salvar se é grupo
             // ✅ Só salvar pushName se for mensagem individual (não grupo) e não for nossa
             pushName: (!isGroup && !isFromMe && pushName) ? pushName : null,
           },
         });
-        logger.info(`New contact created: ${phoneNumber} (${contactName}) - pushName: ${(!isGroup && !isFromMe && pushName) ? pushName : 'N/A'}`);
-      } else if (!isGroup && !isFromMe && pushName && contact.pushName !== pushName) {
+        logger.info(`New contact created: ${phoneNumber} (${contactName}) - isGroup: ${isGroup}, pushName: ${(!isGroup && !isFromMe && pushName) ? pushName : 'N/A'}`);
+      } else {
+        // ✅ Atualizar isGroup se necessário (caso contato exista mas flag não esteja correta)
+        if (contact.isGroup !== isGroup) {
+          await this.prisma.contact.update({
+            where: { id: contact.id },
+            data: { isGroup },
+          });
+          logger.info(`[MessageService] 📝 Updated isGroup for ${phoneNumber}: ${isGroup}`);
+          contact.isGroup = isGroup; // Atualizar objeto em memória
+        }
+        
         // ✅ CORRIGIDO: Só atualizar pushName se for mensagem individual (não grupo) e não for nossa
         // O pushName deve ser do contato da conversa, não do remetente da última mensagem
-        await this.prisma.contact.update({
-          where: { id: contact.id },
-          data: { pushName },
-        });
-        logger.info(`[MessageService] 📝 Updated pushName for ${phoneNumber}: ${pushName}`);
-        contact.pushName = pushName; // Atualizar objeto em memória
+        if (!isGroup && !isFromMe && pushName && contact.pushName !== pushName) {
+          await this.prisma.contact.update({
+            where: { id: contact.id },
+            data: { pushName },
+          });
+          logger.info(`[MessageService] 📝 Updated pushName for ${phoneNumber}: ${pushName}`);
+          contact.pushName = pushName; // Atualizar objeto em memória
+        }
       }
 
       // ✅ DEDUPLICAÇÃO ANTECIPADA: Verificar se mensagem já existe ANTES de criar/buscar conversa

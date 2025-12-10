@@ -81,6 +81,7 @@ export interface Contact {
   avatar: string | null;
   email: string | null;
   tags: string[];
+  isGroup: boolean; // ✅ Indica se é um grupo do WhatsApp
 }
 
 // ==================== TIPOS DE MENSAGEM ====================
