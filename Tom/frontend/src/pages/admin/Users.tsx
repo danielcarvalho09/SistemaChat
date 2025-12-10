@@ -87,7 +87,7 @@ export function Users() {
         // Mostrar mensagem de sucesso
         alert(`✅ ${response.data.message || 'Usuário excluído com sucesso!'}`);
         // Recarregar lista de usuários
-        fetchUsers();
+      fetchUsers();
       }
     } catch (error: any) {
       console.error('Erro ao excluir usuário:', error);

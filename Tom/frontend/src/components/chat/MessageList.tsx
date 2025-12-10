@@ -573,7 +573,7 @@ export function MessageList({ messages, onReply, isGroup = false }: MessageListP
                     className="text-xs font-medium mb-0.5"
                     style={{ color: getColorFromName(message.senderName) }}
                   >
-                    {message.senderName}
+                  {message.senderName}
                   </div>
                   {message.senderPhone && (
                     <div className="text-[10px] text-gray-500">

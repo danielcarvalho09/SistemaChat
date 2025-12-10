@@ -1,6 +1,6 @@
 import { getPrismaClient } from '../config/database.js';
 import { baileysManager } from '../whatsapp/baileys.manager.js';
-import { getSocketServer } from '../websocket/unified-socket.server.js';
+import { getSocketServer } from '../websocket/socket.server.js';
 import { MessageResponse, SendMessageRequest, PaginatedResponse, PaginationParams, MessageType, MessageStatus } from '../models/types.js';
 import { NotFoundError, ForbiddenError } from '../middlewares/error.middleware.js';
 import { logger } from '../config/logger.js';
@@ -834,6 +834,7 @@ export class MessageService {
         });
 
         // ✅ Criar conversa com setor do usuário da conexão
+        // 🎯 LÓGICA CORRETA: Atribuir setor IMEDIATAMENTE quando mensagem é recebida
         conversation = await this.prisma.conversation.create({
           data: {
             contactId: contact.id,
@@ -846,9 +847,53 @@ export class MessageService {
           },
         });
         logger.info(`✅ New conversation created: ${conversation.id} in department: ${userDepartmentId || 'None'} (status: waiting, user: ${connection.user?.name || 'N/A'})`);
+        
+        // ✅ Emitir via WebSocket para TODOS os clientes atualizarem UI
+        try {
+          const socketServer = getSocketServer();
+          if (socketServer) {
+            // Buscar conversa completa para emitir
+            const fullConversation = await this.prisma.conversation.findUnique({
+              where: { id: conversation.id },
+              include: {
+                contact: true,
+                connection: true,
+                department: true,
+                assignedUser: {
+                  include: {
+                    roles: {
+                      include: { role: true },
+                    },
+                  },
+                },
+                messages: {
+                  orderBy: { timestamp: 'desc' },
+                  take: 1,
+                  include: {
+                    sender: true,
+                  },
+                },
+              },
+            });
+
+            if (fullConversation) {
+              // Formatar conversa usando o mesmo formato da listagem
+              const { ConversationService } = await import('./conversation.service.js');
+              const conversationService = new ConversationService();
+              const formattedConversation = conversationService.formatConversationResponse(fullConversation);
+
+              // ✅ Emitir nova conversa formatada para TODOS os usuários
+              socketServer.getIO().emit('new_conversation', formattedConversation);
+              logger.info(`[MessageService] 🆕 New conversation event emitted: ${conversation.id} with department: ${fullConversation.department?.name || 'None'}`);
+            }
+          }
+        } catch (socketError) {
+          logger.error('[MessageService] Error emitting new conversation event:', socketError);
+        }
       } else {
         // ✅ ATUALIZAR: Se conversa existe mas não tem setor, atribuir do usuário da conexão
         // OU se o setor mudou (usuário foi movido para outro setor)
+        // 🎯 LÓGICA CORRETA: Atribuir setor IMEDIATAMENTE quando mensagem é recebida
         if (userDepartmentId && (!conversation.departmentId || conversation.departmentId !== userDepartmentId)) {
           logger.info(`[MessageService] 📍 Updating conversation ${conversation.id}: assigning/updating department ${userDepartmentId} from connection user`);
           await this.prisma.conversation.update({
@@ -856,6 +901,19 @@ export class MessageService {
             data: { departmentId: userDepartmentId },
           });
           conversation.departmentId = userDepartmentId; // Atualizar objeto em memória
+          
+          // ✅ Emitir via WebSocket para TODOS os clientes atualizarem UI
+          try {
+            const socketServer = getSocketServer();
+            if (socketServer) {
+              socketServer.emitConversationUpdate(conversation.id, {
+                departmentId: userDepartmentId,
+              });
+              logger.info(`[MessageService] 📡 Department update emitted via WebSocket: ${conversation.id} -> ${userDepartmentId}`);
+            }
+          } catch (socketError) {
+            logger.error('[MessageService] Error emitting department update:', socketError);
+          }
         } else if (!userDepartmentId && !conversation.departmentId) {
           logger.warn(`[MessageService] ⚠️ Conversation ${conversation.id} has no department and connection user has no departments assigned.`);
         }
@@ -1015,18 +1073,6 @@ export class MessageService {
         // Emitir nova mensagem formatada
         socketServer.emitNewMessage(conversation.id, formattedMessage);
         logger.info(`[MessageService] 📡 New message event emitted for conversation ${conversation.id}`);
-        
-        // 🔥 NOVO: Chamar servidor WebSocket unificado para atribuir setor automaticamente
-        try {
-          const unifiedServer = socketServer as any;
-          if (unifiedServer.handleIncomingMessage) {
-            await unifiedServer.handleIncomingMessage(connectionId, conversation.id, formattedMessage);
-            logger.info(`[MessageService] ✅ Unified WebSocket server notified for auto department assignment`);
-          }
-        } catch (unifiedError) {
-          // Se não tiver o método handleIncomingMessage, continuar normal
-          logger.debug(`[MessageService] handleIncomingMessage not available, standard broadcast only`);
-        }
 
         // Só emitir new_conversation se for realmente uma conversa nova
         if (isNewConversation) {

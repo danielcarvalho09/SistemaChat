@@ -16,7 +16,6 @@ import fs from 'fs';
 import path from 'path';
 import { logger } from '../config/logger.js';
 import { getSocketServer } from '../websocket/socket.server.js';
-import { getEnhancedSocketServer } from '../websocket/socket.server.enhanced.js';
 import { getPrismaClient } from '../config/database.js';
 import { supabaseStorageService } from '../services/supabase-storage.service.js';
 

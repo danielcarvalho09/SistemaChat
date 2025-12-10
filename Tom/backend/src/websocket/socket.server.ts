@@ -201,6 +201,12 @@ export class SocketServer {
    * Emite atualização de conversa
    */
   emitConversationUpdate(conversationId: string, updates: any): void {
+    // ✅ Emitir para TODOS os clientes (não apenas sala da conversa)
+    this.io.emit(SocketEvent.CONVERSATION_UPDATE, {
+      conversationId,
+      updates,
+    });
+    // Também emitir para sala específica
     this.io.to(`conversation:${conversationId}`).emit(SocketEvent.CONVERSATION_UPDATE, {
       conversationId,
       updates,
@@ -208,15 +214,32 @@ export class SocketServer {
   }
 
   /**
+   * Emite nova conversa para todos os clientes
+   */
+  emitNewConversation(conversation: any): void {
+    this.io.emit('new_conversation', conversation);
+    logger.debug(`New conversation emitted globally: ${conversation.id}`);
+  }
+
+  /**
    * Emite conversa atribuída a um usuário
+   * ✅ Emite para TODOS os clientes para atualizar UI
    */
   emitConversationAssigned(userId: string, conversation: any): void {
+    // Emitir para o usuário específico
     const userSockets = this.connectedUsers.get(userId);
     if (userSockets) {
       userSockets.forEach((socketId) => {
         this.io.to(socketId).emit(SocketEvent.CONVERSATION_ASSIGNED, conversation);
       });
     }
+    
+    // ✅ Emitir para TODOS os clientes para atualizar lista de conversas
+    this.io.emit(SocketEvent.CONVERSATION_ASSIGNED, {
+      conversationId: conversation.id,
+      userId,
+      conversation,
+    });
   }
 
   /**

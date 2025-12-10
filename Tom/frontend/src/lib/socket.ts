@@ -538,14 +538,7 @@ class SocketService {
 
   emit(event: string, data: any): void {
     if (this.socket?.connected) {
-      console.log(`📤 [SocketService] Emitting event: ${event}`, data);
-      console.log(`   Socket ID: ${this.socket.id}, Connected: ${this.socket.connected}`);
       this.socket.emit(event, data);
-      console.log(`✅ [SocketService] Event ${event} emitted successfully`);
-    } else {
-      console.error(`❌ [SocketService] Cannot emit ${event} - socket not connected`);
-      console.error('   Socket status:', this.socket ? 'exists but not connected' : 'null');
-      console.error('   Connection state:', this.socket?.connected ? 'connected' : 'disconnected');
     }
   }
 

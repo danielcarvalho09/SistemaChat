@@ -11,7 +11,6 @@ import { ObservationCard } from './ObservationCard';
 import './whatsapp-bg.css';
 import type { Message } from '../../types';
 import api from '../../lib/axios';
-import { useEnhancedWebSocket } from '../../hooks/useEnhancedWebSocket';
 
 interface ChatAreaProps {
   conversationId: string;
@@ -26,9 +25,6 @@ export function ChatArea({ conversationId, onToggleDetails }: ChatAreaProps) {
   const [showObservationModal, setShowObservationModal] = useState(false);
   const [replyingTo, setReplyingTo] = useState<Message | null>(null);
   const [highlightObservation, setHighlightObservation] = useState(false);
-  
-  // 🔥 NOVO: Hook de WebSocket aprimorado
-  useEnhancedWebSocket();
 
   const conversation = conversations.find((c) => c.id === conversationId);
 

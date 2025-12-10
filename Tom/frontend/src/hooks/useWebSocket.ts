@@ -74,9 +74,26 @@ export function useWebSocket() {
     });
 
     // Escutar atribuição de conversa
-    socketService.on('conversation_assigned', (data: { conversationId: string; userId: string }) => {
+    socketService.on('conversation_assigned', (data: { conversationId?: string; userId?: string; conversation?: Conversation }) => {
       console.log('👤 Conversa atribuída via WebSocket:', data);
-      fetchConversations(false); // WebSocket já atualiza, usar cache
+      
+      // Se recebeu a conversa completa, atualizar diretamente
+      if (data.conversation) {
+        updateConversation(data.conversation.id, {
+          status: 'in_progress',
+          assignedUserId: data.userId,
+          assignedTo: data.conversation.assignedUser ? {
+            id: data.conversation.assignedUser.id,
+            name: data.conversation.assignedUser.name,
+          } : null,
+        });
+      } else if (data.conversationId) {
+        // Se recebeu apenas ID, atualizar status
+        updateConversation(data.conversationId, {
+          status: 'in_progress',
+          assignedUserId: data.userId,
+        });
+      }
     });
 
     // Escutar status de mensagem

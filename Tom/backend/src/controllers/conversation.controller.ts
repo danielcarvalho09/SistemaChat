@@ -101,10 +101,25 @@ export class ConversationController {
         departmentId
       );
 
-      // Emitir evento via WebSocket
+      // ✅ Emitir evento via WebSocket para TODOS os clientes atualizarem UI
       const socketServer = getSocketServer();
+      
+      // Emitir para o usuário que aceitou
       socketServer.emitConversationAssigned(userId, conversation);
-      socketServer.emitConversationUpdate(conversationId, { status: 'in_progress', assignedUserId: userId });
+      
+      // ✅ Emitir atualização completa da conversa para TODOS (não apenas status)
+      socketServer.emitConversationUpdate(conversationId, {
+        status: 'in_progress',
+        assignedUserId: userId,
+        departmentId: conversation.department?.id || null,
+        assignedTo: conversation.assignedUser ? {
+          id: conversation.assignedUser.id,
+          name: conversation.assignedUser.name,
+        } : null,
+      });
+      
+      // ✅ Emitir nova conversa para todos os clientes (caso seja nova)
+      socketServer.emitNewConversation(conversation);
 
       return reply.status(200).send({
         success: true,
