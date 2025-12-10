@@ -31,7 +31,7 @@ import {
   ArrowLeft,
 } from 'lucide-react';
 import api from '../../lib/axios';
-import { toast } from 'react-hot-toast';
+import { toast } from 'sonner';
 
 // Mapeamento de ícones
 const iconMap: Record<string, any> = {
