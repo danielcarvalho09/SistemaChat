@@ -903,13 +903,32 @@ export class MessageService {
           conversation.departmentId = userDepartmentId; // Atualizar objeto em memória
           
           // ✅ Emitir via WebSocket para TODOS os clientes atualizarem UI
+          // ✅ IMPORTANTE: Buscar department completo para incluir name, color, etc.
           try {
             const socketServer = getSocketServer();
             if (socketServer) {
-              socketServer.emitConversationUpdate(conversation.id, {
-                departmentId: userDepartmentId,
+              // Buscar department completo
+              const department = await this.prisma.department.findUnique({
+                where: { id: userDepartmentId },
               });
-              logger.info(`[MessageService] 📡 Department update emitted via WebSocket: ${conversation.id} -> ${userDepartmentId}`);
+              
+              if (department) {
+                socketServer.emitConversationUpdate(conversation.id, {
+                  departmentId: userDepartmentId,
+                  department: {
+                    id: department.id,
+                    name: department.name,
+                    color: department.color || '#3B82F6',
+                    icon: department.icon || 'folder',
+                  },
+                });
+                logger.info(`[MessageService] 📡 Department update emitted via WebSocket: ${conversation.id} -> ${department.name} (${userDepartmentId})`);
+              } else {
+                socketServer.emitConversationUpdate(conversation.id, {
+                  departmentId: userDepartmentId,
+                });
+                logger.warn(`[MessageService] ⚠️ Department ${userDepartmentId} not found, emitting only ID`);
+              }
             }
           } catch (socketError) {
             logger.error('[MessageService] Error emitting department update:', socketError);
@@ -1116,11 +1135,31 @@ export class MessageService {
           }
         } else {
           // Conversa existente - emitir evento de atualização para que o frontend atualize a lista
-          socketServer.emitConversationUpdate(conversation.id, {
+          // ✅ Incluir department completo na atualização para garantir que o setor apareça
+          const updateData: any = {
             lastMessageAt: new Date(),
             unreadCount: conversation.unreadCount,
-          });
-          logger.info(`Existing conversation updated, emitted conversation:update event`);
+          };
+          
+          // ✅ Se conversa tem department, incluir objeto completo
+          if (conversation.departmentId) {
+            const department = await this.prisma.department.findUnique({
+              where: { id: conversation.departmentId },
+            });
+            
+            if (department) {
+              updateData.departmentId = conversation.departmentId;
+              updateData.department = {
+                id: department.id,
+                name: department.name,
+                color: department.color || '#3B82F6',
+                icon: department.icon || 'folder',
+              };
+            }
+          }
+          
+          socketServer.emitConversationUpdate(conversation.id, updateData);
+          logger.info(`Existing conversation updated, emitted conversation:update event with department: ${conversation.departmentId || 'None'}`);
         }
       } catch (socketError) {
         logger.error('Error emitting socket event:', socketError);

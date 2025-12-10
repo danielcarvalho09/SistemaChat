@@ -263,10 +263,9 @@ export function ConversationItem({ conversation, isSelected, onClick, onAccept }
           )}
         </div>
 
+        {/* ✅ Setor e Status - Exibir sempre que houver setor (setor primeiro, depois status) */}
         <div className="mt-1 flex items-center gap-2 flex-wrap" onClick={!canAccept ? onClick : undefined}>
-          <span className="inline-block px-2 py-0.5 text-xs font-medium text-white rounded-full" style={{ backgroundColor: getStatusColor(conversation.status) }}>
-            {getStatusLabel(conversation.status)}
-          </span>
+          {/* ✅ Setor aparece PRIMEIRO, logo quando recebe mensagem */}
           {conversation.department && (
             <span 
               className="inline-block px-2 py-0.5 text-xs font-medium text-white rounded-full"
@@ -275,6 +274,13 @@ export function ConversationItem({ conversation, isSelected, onClick, onAccept }
               {conversation.department.name}
             </span>
           )}
+          {/* Status aparece DEPOIS do setor */}
+          <span
+            className="inline-block px-2 py-0.5 text-xs font-medium text-white rounded-full"
+            style={{ backgroundColor: getStatusColor(conversation.status) }}
+          >
+            {getStatusLabel(conversation.status)}
+          </span>
           {conversation.connection && (
             <span 
               className="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium text-white bg-gray-800 rounded-full border border-gray-700"
