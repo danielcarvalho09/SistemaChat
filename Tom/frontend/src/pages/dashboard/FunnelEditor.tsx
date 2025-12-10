@@ -91,7 +91,15 @@ function CustomNode({ data, selected }: { data: any; selected: boolean }) {
         <h3 className="text-white font-semibold text-sm">{data.title}</h3>
       </div>
       {data.description && (
-        <p className="text-white/90 text-xs leading-relaxed">{data.description}</p>
+        <p className="text-white/90 text-xs leading-relaxed mb-2">{data.description}</p>
+      )}
+      {data.whatsappGuidance && (
+        <div className="mt-2 pt-2 border-t border-white/20">
+          <div className="flex items-center gap-1 text-white/80 text-xs">
+            <Phone className="w-3 h-3" />
+            <span>Guia WhatsApp disponível</span>
+          </div>
+        </div>
       )}
     </div>
   );
@@ -111,8 +119,10 @@ export function FunnelEditor({ funnel, onUpdate }: FunnelEditorProps) {
   // Form states
   const [editTitle, setEditTitle] = useState('');
   const [editDescription, setEditDescription] = useState('');
+  const [editWhatsappGuidance, setEditWhatsappGuidance] = useState('');
   const [editIcon, setEditIcon] = useState('target');
   const [editColor, setEditColor] = useState('#3B82F6');
+  const [showWhatsappDetails, setShowWhatsappDetails] = useState(false);
 
   // Carregar funil no canvas
   useEffect(() => {
@@ -125,6 +135,7 @@ export function FunnelEditor({ funnel, onUpdate }: FunnelEditorProps) {
       data: {
         title: stage.title,
         description: stage.description,
+        whatsappGuidance: stage.whatsappGuidance || null,
         icon: stage.icon,
         color: stage.color,
       },
@@ -193,6 +204,7 @@ export function FunnelEditor({ funnel, onUpdate }: FunnelEditorProps) {
     setSelectedNode(node);
     setEditTitle(node.data.title);
     setEditDescription(node.data.description || '');
+    setEditWhatsappGuidance(node.data.whatsappGuidance || '');
     setEditIcon(node.data.icon);
     setEditColor(node.data.color);
     setShowEditModal(true);
@@ -205,6 +217,7 @@ export function FunnelEditor({ funnel, onUpdate }: FunnelEditorProps) {
       await api.patch(`/funnels/stages/${selectedNode.id}`, {
         title: editTitle,
         description: editDescription,
+        whatsappGuidance: editWhatsappGuidance,
         icon: editIcon,
         color: editColor,
       });
@@ -219,6 +232,7 @@ export function FunnelEditor({ funnel, onUpdate }: FunnelEditorProps) {
                   ...node.data,
                   title: editTitle,
                   description: editDescription,
+                  whatsappGuidance: editWhatsappGuidance,
                   icon: editIcon,
                   color: editColor,
                 },
@@ -456,6 +470,21 @@ export function FunnelEditor({ funnel, onUpdate }: FunnelEditorProps) {
               </div>
             </div>
 
+            {selectedNode?.data.whatsappGuidance && (
+              <div className="mt-4">
+                <button
+                  onClick={() => {
+                    setShowEditModal(false);
+                    setShowWhatsappDetails(true);
+                  }}
+                  className="w-full px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors flex items-center justify-center gap-2"
+                >
+                  <Phone className="w-4 h-4" />
+                  Ver Detalhes do WhatsApp
+                </button>
+              </div>
+            )}
+
             <div className="flex gap-3 mt-6">
               <button
                 onClick={deleteStage}
@@ -574,6 +603,67 @@ export function FunnelEditor({ funnel, onUpdate }: FunnelEditorProps) {
                 className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 Adicionar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de detalhes do WhatsApp */}
+      {showWhatsappDetails && selectedNode && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-2xl max-w-2xl w-full p-6 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-6">
+              <div className="flex items-center gap-3">
+                <div
+                  className="w-12 h-12 rounded-lg flex items-center justify-center"
+                  style={{ backgroundColor: selectedNode.data.color }}
+                >
+                  {(() => {
+                    const Icon = iconMap[selectedNode.data.icon] || Target;
+                    return <Icon className="w-6 h-6 text-white" />;
+                  })()}
+                </div>
+                <div>
+                  <h2 className="text-2xl font-bold text-gray-900">{selectedNode.data.title}</h2>
+                  <p className="text-sm text-gray-500">Guia de Implementação no WhatsApp</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowWhatsappDetails(false)}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-6">
+              <div className="flex items-start gap-3">
+                <Phone className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" />
+                <div>
+                  <h3 className="font-semibold text-green-900 mb-1">Como implementar esta etapa no WhatsApp</h3>
+                  <p className="text-sm text-green-700">
+                    Este guia foi gerado automaticamente pela IA com base no nicho do seu funil.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="prose prose-sm max-w-none">
+              <div className="text-gray-700 whitespace-pre-wrap leading-relaxed">
+                {selectedNode.data.whatsappGuidance || 'Nenhum guia disponível para esta etapa.'}
+              </div>
+            </div>
+
+            <div className="mt-6 flex justify-end">
+              <button
+                onClick={() => {
+                  setShowWhatsappDetails(false);
+                  setShowEditModal(true);
+                }}
+                className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
+              >
+                Fechar
               </button>
             </div>
           </div>

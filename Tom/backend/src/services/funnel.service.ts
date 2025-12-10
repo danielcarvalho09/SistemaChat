@@ -10,6 +10,7 @@ interface GenerateFunnelRequest {
 interface FunnelStageData {
   title: string;
   description: string;
+  whatsappGuidance?: string;
   icon: string;
   color: string;
   order: number;
@@ -54,6 +55,7 @@ export class FunnelService {
             funnelId: funnel.id,
             title: stageData.title,
             description: stageData.description,
+            whatsappGuidance: stageData.whatsappGuidance || null,
             icon: stageData.icon,
             color: stageData.color,
             order: stageData.order,
@@ -102,7 +104,8 @@ Retorne APENAS um JSON válido no seguinte formato (sem explicações adicionais
   "stages": [
     {
       "title": "Nome da Etapa",
-      "description": "Descrição detalhada da etapa (2-3 frases)",
+      "description": "Descrição breve da etapa (1-2 frases)",
+      "whatsappGuidance": "Detalhes específicos de como implementar esta etapa em um atendimento WhatsApp. Inclua: mensagens de exemplo, tom de voz, quando enviar, como responder objeções, scripts de diálogo, etc. (4-6 parágrafos detalhados)",
       "icon": "target|users|mail|phone|check-circle|dollar-sign|star|gift",
       "color": "#HEX_COLOR",
       "order": 0,
@@ -115,7 +118,10 @@ Retorne APENAS um JSON válido no seguinte formato (sem explicações adicionais
   ]
 }
 
-Regras:
+Regras IMPORTANTES:
+- Cada etapa DEVE ter um campo "whatsappGuidance" com detalhes práticos de implementação no WhatsApp
+- whatsappGuidance deve incluir: scripts de mensagens, tom de voz, timing, como lidar com objeções, exemplos de diálogo
+- whatsappGuidance deve ser específico para o nicho informado
 - Etapas devem seguir ordem lógica de conversão
 - Cores devem ser distintas e representativas
 - PositionX deve aumentar ~200px por etapa (fluxo horizontal)
@@ -208,6 +214,7 @@ Regras:
         {
           title: 'Atração',
           description: 'Captar atenção do público-alvo através de conteúdo relevante e anúncios direcionados.',
+          whatsappGuidance: 'No WhatsApp, inicie com uma mensagem de valor que desperte interesse. Use tom amigável e profissional. Exemplo: "Olá! Vi que você se interessou por [produto/serviço]. Tenho algo especial que pode te ajudar..." Responda rapidamente (até 5 minutos) e faça perguntas abertas para entender a necessidade do cliente.',
           icon: 'target',
           color: '#3B82F6',
           order: 0,
@@ -217,6 +224,7 @@ Regras:
         {
           title: 'Captura',
           description: 'Converter visitantes em leads através de formulários, landing pages e iscas digitais.',
+          whatsappGuidance: 'No WhatsApp, capture o interesse do lead oferecendo algo de valor imediato. Exemplo: "Olá! Tenho um material exclusivo que pode te ajudar com [problema]. Posso enviar?" Use mensagens curtas, objetivas e com emojis para aumentar engajamento. Após o lead aceitar, colete informações básicas de forma natural.',
           icon: 'users',
           color: '#8B5CF6',
           order: 1,
@@ -226,6 +234,7 @@ Regras:
         {
           title: 'Nutrição',
           description: 'Educar e engajar leads através de e-mails, conteúdos e interações personalizadas.',
+          whatsappGuidance: 'No WhatsApp, envie conteúdo educativo regularmente (2-3x por semana). Compartilhe dicas, cases de sucesso, vídeos explicativos. Use tom consultivo, não vendedor. Faça perguntas para entender melhor o lead: "Como você tem lidado com [problema]?" Responda sempre de forma personalizada, nunca use mensagens genéricas em massa.',
           icon: 'mail',
           color: '#10B981',
           order: 2,
@@ -235,6 +244,7 @@ Regras:
         {
           title: 'Qualificação',
           description: 'Identificar leads prontos para compra através de scoring e análise de comportamento.',
+          whatsappGuidance: 'No WhatsApp, faça perguntas estratégicas para qualificar: "Qual é o maior desafio que você enfrenta hoje?" "Qual seria o impacto se você resolvesse isso?" "Qual o prazo ideal para implementar uma solução?" Identifique sinais de compra: urgência, orçamento disponível, autoridade para decidir. Leads qualificados demonstram interesse ativo e fazem perguntas específicas.',
           icon: 'check-circle',
           color: '#F59E0B',
           order: 3,
@@ -244,6 +254,7 @@ Regras:
         {
           title: 'Oferta',
           description: 'Apresentar solução ideal com proposta de valor clara e call-to-action forte.',
+          whatsappGuidance: 'No WhatsApp, apresente a oferta de forma personalizada, destacando benefícios específicos para o lead. Use linguagem clara e evite jargões. Exemplo: "Com base no que você me contou, nossa solução pode te ajudar a [benefício específico]. Quer que eu te mostre como funciona?" Inclua prova social (testemunhos, números) e crie urgência quando apropriado. Seja transparente sobre valores e condições.',
           icon: 'dollar-sign',
           color: '#EF4444',
           order: 4,
@@ -253,6 +264,7 @@ Regras:
         {
           title: 'Fechamento',
           description: 'Converter leads qualificados em clientes através de negociação e superação de objeções.',
+          whatsappGuidance: 'No WhatsApp, identifique e trate objeções com empatia. Para preço: "Entendo sua preocupação. Vamos pensar no retorno que você terá..." Para tempo: "Que tal começarmos com um piloto de 30 dias?" Use perguntas de fechamento: "Faz sentido para você?" "Qual seria o próximo passo ideal?" Crie facilidades: parcelamento, garantia, suporte. Seja assertivo mas nunca pressione. O timing certo é fundamental.',
           icon: 'star',
           color: '#EC4899',
           order: 5,
@@ -262,6 +274,7 @@ Regras:
         {
           title: 'Pós-Venda',
           description: 'Garantir satisfação, fidelização e transformar clientes em promotores da marca.',
+          whatsappGuidance: 'No WhatsApp, mantenha contato após a venda. Envie mensagens de acompanhamento: "Como está sendo a experiência?" "Precisa de ajuda com algo?" Ofereça suporte proativo e resolva problemas rapidamente. Peça feedback e use para melhorar. Após resultados positivos, peça indicações: "Que tal compartilhar sua experiência com outros que possam se beneficiar?" Transforme clientes satisfeitos em embaixadores da marca.',
           icon: 'gift',
           color: '#06B6D4',
           order: 6,
@@ -451,6 +464,7 @@ Regras:
         funnelId,
         title: data.title,
         description: data.description,
+        whatsappGuidance: data.whatsappGuidance || null,
         icon: data.icon,
         color: data.color,
         order: (maxOrder?.order || -1) + 1,

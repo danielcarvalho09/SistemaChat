@@ -531,17 +531,18 @@ model Funnel {
 }
 
 model FunnelStage {
-  id          String   @id @default(uuid())
-  funnelId    String
-  title       String
-  description String?
-  icon        String   @default("circle")
-  color       String   @default("#3B82F6")
-  order       Int // Ordem no fluxo
-  positionX   Float    @default(0) // Posição X no canvas
-  positionY   Float    @default(0) // Posição Y no canvas
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id                String   @id @default(uuid())
+  funnelId          String
+  title             String
+  description       String?
+  whatsappGuidance  String?  @db.Text // Detalhes de como implementar esta etapa no WhatsApp
+  icon              String   @default("circle")
+  color             String   @default("#3B82F6")
+  order             Int // Ordem no fluxo
+  positionX         Float    @default(0) // Posição X no canvas
+  positionY         Float    @default(0) // Posição Y no canvas
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 
   // Relações
   funnel          Funnel             @relation(fields: [funnelId], references: [id], onDelete: Cascade)
