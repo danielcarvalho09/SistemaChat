@@ -162,8 +162,14 @@ Regras:
         throw new Error(`OpenRouter API error: ${response.statusText}`);
       }
 
-      const result = await response.json();
-      const content = result.choices[0]?.message?.content || '';
+      const result = await response.json() as {
+        choices?: Array<{
+          message?: {
+            content?: string;
+          };
+        }>;
+      };
+      const content = result.choices?.[0]?.message?.content || '';
       
       logger.info(`[FunnelService] Raw AI response: ${content.substring(0, 200)}...`);
       
