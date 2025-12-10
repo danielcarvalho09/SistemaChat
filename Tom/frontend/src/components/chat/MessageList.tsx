@@ -386,6 +386,7 @@ function AudioMessage({
 interface MessageListProps {
   messages: ChatMessage[];
   onReply?: (message: ChatMessage) => void;
+  isGroup?: boolean; // ✅ Indica se a conversa é um grupo
 }
 
 // Função para gerar cor consistente baseada no nome
@@ -445,7 +446,7 @@ function formatPhoneNumber(phone: string | null | undefined): string {
   return phone;
 }
 
-export function MessageList({ messages, onReply }: MessageListProps) {
+export function MessageList({ messages, onReply, isGroup = false }: MessageListProps) {
   const getQuotedPreview = (quoted: QuotedMessage) => {
     if (quoted.messageType === 'text') {
       return quoted.content || '';
@@ -551,8 +552,10 @@ export function MessageList({ messages, onReply }: MessageListProps) {
         // isFromContact = false -> mensagem do agente (direita, verde)
         const isFromMe = !message.isFromContact;
         
-        // Verificar se é grupo: mensagem tem senderName e é do contato (não do agente)
-        const isGroup = message.senderName && message.isFromContact;
+        // ✅ Verificar se é grupo: usar prop isGroup (fonte confiável do backend)
+        // IMPORTANTE: Em conversas privadas, isGroup = false e senderName = null, então não mostra
+        // Só mostrar nome do remetente se for grupo confirmado (isGroup === true)
+        const isGroupMessage = isGroup === true;
         
         return (
           <div
@@ -564,7 +567,7 @@ export function MessageList({ messages, onReply }: MessageListProps) {
           >
             <div className="relative group" style={{ maxWidth: '70%' }}>
               {/* Nome do remetente em grupos com cor e número */}
-              {isGroup && message.senderName && (
+              {isGroupMessage && message.senderName && (
                 <div className="mb-1 px-1">
                   <div 
                     className="text-xs font-medium mb-0.5"

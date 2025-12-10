@@ -205,7 +205,7 @@ export class ConversationService {
                 avatar: conv.contact.avatar || null,
                 email: conv.contact.email || null,
                 tags: conv.contact.tags || [],
-                isGroup: 'isGroup' in conv.contact ? (conv.contact as any).isGroup : false,
+                isGroup: (conv.contact as any).isGroup ?? false,
               } : {
                 id: 'unknown',
                 phoneNumber: 'Unknown',
@@ -722,7 +722,7 @@ export class ConversationService {
           avatar: conversation.contact.avatar || null,
           email: conversation.contact.email || null,
           tags: conversation.contact.tags || [],
-          isGroup: 'isGroup' in conversation.contact ? (conversation.contact as any).isGroup : false,
+          isGroup: (conversation.contact as any).isGroup ?? false,
         },
         connection: {
           id: conversation.connection.id,

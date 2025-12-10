@@ -314,6 +314,7 @@ export function ChatArea({ conversationId, onToggleDetails }: ChatAreaProps) {
         <MessageList
           messages={messages[conversationId] || []}
           onReply={(message) => setReplyingTo(message)}
+          isGroup={conversation?.contact?.isGroup || false}
         />
         <div ref={messagesEndRef} />
       </div>

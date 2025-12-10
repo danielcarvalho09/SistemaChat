@@ -1246,15 +1246,14 @@ class BaileysManager {
             }
           } catch (error) {
             logger.debug(`[Baileys] Error fetching sender name for group message:`, error);
-            // Fallback: usar pushName se disponível
-            if (pushName) {
+            // Fallback: usar pushName se disponível (apenas para grupos)
+            if (pushName && isGroup) {
               senderName = pushName;
             }
           }
-        } else if (!isFromMe && pushName) {
-          // Para mensagens individuais, usar pushName
-          senderName = pushName;
         }
+        // ✅ REMOVIDO: Não preencher senderName para mensagens individuais
+        // Em conversas privadas, senderName deve ser null
 
         logger.info(`[Baileys] 📱 Processing message ${processedIndex}/${totalMessages} from ${from}, isFromMe: ${isFromMe}, pushName: ${pushName}, senderName: ${senderName || 'N/A'}, isGroup: ${isGroup}`);
 
