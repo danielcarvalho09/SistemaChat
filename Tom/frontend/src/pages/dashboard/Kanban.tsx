@@ -435,9 +435,9 @@ export function Kanban() {
                 key={column.stage.id}
                 className="flex flex-col w-80"
               >
-                {/* Column Header - Nome da etapa */}
+                {/* Column Header - Nome da etapa ✅ CENTRALIZADO */}
                 <div className="mb-2">
-                  <h3 className="text-sm font-medium text-gray-900 mb-2">{column.stage.name}</h3>
+                  <h3 className="text-sm font-medium text-gray-900 mb-2 text-center">{column.stage.name}</h3>
                   {/* Barra colorida */}
                   <div
                     className="h-1 rounded-full"

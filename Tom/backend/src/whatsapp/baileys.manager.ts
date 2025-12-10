@@ -1207,9 +1207,11 @@ class BaileysManager {
         const pushName = msg.pushName || null;
 
         // ✅ Capturar participante em grupos (quem enviou a mensagem dentro do grupo)
-        const isGroup = from?.endsWith('@g.us') || false;
+        // ✅ Verificar se é grupo OU LID (ambos devem exibir nomes dos remetentes)
+        // LID = LinkedIn Device ID (múltiplos usuários podem usar o mesmo @lid)
+        const isGroup = from?.endsWith('@g.us') || from?.includes('@lid') || false;
         const participant = msg.key.participant || null; // JID do participante que enviou (em grupos)
-        // ✅ Extrair número de telefone do participante (se for grupo)
+        // ✅ Extrair número de telefone do participante (se for grupo ou LID)
         let senderPhone: string | null = null;
         if (isGroup && participant) {
           // Extrair número do JID (ex: 5511999999999@s.whatsapp.net -> 5511999999999)
@@ -1217,7 +1219,7 @@ class BaileysManager {
         }
         let senderName: string | null = null;
 
-        // Se for grupo e não for mensagem nossa, buscar nome do participante
+        // Se for grupo/LID e não for mensagem nossa, buscar nome do participante
         if (isGroup && !isFromMe && participant) {
           try {
             // Tentar buscar nome do participante do grupo
@@ -1245,17 +1247,18 @@ class BaileysManager {
               }
             }
           } catch (error) {
-            logger.debug(`[Baileys] Error fetching sender name for group message:`, error);
-            // Fallback: usar pushName se disponível (apenas para grupos)
+            logger.debug(`[Baileys] Error fetching sender name for group/LID message:`, error);
+            // Fallback: usar pushName se disponível (apenas para grupos/LID)
             if (pushName && isGroup) {
               senderName = pushName;
             }
           }
         }
         // ✅ REMOVIDO: Não preencher senderName para mensagens individuais
-        // Em conversas privadas, senderName deve ser null
+        // Em conversas privadas (números normais), senderName deve ser null
+        // Em LID ou grupos, senderName deve ser preenchido
 
-        logger.info(`[Baileys] 📱 Processing message ${processedIndex}/${totalMessages} from ${from}, isFromMe: ${isFromMe}, pushName: ${pushName}, senderName: ${senderName || 'N/A'}, isGroup: ${isGroup}`);
+        logger.info(`[Baileys] 📱 Processing message ${processedIndex}/${totalMessages} from ${from}, isFromMe: ${isFromMe}, pushName: ${pushName}, senderName: ${senderName || 'N/A'}, isGroup: ${isGroup}, isLID: ${from?.includes('@lid')}`);
 
         let messageTimestamp: Date | null = null;
         if (msg.messageTimestamp) {
@@ -4125,7 +4128,7 @@ class BaileysManager {
       // Prioridade: lastSyncFrom atualizado > lastDisconnectAt > null (sincronização completa)
       if (!client.lastSyncFrom) {
         if (client.lastDisconnectAt) {
-          client.lastSyncFrom = client.lastDisconnectAt;
+        client.lastSyncFrom = client.lastDisconnectAt;
           logger.info(`[Baileys] 📅 Initialized lastSyncFrom from lastDisconnectAt: ${client.lastDisconnectAt.toISOString()}`);
         } else {
           // Se não tem lastDisconnectAt, usar momento atual menos 1 hora como margem de segurança

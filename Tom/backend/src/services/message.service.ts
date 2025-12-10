@@ -580,10 +580,11 @@ export class MessageService {
       // ✅ DEDUPLICAÇÃO REMOVIDA DAQUI - será feita depois de buscar/criar conversa
       // Isso garante que conversas só sejam criadas quando realmente houver mensagem nova
       
-      // ✅ CORRIGIDO: Verificar se é um grupo ANTES de normalizar o número
+      // ✅ CORRIGIDO: Verificar se é um grupo OU LID ANTES de normalizar o número
       // IMPORTANTE: isGroup deve ser determinado pelo JID original (from), não pelo número normalizado
       // Grupos sempre terminam com @g.us, independente de @lid ou outros sufixos
-      const isGroup = from.endsWith('@g.us');
+      // ✅ LID (@lid): Tratar como grupo para exibir nomes dos remetentes (múltiplos usuários podem usar o mesmo @lid)
+      const isGroup = from.endsWith('@g.us') || from.includes('@lid');
 
       // ✅ CORRIGIDO: Normalizar número de telefone/ID do grupo (incluindo @lid)
       let phoneNumber = from.replace('@s.whatsapp.net', '').replace('@g.us', '').replace('@lid', '');
@@ -685,9 +686,10 @@ export class MessageService {
           }
         }
 
-        // ✅ GARANTIR: isGroup só pode ser true se from termina com @g.us
+        // ✅ GARANTIR: isGroup pode ser true se from termina com @g.us OU contém @lid
+        // @lid = LinkedIn Device ID (múltiplos usuários podem usar o mesmo @lid)
         // Isso previne que contatos individuais sejam criados como grupos
-        const finalIsGroup = from.endsWith('@g.us');
+        const finalIsGroup = from.endsWith('@g.us') || from.includes('@lid');
 
         contact = await this.prisma.contact.create({
           data: {
@@ -702,7 +704,8 @@ export class MessageService {
       } else {
         // ✅ CORRIGIDO: Sempre verificar novamente o from original para garantir isGroup correto
         // Isso previne que contatos individuais sejam marcados como grupos por engano
-        const finalIsGroup = from.endsWith('@g.us');
+        // ✅ LID (@lid): Tratar como grupo para exibir nomes dos remetentes
+        const finalIsGroup = from.endsWith('@g.us') || from.includes('@lid');
         
         // ✅ Atualizar isGroup se necessário (caso contato exista mas flag não esteja correta)
         // IMPORTANTE: Se o contato está marcado como grupo mas o from não termina com @g.us, corrigir!
@@ -719,12 +722,12 @@ export class MessageService {
         // O pushName deve ser do contato da conversa, não do remetente da última mensagem
         // Usar finalIsGroup (verificação do from original) para garantir correção
         if (!finalIsGroup && !isFromMe && pushName && contact.pushName !== pushName) {
-          await this.prisma.contact.update({
-            where: { id: contact.id },
-            data: { pushName },
-          });
-          logger.info(`[MessageService] 📝 Updated pushName for ${phoneNumber}: ${pushName}`);
-          contact.pushName = pushName; // Atualizar objeto em memória
+        await this.prisma.contact.update({
+          where: { id: contact.id },
+          data: { pushName },
+        });
+        logger.info(`[MessageService] 📝 Updated pushName for ${phoneNumber}: ${pushName}`);
+        contact.pushName = pushName; // Atualizar objeto em memória
         }
       }
 
