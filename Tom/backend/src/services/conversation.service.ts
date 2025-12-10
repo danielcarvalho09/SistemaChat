@@ -776,6 +776,8 @@ export class ConversationService {
             mediaUrl: lastMessage.mediaUrl || null,
             status: lastMessage.status || 'sent',
             isFromContact: lastMessage.isFromContact ?? false,
+            senderName: lastMessage.senderName || null,
+            senderPhone: lastMessage.senderPhone || null,
             timestamp: lastMessage.timestamp?.toISOString() || new Date().toISOString(),
             createdAt: lastMessage.createdAt?.toISOString() || new Date().toISOString(),
             quotedMessageId: lastMessage.quotedMessageId || null,

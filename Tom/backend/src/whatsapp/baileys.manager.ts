@@ -74,6 +74,7 @@ type IncomingRetryItem = {
   externalId: string;
   pushName: string | null;
   senderName: string | null; // ✅ Nome do remetente (para grupos)
+  senderPhone: string | null; // ✅ Número de telefone do participante (para grupos)
   quotedContext?: {
     stanzaId?: string;
     participant?: string;
@@ -1115,21 +1116,16 @@ class BaileysManager {
           logger.info(`[Baileys] 📦 Processing batch ${batchIndex + 1}/${batches.length} (${batch.length} messages)...`);
 
           // Processar lote (usar mesmo código de processamento)
-          // ✅ Passar lastSyncFrom atualizado do lote anterior
+          // ✅ Buscar client atualizado antes de cada batch para usar lastSyncFrom atualizado
+          const currentClient = this.clients.get(connectionId);
           await this.processMessageBatch(
             connectionId,
             batch,
             type,
             firstConnectedAt || null,
             syncStats,
-            client?.lastSyncFrom ?? null
+            currentClient?.lastSyncFrom ?? null
           );
-
-          // ✅ Atualizar client após cada batch para que próximo batch use lastSyncFrom atualizado
-          const updatedClient = this.clients.get(connectionId);
-          if (updatedClient) {
-            client = updatedClient;
-          }
 
           // Delay entre lotes para evitar sobrecarga
           if (batchIndex < batches.length - 1) {
@@ -1760,6 +1756,7 @@ class BaileysManager {
             externalId,
             pushName,
             senderName, // ✅ Incluir nome do remetente
+            senderPhone, // ✅ Incluir número de telefone do participante
             quotedContext: quotedContext || undefined,
             retries: existingRetry ? existingRetry.retries + 1 : attempt,
             lastAttempt: new Date(),
@@ -1813,6 +1810,7 @@ class BaileysManager {
         retryItem.externalId,
         retryItem.pushName,
         retryItem.senderName, // ✅ Passar nome do remetente
+        retryItem.senderPhone, // ✅ Passar número de telefone do participante
         retryItem.quotedContext
       );
       this.syncRetryQueue.delete(retryKey);
