@@ -584,7 +584,8 @@ export class MessageService {
       // IMPORTANTE: isGroup deve ser determinado pelo JID original (from), não pelo número normalizado
       // Grupos sempre terminam com @g.us, independente de @lid ou outros sufixos
       // ✅ LID (@lid): Tratar como grupo para exibir nomes dos remetentes (múltiplos usuários podem usar o mesmo @lid)
-      const isGroup = from.endsWith('@g.us') || from.includes('@lid');
+      // ✅ IDs de grupo: Números que começam com 120363 são SEMPRE grupos do WhatsApp
+      const isGroup = from.endsWith('@g.us') || from.includes('@lid') || from.startsWith('120363');
 
       // ✅ CORRIGIDO: Normalizar número de telefone/ID do grupo (incluindo @lid)
       let phoneNumber = from.replace('@s.whatsapp.net', '').replace('@g.us', '').replace('@lid', '');
@@ -686,10 +687,12 @@ export class MessageService {
           }
         }
 
-        // ✅ GARANTIR: isGroup pode ser true se from termina com @g.us OU contém @lid
-        // @lid = LinkedIn Device ID (múltiplos usuários podem usar o mesmo @lid)
+        // ✅ GARANTIR: isGroup pode ser true se:
+        // 1. from termina com @g.us (grupos oficiais)
+        // 2. from contém @lid (múltiplos usuários podem usar o mesmo @lid)
+        // 3. phoneNumber começa com 120363 (IDs de grupos do WhatsApp)
         // Isso previne que contatos individuais sejam criados como grupos
-        const finalIsGroup = from.endsWith('@g.us') || from.includes('@lid');
+        const finalIsGroup = from.endsWith('@g.us') || from.includes('@lid') || phoneNumber.startsWith('120363');
 
         contact = await this.prisma.contact.create({
           data: {
@@ -705,7 +708,8 @@ export class MessageService {
         // ✅ CORRIGIDO: Sempre verificar novamente o from original para garantir isGroup correto
         // Isso previne que contatos individuais sejam marcados como grupos por engano
         // ✅ LID (@lid): Tratar como grupo para exibir nomes dos remetentes
-        const finalIsGroup = from.endsWith('@g.us') || from.includes('@lid');
+        // ✅ IDs de grupo (120363...): Sempre são grupos
+        const finalIsGroup = from.endsWith('@g.us') || from.includes('@lid') || phoneNumber.startsWith('120363');
         
         // ✅ Atualizar isGroup se necessário (caso contato exista mas flag não esteja correta)
         // IMPORTANTE: Se o contato está marcado como grupo mas o from não termina com @g.us, corrigir!
