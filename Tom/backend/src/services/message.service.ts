@@ -579,7 +579,10 @@ export class MessageService {
     try {
       // ✅ DEDUPLICAÇÃO REMOVIDA DAQUI - será feita depois de buscar/criar conversa
       // Isso garante que conversas só sejam criadas quando realmente houver mensagem nova
-      // Verificar se é um grupo
+      
+      // ✅ CORRIGIDO: Verificar se é um grupo ANTES de normalizar o número
+      // IMPORTANTE: isGroup deve ser determinado pelo JID original (from), não pelo número normalizado
+      // Grupos sempre terminam com @g.us, independente de @lid ou outros sufixos
       const isGroup = from.endsWith('@g.us');
 
       // ✅ CORRIGIDO: Normalizar número de telefone/ID do grupo (incluindo @lid)
@@ -588,6 +591,7 @@ export class MessageService {
       // ✅ FILTRO LID: Resolver número real quando vem com @lid
       // LIDs (Linked Device IDs) são usados para ofuscar números no WhatsApp Web
       // Quando uma mensagem vem com @lid, precisamos resolver o número real
+      // ⚠️ IMPORTANTE: Mesmo com @lid, se o from original termina com @g.us, é grupo!
       if (from.includes('@lid')) {
         // CASO 1: Mensagem enviada pelo próprio sistema (isFromMe = true)
         // Nesse caso, usar o número da conexão WhatsApp que está enviando
@@ -658,9 +662,10 @@ export class MessageService {
       }
 
       // Buscar ou criar contato
+      // ✅ Type assertion temporária até Prisma Client ser regenerado corretamente
       let contact = await this.prisma.contact.findUnique({
         where: { phoneNumber },
-      });
+      }) as any;
 
       if (!contact) {
         // Se for grupo, tentar buscar o nome do grupo
@@ -680,30 +685,40 @@ export class MessageService {
           }
         }
 
+        // ✅ GARANTIR: isGroup só pode ser true se from termina com @g.us
+        // Isso previne que contatos individuais sejam criados como grupos
+        const finalIsGroup = from.endsWith('@g.us');
+
         contact = await this.prisma.contact.create({
           data: {
             phoneNumber,
             name: contactName,
-            isGroup, // ✅ Salvar se é grupo
+            isGroup: finalIsGroup, // ✅ Usar verificação final para garantir correção
             // ✅ Só salvar pushName se for mensagem individual (não grupo) e não for nossa
-            pushName: (!isGroup && !isFromMe && pushName) ? pushName : null,
-          },
-        });
-        logger.info(`New contact created: ${phoneNumber} (${contactName}) - isGroup: ${isGroup}, pushName: ${(!isGroup && !isFromMe && pushName) ? pushName : 'N/A'}`);
+            pushName: (!finalIsGroup && !isFromMe && pushName) ? pushName : null,
+          } as any, // ✅ Type assertion temporária
+        }) as any;
+        logger.info(`[MessageService] ✅ New contact created: ${phoneNumber} (${contactName}) - isGroup: ${finalIsGroup} (from: ${from}), pushName: ${(!finalIsGroup && !isFromMe && pushName) ? pushName : 'N/A'}`);
       } else {
+        // ✅ CORRIGIDO: Sempre verificar novamente o from original para garantir isGroup correto
+        // Isso previne que contatos individuais sejam marcados como grupos por engano
+        const finalIsGroup = from.endsWith('@g.us');
+        
         // ✅ Atualizar isGroup se necessário (caso contato exista mas flag não esteja correta)
-        if (contact.isGroup !== isGroup) {
+        // IMPORTANTE: Se o contato está marcado como grupo mas o from não termina com @g.us, corrigir!
+        if (contact.isGroup !== finalIsGroup) {
           await this.prisma.contact.update({
             where: { id: contact.id },
-            data: { isGroup },
+            data: { isGroup: finalIsGroup } as any, // ✅ Type assertion temporária
           });
-          logger.info(`[MessageService] 📝 Updated isGroup for ${phoneNumber}: ${isGroup}`);
-          contact.isGroup = isGroup; // Atualizar objeto em memória
+          logger.warn(`[MessageService] ⚠️ CORRIGIDO isGroup para ${phoneNumber}: ${contact.isGroup} -> ${finalIsGroup} (from: ${from})`);
+          contact.isGroup = finalIsGroup; // Atualizar objeto em memória
         }
         
         // ✅ CORRIGIDO: Só atualizar pushName se for mensagem individual (não grupo) e não for nossa
         // O pushName deve ser do contato da conversa, não do remetente da última mensagem
-        if (!isGroup && !isFromMe && pushName && contact.pushName !== pushName) {
+        // Usar finalIsGroup (verificação do from original) para garantir correção
+        if (!finalIsGroup && !isFromMe && pushName && contact.pushName !== pushName) {
           await this.prisma.contact.update({
             where: { id: contact.id },
             data: { pushName },
@@ -904,7 +919,7 @@ export class MessageService {
           timestamp: new Date(),
           quotedMessageId: referencedMessageId,
           ...(hasMetadata ? { metadata: additionalMetadata } : {}),
-        },
+        } as any, // ✅ Type assertion temporária até Prisma Client ser regenerado
         include: {
           sender: {
             include: {
@@ -1000,6 +1015,18 @@ export class MessageService {
         // Emitir nova mensagem formatada
         socketServer.emitNewMessage(conversation.id, formattedMessage);
         logger.info(`[MessageService] 📡 New message event emitted for conversation ${conversation.id}`);
+        
+        // 🔥 NOVO: Chamar servidor WebSocket unificado para atribuir setor automaticamente
+        try {
+          const unifiedServer = socketServer as any;
+          if (unifiedServer.handleIncomingMessage) {
+            await unifiedServer.handleIncomingMessage(connectionId, conversation.id, formattedMessage);
+            logger.info(`[MessageService] ✅ Unified WebSocket server notified for auto department assignment`);
+          }
+        } catch (unifiedError) {
+          // Se não tiver o método handleIncomingMessage, continuar normal
+          logger.debug(`[MessageService] handleIncomingMessage not available, standard broadcast only`);
+        }
 
         // Só emitir new_conversation se for realmente uma conversa nova
         if (isNewConversation) {

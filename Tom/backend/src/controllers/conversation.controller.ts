@@ -90,26 +90,32 @@ export class ConversationController {
     request: FastifyRequest<{ Params: { conversationId: string } }>,
     reply: FastifyReply
   ) => {
-    const { conversationId } = request.params;
-    const { departmentId } = validate(acceptConversationSchema, request.body ?? {});
-    const userId = request.user!.userId;
+    try {
+      const { conversationId } = request.params;
+      const { departmentId } = validate(acceptConversationSchema, request.body ?? {});
+      const userId = request.user!.userId;
 
-    const conversation = await this.conversationService.acceptConversation(
-      conversationId,
-      userId,
-      departmentId
-    );
+      const conversation = await this.conversationService.acceptConversation(
+        conversationId,
+        userId,
+        departmentId
+      );
 
-    // Emitir evento via WebSocket
-    const socketServer = getSocketServer();
-    socketServer.emitConversationAssigned(userId, conversation);
-    socketServer.emitConversationUpdate(conversationId, { status: 'in_progress', assignedUserId: userId });
+      // Emitir evento via WebSocket
+      const socketServer = getSocketServer();
+      socketServer.emitConversationAssigned(userId, conversation);
+      socketServer.emitConversationUpdate(conversationId, { status: 'in_progress', assignedUserId: userId });
 
-    return reply.status(200).send({
-      success: true,
-      message: 'Conversation accepted successfully',
-      data: conversation,
-    });
+      return reply.status(200).send({
+        success: true,
+        message: 'Conversation accepted successfully',
+        data: conversation,
+      });
+    } catch (error: any) {
+      // Re-throw para o middleware de erro tratar
+      // Isso garante que erros 409 (Conflict) sejam retornados corretamente
+      throw error;
+    }
   };
 
   /**

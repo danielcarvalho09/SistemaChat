@@ -4,7 +4,7 @@ import { logger } from './config/logger.js';
 import { connectDatabase, disconnectDatabase } from './config/database.js';
 import { connectRedis, disconnectRedis } from './config/redis.js';
 import { seedDatabase } from './utils/seed.js';
-import { initializeSocketServer } from './websocket/socket.server.js';
+import { initializeSocketServer, getSocketServer } from './websocket/unified-socket.server.js';
 import { baileysManager } from './whatsapp/baileys.manager.js';
 import { CleanupService } from './services/cleanup.service.js';
 import { keepAliveService } from './services/keep-alive.service.js';
@@ -69,12 +69,11 @@ async function start() {
     
     logger.info('⚙️  HTTP Keep-Alive configurado: 620s timeout');
 
-    // Inicializar WebSocket server
+    // Inicializar WebSocket server unificado
     const socketServer = initializeSocketServer(app.server);
+    logger.info('🚀 Unified WebSocket Server initialized with auto department assignment');
     
     // Configurar heartbeat no servidor para manter conexões vivas
-    // Enviar ping do servidor para todos os clientes a cada 30 segundos
-    // Reduzido de 15s para 30s para economizar network usage
     setInterval(() => {
       const io = socketServer.getIO();
       const connectedSockets = io.sockets.sockets;
@@ -85,8 +84,13 @@ async function start() {
         }
       });
       
-      logger.debug(`🏓 Server ping enviado para ${connectedSockets.size} clientes`);
-    }, 30000); // 30 segundos (reduzido de 15s para economizar network usage)
+      logger.debug(`🏓 Server ping sent to ${connectedSockets.size} clients`);
+      
+      // Debug do estado do servidor (apenas em dev)
+      if (config.server.isDevelopment) {
+        socketServer.debugState();
+      }
+    }, 30000); // 30 segundos
 
     logger.info(`✅ Server running on http://localhost:${config.server.port}`);
     logger.info(`🔌 WebSocket server running on ws://localhost:${config.server.port}`);

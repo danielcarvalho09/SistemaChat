@@ -3,13 +3,14 @@ import { ConversationList } from '../components/chat/ConversationList';
 import { ChatArea } from '../components/chat/ChatArea';
 import { ContactDetails } from '../components/chat/ContactDetails';
 import { BackgroundPaths } from '../components/ui/background-paths';
+import { useEnhancedWebSocket } from '../hooks/useEnhancedWebSocket';
 
 export function Dashboard() {
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
   const [showContactDetails, setShowContactDetails] = useState(false);
 
-  // WebSocket agora é gerenciado globalmente pelo WebSocketProvider no App.tsx
-  // Não precisa mais chamar useWebSocket() aqui
+  // 🔥 NOVO: Hook de WebSocket aprimorado para garantir atualizações em tempo real
+  useEnhancedWebSocket();
 
   return (
     <div className="flex h-full bg-black">

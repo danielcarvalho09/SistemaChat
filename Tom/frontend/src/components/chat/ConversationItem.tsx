@@ -6,6 +6,7 @@ import { useState } from 'react';
 import api from '../../lib/axios';
 import { formatPhoneNumber as formatPhone } from '../../utils/formatPhone';
 import { ConversationTags } from '../tags/ConversationTags';
+import { useEnhancedWebSocket } from '../../hooks/useEnhancedWebSocket';
 
 interface Conversation {
   id: string;
@@ -40,6 +41,7 @@ interface Conversation {
     id: string;
     name: string;
   } | null;
+  internalNotes?: string | null;
 }
 
 interface ConversationItemProps {
@@ -52,6 +54,7 @@ interface ConversationItemProps {
 export function ConversationItem({ conversation, isSelected, onClick, onAccept }: ConversationItemProps) {
   const [isAccepting, setIsAccepting] = useState(false);
   const [isRejecting, setIsRejecting] = useState(false);
+  const { acceptConversation } = useEnhancedWebSocket();
 
   const handleAccept = async (e: React.MouseEvent) => {
     e.stopPropagation(); // Evitar que clique no botão selecione a conversa
@@ -63,20 +66,47 @@ export function ConversationItem({ conversation, isSelected, onClick, onAccept }
         localStorage.setItem(`transferred_${conversation.id}`, 'true');
       }
       
-      await api.patch(`/conversations/${conversation.id}/accept`, {});
+      // 🔥 NOVO: Usar WebSocket em vez de HTTP para aceitar conversa
+      acceptConversation(conversation.id);
+      
+      // Feedback imediato (o WebSocket atualizará o estado real)
       if (onAccept) {
         onAccept(conversation.id);
       }
+      
+      // Sucesso imediato pois o WebSocket cuida da atualização
+      setIsAccepting(false);
+      return;
     } catch (error: any) {
       console.error('Erro ao aceitar conversa:', error);
+      console.error('Detalhes do erro:', {
+        status: error?.response?.status,
+        data: error?.response?.data,
+        message: error?.message,
+      });
+      
+      // Extrair mensagem de erro do backend
+      let errorMessage = 'Não foi possível aceitar a conversa.';
+      
+      // Tentar diferentes formatos de resposta de erro
+      if (error?.response?.status === 409) {
+        // Erro 409 = Conflict (conversa já aceita)
+        // O backend retorna: { statusCode: 409, message: "..." }
+        errorMessage = error?.response?.data?.message || 
+                      error?.response?.data?.error || 
+                      'Esta conversa já foi aceita por outro atendente.';
+      } else if (error?.response?.data) {
+        // Tentar diferentes campos possíveis
+        errorMessage = error.response.data.message || 
+                      error.response.data.error || 
+                      error.response.data.statusCode ||
+                      errorMessage;
+      } else if (error?.message) {
+        errorMessage = error.message;
+      }
       
       // Mostrar mensagem de erro amigável
-      const errorMessage = error?.response?.data?.message || 
-                          error?.response?.data?.error || 
-                          error?.message || 
-                          'Não foi possível aceitar a conversa. Ela pode já ter sido aceita por outro atendente.';
-      
-      alert(errorMessage);
+      alert(`⚠️ ${errorMessage}`);
     } finally {
       setIsAccepting(false);
     }
