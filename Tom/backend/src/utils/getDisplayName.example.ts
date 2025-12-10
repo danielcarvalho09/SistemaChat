@@ -24,6 +24,9 @@ export async function exampleMessagesUpsertHandler(
   messages: proto.IWebMessageInfo[]
 ) {
   for (const msg of messages) {
+    // Verificar se msg.key existe antes de acessar
+    if (!msg.key) continue;
+    
     const jid = msg.key.remoteJid;
     if (!jid) continue;
 
