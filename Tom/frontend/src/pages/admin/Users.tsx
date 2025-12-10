@@ -73,17 +73,42 @@ export function Users() {
   };
 
   const handleDelete = async (userId: string) => {
-    if (!confirm('Tem certeza que deseja excluir este usuário?')) return;
+    if (!confirm('Tem certeza que deseja excluir (desativar) este usuário?')) return;
     
     try {
-      await api.delete(`/users/${userId}`);
-      fetchUsers();
-      // Mostrar mensagem de sucesso (opcional)
-      alert('Usuário excluído com sucesso!');
+      const response = await api.delete(`/users/${userId}`);
+      console.log('Resposta do servidor:', response.data);
+      
+      // Verificar se a resposta indica sucesso
+      if (response.data?.success || response.status === 200) {
+        fetchUsers();
+        alert('Usuário desativado com sucesso!');
+      } else {
+        throw new Error(response.data?.message || 'Resposta inesperada do servidor');
+      }
     } catch (error: any) {
       console.error('Erro ao excluir usuário:', error);
-      // Mostrar mensagem de erro ao usuário
-      const errorMessage = error?.response?.data?.message || error?.message || 'Erro ao excluir usuário';
+      console.error('Detalhes do erro:', {
+        status: error?.response?.status,
+        data: error?.response?.data,
+        message: error?.message
+      });
+      
+      // Mostrar mensagem de erro mais detalhada
+      let errorMessage = 'Erro ao excluir usuário';
+      
+      if (error?.response?.status === 403) {
+        errorMessage = 'Você não tem permissão para excluir usuários';
+      } else if (error?.response?.status === 404) {
+        errorMessage = 'Usuário não encontrado';
+      } else if (error?.response?.status === 409) {
+        errorMessage = error?.response?.data?.message || 'Não é possível excluir este usuário (pode ser o último admin ativo)';
+      } else if (error?.response?.data?.message) {
+        errorMessage = error.response.data.message;
+      } else if (error?.message) {
+        errorMessage = error.message;
+      }
+      
       alert(`Erro: ${errorMessage}`);
     }
   };

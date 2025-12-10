@@ -168,13 +168,14 @@ export function ConversationItem({ conversation, isSelected, onClick, onAccept }
         <div className="flex items-center justify-between mb-1">
           <div className="flex flex-col gap-0.5 flex-1" onClick={!canAccept ? onClick : undefined}>
             <h3 className="font-semibold text-gray-900 truncate">
-              {conversation.contact.name && conversation.contact.name !== conversation.contact.phoneNumber 
-                ? conversation.contact.name 
-                : formatPhoneNumber(conversation.contact.phoneNumber)}
+              {conversation.contact.pushName || 
+               (conversation.contact.name && conversation.contact.name !== conversation.contact.phoneNumber 
+                 ? conversation.contact.name 
+                 : formatPhoneNumber(conversation.contact.phoneNumber))}
             </h3>
-            {conversation.contact.pushName && (
+            {(conversation.contact.pushName || conversation.contact.name) && (
               <p className="text-xs text-gray-500 truncate">
-                {conversation.contact.pushName}
+                {formatPhoneNumber(conversation.contact.phoneNumber)}
               </p>
             )}
           </div>

@@ -386,6 +386,7 @@ function AudioMessage({
 interface MessageListProps {
   messages: ChatMessage[];
   onReply?: (message: ChatMessage) => void;
+  contactPhoneNumber?: string; // Para identificar se é grupo
 }
 
 // Função para gerar cor consistente baseada no nome
@@ -445,7 +446,7 @@ function formatPhoneNumber(phone: string | null | undefined): string {
   return phone;
 }
 
-export function MessageList({ messages, onReply }: MessageListProps) {
+export function MessageList({ messages, onReply, contactPhoneNumber }: MessageListProps) {
   const getQuotedPreview = (quoted: QuotedMessage) => {
     if (quoted.messageType === 'text') {
       return quoted.content || '';
@@ -551,8 +552,11 @@ export function MessageList({ messages, onReply }: MessageListProps) {
         // isFromContact = false -> mensagem do agente (direita, verde)
         const isFromMe = !message.isFromContact;
         
-        // Verificar se é grupo e mostrar nome do remetente
-        const isGroup = message.senderName && message.isFromContact;
+        // Verificar se é grupo: phoneNumber contém @g.us OU há senderName E senderPhone (indica grupo)
+        // Se há senderName e senderPhone, é definitivamente um grupo
+        const isGroup = message.senderName && 
+                        message.senderPhone && 
+                        message.isFromContact;
         
         return (
           <div
