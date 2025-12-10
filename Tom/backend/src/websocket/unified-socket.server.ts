@@ -199,6 +199,10 @@ export class UnifiedSocketServer {
       const connectionId = socket.connectionId || null;
       
       logger.info(`👤 User ${userId} connected via socket ${socket.id}`);
+      logger.info(`   Department: ${departmentId}, Connection: ${connectionId}`);
+
+      // 🔍 DEBUG: Listar todos os eventos disponíveis
+      logger.debug(`📋 Available socket events: join_room, leave_room, accept_conversation, typing_start, typing_stop`);
 
       // Armazenar conexão
       const connectionInfo: ConnectionInfo = {
@@ -240,10 +244,45 @@ export class UnifiedSocketServer {
         logger.debug(`User ${userId} left conversation ${conversationId}`);
       });
 
-      // 🎯 ACEITAR CONVERSA
-      socket.on(SocketEvent.ACCEPT_CONVERSATION, async (conversationId: string) => {
+      // 🎯 ACEITAR CONVERSA - Registrar com string literal para garantir
+      logger.info(`📋 Registering accept_conversation handler for socket ${socket.id} (User: ${userId})`);
+      
+      // 🔍 DEBUG: Listener genérico para capturar todos os eventos (se disponível)
+      if (typeof (socket as any).onAny === 'function') {
+        (socket as any).onAny((eventName: string, ...args: any[]) => {
+          if (eventName === 'accept_conversation') {
+            logger.info(`🔍 [DEBUG] accept_conversation event received on socket ${socket.id}`, args);
+          }
+        });
+      }
+      
+      // Registrar handler com string literal (garantir compatibilidade)
+      socket.on('accept_conversation', async (conversationId: string) => {
         try {
-          logger.info(`🎯 User ${userId} accepting conversation ${conversationId}`);
+          logger.info(`🎯 [WebSocket] Event accept_conversation received!`);
+          logger.info(`   Conversation ID: ${conversationId}`);
+          logger.info(`   User: ${userId}, Socket: ${socket.id}, Department: ${departmentId}`);
+          
+          // Verificar se userId é válido
+          if (!userId || userId === 'anonymous') {
+            logger.error(`❌ [WebSocket] Invalid userId: ${userId}`);
+            socket.emit('error', { message: 'Usuário não autenticado' });
+            return;
+          }
+
+          // Buscar conversa atual para verificar status
+          const currentConversation = await this.prisma.conversation.findUnique({
+            where: { id: conversationId },
+            select: { status: true, assignedUserId: true, departmentId: true },
+          });
+
+          if (!currentConversation) {
+            logger.error(`❌ [WebSocket] Conversation ${conversationId} not found`);
+            socket.emit('error', { message: 'Conversa não encontrada' });
+            return;
+          }
+
+          logger.info(`   Current status: ${currentConversation.status}, Assigned: ${currentConversation.assignedUserId}`);
           
           const updated = await this.prisma.conversation.updateMany({
             where: { 
@@ -253,10 +292,12 @@ export class UnifiedSocketServer {
             data: {
               status: 'in_progress',
               assignedUserId: userId,
-              departmentId: departmentId,
+              departmentId: departmentId || currentConversation.departmentId,
               firstResponseAt: new Date(),
             },
           });
+
+          logger.info(`   Update result: ${updated.count} rows updated`);
 
           if (updated.count > 0) {
             const conversation = await this.prisma.conversation.findUnique({
@@ -280,23 +321,38 @@ export class UnifiedSocketServer {
             });
 
             if (conversation) {
-              // BROADCAST para todos
-              this.io.emit(SocketEvent.CONVERSATION_ACCEPTED, {
+              const formattedConversation = this.formatConversationResponse(conversation);
+              
+              // BROADCAST para todos (usar string literal)
+              this.io.emit('conversation_accepted', {
                 conversationId,
                 userId,
-                departmentId,
-                conversation: this.formatConversationResponse(conversation),
+                departmentId: departmentId || conversation.departmentId,
+                conversation: formattedConversation,
               });
               
-              logger.info(`✅ Conversation ${conversationId} accepted and broadcasted`);
+              logger.info(`✅ [WebSocket] Conversation ${conversationId} accepted and broadcasted to all clients`);
+              logger.info(`   Broadcasting to ${this.io.sockets.sockets.size} connected sockets`);
+            } else {
+              logger.error(`❌ [WebSocket] Conversation ${conversationId} not found after update`);
             }
           } else {
-            logger.warn(`⚠️ Conversation ${conversationId} not available`);
-            socket.emit('error', { message: 'Conversa não disponível' });
+            logger.warn(`⚠️ [WebSocket] Conversation ${conversationId} not available for acceptance`);
+            logger.warn(`   Current status: ${currentConversation.status}, Already assigned to: ${currentConversation.assignedUserId}`);
+            socket.emit('error', { 
+              message: currentConversation.status === 'in_progress' 
+                ? 'Conversa já foi aceita por outro atendente' 
+                : `Conversa não está disponível (status: ${currentConversation.status})`
+            });
           }
-        } catch (error) {
-          logger.error('Error accepting conversation:', error);
-          socket.emit('error', { message: 'Erro ao aceitar conversa' });
+        } catch (error: any) {
+          logger.error(`❌ [WebSocket] Error accepting conversation ${conversationId}:`, error);
+          logger.error(`   Error message: ${error?.message}`);
+          logger.error(`   Error stack: ${error?.stack}`);
+          socket.emit('error', { 
+            message: error?.message || 'Erro ao aceitar conversa',
+            details: error?.stack 
+          });
         }
       });
 

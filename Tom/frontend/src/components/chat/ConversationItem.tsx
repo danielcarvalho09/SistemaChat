@@ -7,6 +7,7 @@ import api from '../../lib/axios';
 import { formatPhoneNumber as formatPhone } from '../../utils/formatPhone';
 import { ConversationTags } from '../tags/ConversationTags';
 import { useEnhancedWebSocket } from '../../hooks/useEnhancedWebSocket';
+import { useConversationStore } from '../../store/conversationStore';
 
 interface Conversation {
   id: string;
@@ -66,16 +67,44 @@ export function ConversationItem({ conversation, isSelected, onClick, onAccept }
         localStorage.setItem(`transferred_${conversation.id}`, 'true');
       }
       
+      console.log(`🎯 [ConversationItem] Attempting to accept conversation ${conversation.id}`);
+      console.log(`   Current status: ${conversation.status}`);
+      
       // 🔥 NOVO: Usar WebSocket em vez de HTTP para aceitar conversa
       acceptConversation(conversation.id);
+      
+      // Aguardar um pouco para ver se o WebSocket responde
+      // Se não responder em 2 segundos, tentar via HTTP como fallback
+      setTimeout(async () => {
+        const { conversations } = useConversationStore.getState();
+        const updatedConversation = conversations.find(c => c.id === conversation.id);
+        
+        if (!updatedConversation || updatedConversation.status !== 'in_progress') {
+          console.warn('⚠️ [ConversationItem] WebSocket did not update, trying HTTP fallback');
+          try {
+            await api.patch(`/conversations/${conversation.id}/accept`, {});
+            if (onAccept) {
+              onAccept(conversation.id);
+            }
+          } catch (httpError: any) {
+            console.error('❌ [ConversationItem] HTTP fallback also failed:', httpError);
+            const errorMessage = httpError?.response?.data?.message || 
+                                httpError?.response?.data?.error || 
+                                httpError?.message || 
+                                'Não foi possível aceitar a conversa.';
+            alert(`⚠️ ${errorMessage}`);
+          }
+        } else {
+          console.log('✅ [ConversationItem] Conversation accepted via WebSocket');
+        }
+        setIsAccepting(false);
+      }, 2000);
       
       // Feedback imediato (o WebSocket atualizará o estado real)
       if (onAccept) {
         onAccept(conversation.id);
       }
       
-      // Sucesso imediato pois o WebSocket cuida da atualização
-      setIsAccepting(false);
       return;
     } catch (error: any) {
       console.error('Erro ao aceitar conversa:', error);

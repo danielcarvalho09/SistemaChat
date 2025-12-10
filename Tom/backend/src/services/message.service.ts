@@ -1,6 +1,6 @@
 import { getPrismaClient } from '../config/database.js';
 import { baileysManager } from '../whatsapp/baileys.manager.js';
-import { getSocketServer } from '../websocket/socket.server.js';
+import { getSocketServer } from '../websocket/unified-socket.server.js';
 import { MessageResponse, SendMessageRequest, PaginatedResponse, PaginationParams, MessageType, MessageStatus } from '../models/types.js';
 import { NotFoundError, ForbiddenError } from '../middlewares/error.middleware.js';
 import { logger } from '../config/logger.js';

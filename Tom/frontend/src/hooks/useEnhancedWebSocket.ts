@@ -20,8 +20,18 @@ export function useEnhancedWebSocket() {
 
   // Função para aceitar conversa via WebSocket
   const acceptConversation = useCallback((conversationId: string) => {
-    console.log(`🎯 Accepting conversation ${conversationId} via WebSocket`);
+    console.log(`🎯 [useEnhancedWebSocket] Accepting conversation ${conversationId} via WebSocket`);
+    
+    const socket = socketService.getSocket();
+    if (!socket || !socket.connected) {
+      console.error('❌ [useEnhancedWebSocket] Socket not connected!');
+      console.error('   Socket status:', socket ? 'exists but not connected' : 'null');
+      return;
+    }
+    
+    console.log('✅ [useEnhancedWebSocket] Socket is connected, emitting accept_conversation');
     socketService.emit('accept_conversation', conversationId);
+    console.log('✅ [useEnhancedWebSocket] Event emitted successfully');
   }, []);
 
   useEffect(() => {
@@ -44,7 +54,10 @@ export function useEnhancedWebSocket() {
       departmentId: string | null;
       conversation: Conversation;
     }) => {
-      console.log('✅ Conversation accepted via WebSocket:', data);
+      console.log('✅ [WebSocket] Conversation accepted event received:', data);
+      console.log('   Conversation ID:', data.conversationId);
+      console.log('   Assigned to user:', data.userId);
+      console.log('   Department:', data.departmentId);
       
       // Atualizar conversa no store
       updateConversation(data.conversationId, {
@@ -57,9 +70,18 @@ export function useEnhancedWebSocket() {
       const exists = conversations.some(c => c.id === data.conversationId);
       if (!exists) {
         addConversation(data.conversation);
+        console.log('✅ [WebSocket] New conversation added to list');
+      } else {
+        console.log('✅ [WebSocket] Existing conversation updated in list');
       }
       
-      console.log('✅ UI updated with accepted conversation');
+      console.log('✅ [WebSocket] UI updated with accepted conversation');
+    });
+
+    // Escutar erros do servidor
+    socketService.on('error', (error: { message: string; details?: string }) => {
+      console.error('❌ [WebSocket] Error from server:', error);
+      alert(`Erro: ${error.message}`);
     });
 
     // Escutar novas mensagens
