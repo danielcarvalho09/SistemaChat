@@ -139,19 +139,34 @@ export class UserController {
 
   /**
    * DELETE /api/v1/users/:userId
-   * Desativa usuário (apenas admin)
+   * Exclui usuário permanentemente (apenas admin)
+   * Se query param ?soft=true, apenas desativa (soft delete)
    */
   deactivateUser = async (
-    request: FastifyRequest<{ Params: { userId: string } }>,
+    request: FastifyRequest<{ 
+      Params: { userId: string };
+      Querystring: { soft?: string };
+    }>,
     reply: FastifyReply
   ) => {
     try {
       const { userId } = request.params;
-      await this.userService.deactivateUser(userId);
+      const { soft } = request.query;
 
+      // Se soft=true, apenas desativa (soft delete)
+      if (soft === 'true') {
+        await this.userService.deactivateUser(userId);
+        return reply.status(200).send({
+          success: true,
+          message: 'User deactivated successfully',
+        });
+      }
+
+      // Caso contrário, exclui permanentemente (hard delete)
+      await this.userService.deleteUser(userId);
       return reply.status(200).send({
         success: true,
-        message: 'User deactivated successfully',
+        message: 'User deleted successfully',
       });
     } catch (error: any) {
       // Re-throw para o middleware de erro tratar

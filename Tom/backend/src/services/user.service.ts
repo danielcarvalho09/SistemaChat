@@ -21,6 +21,9 @@ export class UserService {
         skip,
         take: limit,
         orderBy: { [sortBy]: sortOrder },
+        where: {
+          isActive: true, // ✅ Apenas usuários ativos por padrão
+        },
         include: {
           roles: {
             include: {
@@ -29,7 +32,11 @@ export class UserService {
           },
         },
       }),
-      this.prisma.user.count(),
+      this.prisma.user.count({
+        where: {
+          isActive: true, // ✅ Contar apenas usuários ativos
+        },
+      }),
     ]);
 
     return {
@@ -257,6 +264,61 @@ export class UserService {
     await cacheDel(`user:${userId}`);
 
     logger.info(`User deactivated: ${userId} (${user.email})`);
+  }
+
+  /**
+   * Exclui usuário permanentemente (hard delete)
+   * ⚠️ ATENÇÃO: Esta operação é irreversível!
+   */
+  async deleteUser(userId: string): Promise<void> {
+    // Verificar se o usuário existe
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      include: {
+        roles: {
+          include: {
+            role: true,
+          },
+        },
+      },
+    });
+
+    if (!user) {
+      throw new NotFoundError('User not found');
+    }
+
+    // Verificar se é o último admin ativo
+    const isAdmin = user.roles.some(ur => ur.role.name === 'admin');
+    if (isAdmin && user.isActive) {
+      const activeAdminCount = await this.prisma.user.count({
+        where: {
+          isActive: true,
+          roles: {
+            some: {
+              role: {
+                name: 'admin',
+              },
+            },
+          },
+        },
+      });
+
+      if (activeAdminCount <= 1) {
+        throw new ConflictError('Cannot delete the last active admin user. Deactivate it instead.');
+      }
+    }
+
+    // Excluir usuário permanentemente
+    // As relações com onDelete: Cascade serão removidas automaticamente
+    // As relações com onDelete: SetNull terão o campo setado como null
+    await this.prisma.user.delete({
+      where: { id: userId },
+    });
+
+    // Invalidar cache
+    await cacheDel(`user:${userId}`);
+
+    logger.info(`User deleted permanently: ${userId} (${user.email})`);
   }
 
   /**

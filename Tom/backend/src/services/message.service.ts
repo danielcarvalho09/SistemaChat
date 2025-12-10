@@ -663,20 +663,21 @@ export class MessageService {
       });
 
       if (!contact) {
-        // ✅ Usar função centralizada para obter nome da conversa
+        // Se for grupo, tentar buscar o nome do grupo
         let contactName = phoneNumber;
 
-        try {
-          const client = baileysManager['clients'].get(connectionId);
-          const { getDisplayName } = await import('../utils/getDisplayName.js');
-          
-          // Obter nome correto da conversa (grupo ou privado)
-          contactName = await getDisplayName(from, client?.socket || null, pushName || null);
-          logger.info(`[MessageService] 📱 Conversation name resolved: ${contactName} (isGroup: ${isGroup})`);
-        } catch (error) {
-          logger.warn(`[MessageService] ⚠️ Could not resolve conversation name, using fallback:`, error);
-          // Fallback: usar número
-          contactName = phoneNumber;
+        if (isGroup) {
+          try {
+            const client = baileysManager['clients'].get(connectionId);
+
+            if (client?.socket) {
+              const groupMetadata = await client.socket.groupMetadata(from);
+              contactName = groupMetadata.subject || phoneNumber;
+              logger.info(`[MessageService] 📱 Group name: ${contactName}`);
+            }
+          } catch (error) {
+            logger.warn(`[MessageService] Could not fetch group name:`, error);
+          }
         }
 
         contact = await this.prisma.contact.create({
@@ -688,43 +689,15 @@ export class MessageService {
           },
         });
         logger.info(`New contact created: ${phoneNumber} (${contactName}) - pushName: ${(!isGroup && !isFromMe && pushName) ? pushName : 'N/A'}`);
-      } else {
-        // ✅ Contato já existe - atualizar nome se necessário
-        // Para grupos: sempre atualizar nome se mudou (subject do grupo pode mudar)
-        // Para privados: atualizar pushName se mudou
-        const needsUpdate: { name?: string; pushName?: string | null } = {};
-        
-        if (isGroup) {
-          // ✅ GRUPO: Atualizar nome se mudou (subject do grupo pode ter mudado)
-          try {
-            const client = baileysManager['clients'].get(connectionId);
-            const { getDisplayName } = await import('../utils/getDisplayName.js');
-            const newGroupName = await getDisplayName(from, client?.socket || null, null);
-            
-            if (newGroupName && newGroupName !== contact.name && newGroupName !== phoneNumber) {
-              needsUpdate.name = newGroupName;
-              logger.info(`[MessageService] 📝 Group name changed: ${contact.name} -> ${newGroupName}`);
-            }
-          } catch (error) {
-            logger.debug(`[MessageService] Could not check group name update:`, error);
-          }
-        } else if (!isFromMe && pushName && contact.pushName !== pushName) {
-          // ✅ PRIVADO: Atualizar pushName se mudou (nome do contato pode ter mudado)
-          needsUpdate.pushName = pushName;
-          logger.info(`[MessageService] 📝 Updated pushName for ${phoneNumber}: ${pushName}`);
-        }
-        
-        // Aplicar atualizações se necessário
-        if (Object.keys(needsUpdate).length > 0) {
-          await this.prisma.contact.update({
-            where: { id: contact.id },
-            data: needsUpdate,
-          });
-          
-          // Atualizar objeto em memória
-          if (needsUpdate.name) contact.name = needsUpdate.name;
-          if (needsUpdate.pushName !== undefined) contact.pushName = needsUpdate.pushName;
-        }
+      } else if (!isGroup && !isFromMe && pushName && contact.pushName !== pushName) {
+        // ✅ CORRIGIDO: Só atualizar pushName se for mensagem individual (não grupo) e não for nossa
+        // O pushName deve ser do contato da conversa, não do remetente da última mensagem
+        await this.prisma.contact.update({
+          where: { id: contact.id },
+          data: { pushName },
+        });
+        logger.info(`[MessageService] 📝 Updated pushName for ${phoneNumber}: ${pushName}`);
+        contact.pushName = pushName; // Atualizar objeto em memória
       }
 
       // ✅ DEDUPLICAÇÃO ANTECIPADA: Verificar se mensagem já existe ANTES de criar/buscar conversa

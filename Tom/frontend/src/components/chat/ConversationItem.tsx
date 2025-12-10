@@ -57,8 +57,8 @@ export function ConversationItem({ conversation, isSelected, onClick, onAccept }
     
     setIsAccepting(true);
     try {
-      // Se conversa foi transferida, marcar para destacar
-      if (conversation.status === 'transferred') {
+      // Se conversa foi transferida e tem observação, marcar para destacar
+      if (conversation.status === 'transferred' && conversation.internalNotes) {
         localStorage.setItem(`transferred_${conversation.id}`, 'true');
       }
       
@@ -168,40 +168,15 @@ export function ConversationItem({ conversation, isSelected, onClick, onAccept }
         <div className="flex items-center justify-between mb-1">
           <div className="flex flex-col gap-0.5 flex-1" onClick={!canAccept ? onClick : undefined}>
             <h3 className="font-semibold text-gray-900 truncate">
-              {(() => {
-                // ✅ Verificar se é grupo (phoneNumber contém @g.us)
-                const isGroup = conversation.contact.phoneNumber?.includes('@g.us') || false;
-                
-                // ✅ REGRA: Para grupos, SEMPRE usar name (subject do grupo), nunca pushName
-                // Para privados, priorizar pushName > name > número
-                if (isGroup) {
-                  // Grupo: usar name (subject) ou número como fallback
-                  return conversation.contact.name && conversation.contact.name !== conversation.contact.phoneNumber
-                    ? conversation.contact.name
-                    : formatPhoneNumber(conversation.contact.phoneNumber);
-                } else {
-                  // Privado: priorizar pushName > name > número
-                  return conversation.contact.pushName || 
-                         (conversation.contact.name && conversation.contact.name !== conversation.contact.phoneNumber 
-                           ? conversation.contact.name 
-                           : formatPhoneNumber(conversation.contact.phoneNumber));
-                }
-              })()}
+              {conversation.contact.name && conversation.contact.name !== conversation.contact.phoneNumber 
+                ? conversation.contact.name 
+                : formatPhoneNumber(conversation.contact.phoneNumber)}
             </h3>
-            {(() => {
-              const isGroup = conversation.contact.phoneNumber?.includes('@g.us') || false;
-              // Para grupos, não mostrar número (já está no título se não tiver name)
-              // Para privados, mostrar número se tiver pushName ou name
-              if (isGroup) {
-                return null; // Grupos não mostram número no subtítulo
-              } else {
-                return (conversation.contact.pushName || conversation.contact.name) ? (
-                  <p className="text-xs text-gray-500 truncate">
-                    {formatPhoneNumber(conversation.contact.phoneNumber)}
-                  </p>
-                ) : null;
-              }
-            })()}
+            {conversation.contact.pushName && (
+              <p className="text-xs text-gray-500 truncate">
+                {conversation.contact.pushName}
+              </p>
+            )}
           </div>
           <div className="flex items-center gap-2 flex-shrink-0">
             {conversation.lastMessageAt && (

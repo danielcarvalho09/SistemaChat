@@ -73,43 +73,38 @@ export function Users() {
   };
 
   const handleDelete = async (userId: string) => {
-    if (!confirm('Tem certeza que deseja excluir (desativar) este usuário?')) return;
+    const user = users.find(u => u.id === userId);
+    const userName = user?.name || user?.email || 'este usuário';
+    
+    if (!confirm(`⚠️ ATENÇÃO: Tem certeza que deseja EXCLUIR PERMANENTEMENTE ${userName}?\n\nEsta ação é irreversível e o usuário será removido completamente do sistema.`)) {
+      return;
+    }
     
     try {
       const response = await api.delete(`/users/${userId}`);
-      console.log('Resposta do servidor:', response.data);
       
-      // Verificar se a resposta indica sucesso
-      if (response.data?.success || response.status === 200) {
-      fetchUsers();
-        alert('Usuário desativado com sucesso!');
-      } else {
-        throw new Error(response.data?.message || 'Resposta inesperada do servidor');
+      if (response.data.success) {
+        // Mostrar mensagem de sucesso
+        alert(`✅ ${response.data.message || 'Usuário excluído com sucesso!'}`);
+        // Recarregar lista de usuários
+        fetchUsers();
       }
     } catch (error: any) {
       console.error('Erro ao excluir usuário:', error);
-      console.error('Detalhes do erro:', {
-        status: error?.response?.status,
-        data: error?.response?.data,
-        message: error?.message
-      });
       
-      // Mostrar mensagem de erro mais detalhada
+      // Extrair mensagem de erro mais detalhada
       let errorMessage = 'Erro ao excluir usuário';
       
-      if (error?.response?.status === 403) {
-        errorMessage = 'Você não tem permissão para excluir usuários';
-      } else if (error?.response?.status === 404) {
-        errorMessage = 'Usuário não encontrado';
-      } else if (error?.response?.status === 409) {
-        errorMessage = error?.response?.data?.message || 'Não é possível excluir este usuário (pode ser o último admin ativo)';
-      } else if (error?.response?.data?.message) {
+      if (error?.response?.data?.message) {
         errorMessage = error.response.data.message;
+      } else if (error?.response?.data?.error) {
+        errorMessage = error.response.data.error;
       } else if (error?.message) {
         errorMessage = error.message;
       }
       
-      alert(`Erro: ${errorMessage}`);
+      // Mostrar mensagem de erro ao usuário
+      alert(`❌ Erro: ${errorMessage}`);
     }
   };
 

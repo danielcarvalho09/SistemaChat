@@ -314,7 +314,6 @@ export function ChatArea({ conversationId, onToggleDetails }: ChatAreaProps) {
         <MessageList
           messages={messages[conversationId] || []}
           onReply={(message) => setReplyingTo(message)}
-          contactPhoneNumber={conversation?.contact.phoneNumber}
         />
         <div ref={messagesEndRef} />
       </div>
