@@ -81,7 +81,7 @@ export function Users() {
       
       // Verificar se a resposta indica sucesso
       if (response.data?.success || response.status === 200) {
-        fetchUsers();
+      fetchUsers();
         alert('Usuário desativado com sucesso!');
       } else {
         throw new Error(response.data?.message || 'Resposta inesperada do servidor');
