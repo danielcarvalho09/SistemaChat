@@ -214,6 +214,7 @@ export class ConversationService {
                 avatar: null,
                 email: null,
                 tags: [],
+                isGroup: false,
               },
               connection: conv.connection ? {
                 id: conv.connection.id,

@@ -14,6 +14,7 @@ interface Conversation {
     phoneNumber: string;
     pushName?: string | null;
     profilePicture?: string;
+    isGroup?: boolean; // ✅ Indica se é um grupo do WhatsApp
   };
   lastMessage?: {
     content: string;
