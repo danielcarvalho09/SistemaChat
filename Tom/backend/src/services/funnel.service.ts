@@ -32,12 +32,41 @@ export class FunnelService {
    */
   async generateFunnel(data: GenerateFunnelRequest, userId: string): Promise<any> {
     try {
-      logger.info(`[FunnelService] Generating funnel for niche: ${data.niche}`);
+      logger.info(`[FunnelService] ========== INICIANDO GERAÇÃO DE FUNIL ==========`);
+      logger.info(`[FunnelService] Niche: ${data.niche}`);
+      logger.info(`[FunnelService] Name: ${data.name || 'Não informado'}`);
+      logger.info(`[FunnelService] UserId: ${userId}`);
 
       // ✅ Gerar estrutura do funil usando IA
+      logger.info(`[FunnelService] Chamando generateFunnelWithAI...`);
       const funnelStructure = await this.generateFunnelWithAI(data.niche);
+      
+      logger.info(`[FunnelService] ✅ Estrutura do funil recebida da IA`);
+      logger.info(`[FunnelService] Description: ${funnelStructure.description}`);
+      logger.info(`[FunnelService] Total de stages: ${funnelStructure.stages?.length || 0}`);
+      logger.info(`[FunnelService] Total de connections: ${funnelStructure.connections?.length || 0}`);
+
+      // ✅ Validar e logar cada stage
+      if (funnelStructure.stages && Array.isArray(funnelStructure.stages)) {
+        funnelStructure.stages.forEach((stage: any, index: number) => {
+          logger.info(`[FunnelService] Stage ${index}:`);
+          logger.info(`  - Title: ${stage.title}`);
+          logger.info(`  - Description: ${stage.description || 'N/A'}`);
+          logger.info(`  - WhatsAppGuidance: ${stage.whatsappGuidance ? `SIM (${stage.whatsappGuidance.length} chars)` : 'NÃO'}`);
+          logger.info(`  - Icon: ${stage.icon}`);
+          logger.info(`  - Color: ${stage.color}`);
+          logger.info(`  - Order: ${stage.order}`);
+          logger.info(`  - PositionX: ${stage.positionX}`);
+          logger.info(`  - PositionY: ${stage.positionY}`);
+        });
+      } else {
+        logger.error(`[FunnelService] ❌ ERRO: stages não é um array válido!`);
+        logger.error(`[FunnelService] Tipo recebido: ${typeof funnelStructure.stages}`);
+        logger.error(`[FunnelService] Valor: ${JSON.stringify(funnelStructure.stages)}`);
+      }
 
       // ✅ Criar funil no banco
+      logger.info(`[FunnelService] Criando funil no banco de dados...`);
       const funnel = await this.prisma.funnel.create({
         data: {
           name: data.name || `Funil ${data.niche}`,
@@ -46,10 +75,17 @@ export class FunnelService {
           userId,
         },
       });
+      logger.info(`[FunnelService] ✅ Funil criado no banco: ${funnel.id}`);
 
       // ✅ Criar etapas do funil
+      logger.info(`[FunnelService] Criando ${funnelStructure.stages?.length || 0} etapas...`);
       const stageIds: Record<number, string> = {};
-      for (const stageData of funnelStructure.stages) {
+      for (const stageData of funnelStructure.stages || []) {
+        logger.info(`[FunnelService] Criando stage: ${stageData.title}`);
+        logger.info(`[FunnelService]   - whatsappGuidance presente: ${!!stageData.whatsappGuidance}`);
+        logger.info(`[FunnelService]   - whatsappGuidance length: ${stageData.whatsappGuidance?.length || 0}`);
+        logger.info(`[FunnelService]   - positionX: ${stageData.positionX}, positionY: ${stageData.positionY}`);
+        
         const stage = await this.prisma.funnelStage.create({
           data: {
             funnelId: funnel.id,
@@ -64,10 +100,12 @@ export class FunnelService {
           },
         });
         stageIds[stageData.order] = stage.id;
+        logger.info(`[FunnelService] ✅ Stage criado: ${stage.id} com whatsappGuidance: ${!!stage.whatsappGuidance}`);
       }
 
       // ✅ Criar conexões entre etapas
-      for (const connection of funnelStructure.connections) {
+      logger.info(`[FunnelService] Criando ${funnelStructure.connections?.length || 0} conexões...`);
+      for (const connection of funnelStructure.connections || []) {
         await this.prisma.funnelConnection.create({
           data: {
             fromStageId: stageIds[connection.from],
@@ -75,11 +113,29 @@ export class FunnelService {
             label: connection.label || null,
           },
         });
+        logger.info(`[FunnelService] ✅ Conexão criada: ${connection.from} -> ${connection.to}`);
       }
 
-      logger.info(`[FunnelService] ✅ Funnel created: ${funnel.id} with ${funnelStructure.stages.length} stages`);
+      logger.info(`[FunnelService] ✅ Funnel criado com sucesso: ${funnel.id}`);
+      logger.info(`[FunnelService] Buscando funil completo do banco...`);
 
-      return this.getFunnelById(funnel.id, userId);
+      const fullFunnel = await this.getFunnelById(funnel.id, userId);
+      
+      // ✅ Logar o funil completo retornado
+      logger.info(`[FunnelService] ========== FUNIL COMPLETO RETORNADO ==========`);
+      logger.info(`[FunnelService] Funil ID: ${fullFunnel.id}`);
+      logger.info(`[FunnelService] Total de stages no retorno: ${fullFunnel.stages?.length || 0}`);
+      if (fullFunnel.stages && Array.isArray(fullFunnel.stages)) {
+        fullFunnel.stages.forEach((stage: any, index: number) => {
+          logger.info(`[FunnelService] Stage ${index} retornado:`);
+          logger.info(`  - ID: ${stage.id}`);
+          logger.info(`  - Title: ${stage.title}`);
+          logger.info(`  - WhatsAppGuidance: ${stage.whatsappGuidance ? `SIM (${stage.whatsappGuidance.length} chars)` : 'NÃO'}`);
+          logger.info(`  - PositionX: ${stage.positionX}, PositionY: ${stage.positionY}`);
+        });
+      }
+
+      return fullFunnel;
     } catch (error) {
       logger.error('[FunnelService] Error generating funnel:', error);
       throw error;
@@ -91,13 +147,15 @@ export class FunnelService {
    */
   private async generateFunnelWithAI(niche: string): Promise<any> {
     // ✅ Prompt otimizado para gerar funil de vendas
-    const prompt = `Você é um especialista em funis de vendas e marketing digital. 
+    const prompt = `Você é um especialista em funis de vendas e marketing digital, com foco especial em atendimento via WhatsApp.
 
 Crie um funil de vendas completo e estruturado para o nicho: "${niche}".
 
 O funil deve ter entre 5 e 8 etapas, seguindo as melhores práticas de conversão.
 
-Retorne APENAS um JSON válido no seguinte formato (sem explicações adicionais):
+⚠️ ATENÇÃO CRÍTICA: Cada etapa DEVE incluir o campo "whatsappGuidance" com conteúdo detalhado e específico!
+
+Retorne APENAS um JSON válido no seguinte formato (sem explicações adicionais, sem markdown, apenas JSON puro):
 
 {
   "description": "Descrição breve do funil (1 frase)",
@@ -105,7 +163,7 @@ Retorne APENAS um JSON válido no seguinte formato (sem explicações adicionais
     {
       "title": "Nome da Etapa",
       "description": "Descrição breve da etapa (1-2 frases)",
-      "whatsappGuidance": "Detalhes específicos de como implementar esta etapa em um atendimento WhatsApp. Inclua: mensagens de exemplo, tom de voz, quando enviar, como responder objeções, scripts de diálogo, etc. (4-6 parágrafos detalhados)",
+      "whatsappGuidance": "OBRIGATÓRIO: Detalhes específicos de como implementar esta etapa em um atendimento WhatsApp para o nicho ${niche}. Inclua: (1) Mensagens de exemplo reais e específicas, (2) Tom de voz adequado, (3) Quando e como enviar, (4) Como responder objeções comuns, (5) Scripts de diálogo completos, (6) Timing e frequência. Mínimo 300 caracteres, idealmente 500-800 caracteres. Seja específico para o nicho ${niche}.",
       "icon": "target|users|mail|phone|check-circle|dollar-sign|star|gift",
       "color": "#HEX_COLOR",
       "order": 0,
@@ -118,16 +176,18 @@ Retorne APENAS um JSON válido no seguinte formato (sem explicações adicionais
   ]
 }
 
-Regras IMPORTANTES:
-- Cada etapa DEVE ter um campo "whatsappGuidance" com detalhes práticos de implementação no WhatsApp
-- whatsappGuidance deve incluir: scripts de mensagens, tom de voz, timing, como lidar com objeções, exemplos de diálogo
-- whatsappGuidance deve ser específico para o nicho informado
-- Etapas devem seguir ordem lógica de conversão
-- Cores devem ser distintas e representativas
-- PositionX deve aumentar ~200px por etapa (fluxo horizontal)
-- PositionY pode variar para criar fluxos em árvore
-- Ícones devem ser do lucide-react
-- Conexões devem ligar etapas sequencialmente`;
+REGRAS CRÍTICAS (NÃO IGNORE):
+1. ✅ OBRIGATÓRIO: Cada etapa DEVE ter "whatsappGuidance" preenchido com conteúdo detalhado (mínimo 300 chars)
+2. ✅ whatsappGuidance deve ser ESPECÍFICO para o nicho "${niche}" - não use conteúdo genérico
+3. ✅ whatsappGuidance deve incluir: mensagens de exemplo, tom de voz, timing, objeções, scripts
+4. ✅ Etapas devem seguir ordem lógica de conversão
+5. ✅ Cores devem ser distintas e representativas (use hex codes válidos)
+6. ✅ PositionX e PositionY serão ajustados automaticamente - você pode usar valores iniciais
+7. ✅ Ícones devem ser um destes: target, users, mail, phone, check-circle, dollar-sign, star, gift
+8. ✅ Conexões devem ligar etapas sequencialmente (0->1, 1->2, etc.)
+
+EXEMPLO de whatsappGuidance para uma etapa de "Qualificação" no nicho "E-commerce de moda":
+"No WhatsApp, faça perguntas estratégicas para qualificar leads de moda: 'Qual estilo você mais gosta? Casual, formal ou esportivo?' 'Qual é o seu tamanho preferido?' 'Você costuma comprar online ou prefere ver pessoalmente?' Identifique sinais de compra: mencionar eventos próximos, necessidade urgente de peças, orçamento disponível. Leads qualificados demonstram interesse ativo fazendo perguntas sobre produtos específicos, cores e disponibilidade. Use tom amigável e consultivo, nunca pressione."`;
 
     try {
       // ✅ Verificar se há API key do OpenRouter configurada
@@ -139,7 +199,26 @@ Regras IMPORTANTES:
       }
 
       // ✅ Usar OpenRouter com modelo Google Gemini 2.0 Flash
-      logger.info('[FunnelService] Calling OpenRouter API with Gemini 2.0 Flash...');
+      logger.info('[FunnelService] ========== CHAMANDO OPENROUTER API ==========');
+      logger.info(`[FunnelService] Model: google/gemini-2.0-flash-exp:free`);
+      logger.info(`[FunnelService] Niche: ${niche}`);
+      logger.info(`[FunnelService] Prompt length: ${prompt.length} caracteres`);
+      logger.info(`[FunnelService] Primeiros 300 chars do prompt: ${prompt.substring(0, 300)}...`);
+      
+      const requestBody = {
+        model: 'google/gemini-2.0-flash-exp:free',
+        messages: [
+          { 
+            role: 'system', 
+            content: 'Você é um especialista em funis de vendas e marketing digital. Retorne APENAS JSON válido, sem markdown, sem explicações, sem texto adicional. Apenas o JSON puro.' 
+          },
+          { role: 'user', content: prompt }
+        ],
+        temperature: 0.7,
+        max_tokens: 4000, // ✅ Aumentado para garantir que whatsappGuidance completo seja retornado
+      };
+      
+      logger.info(`[FunnelService] Request body: ${JSON.stringify(requestBody).substring(0, 500)}...`);
       
       const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
         method: 'POST',
@@ -147,19 +226,10 @@ Regras IMPORTANTES:
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${apiKey}`,
         },
-        body: JSON.stringify({
-          model: 'google/gemini-2.0-flash-exp:free',
-          messages: [
-            { 
-              role: 'system', 
-              content: 'Você é um especialista em funis de vendas e marketing digital. Retorne APENAS JSON válido, sem markdown, sem explicações, sem texto adicional. Apenas o JSON puro.' 
-            },
-            { role: 'user', content: prompt }
-          ],
-          temperature: 0.7,
-          max_tokens: 2000,
-        }),
+        body: JSON.stringify(requestBody),
       });
+      
+      logger.info(`[FunnelService] Response status: ${response.status} ${response.statusText}`);
 
       if (!response.ok) {
         const errorText = await response.text();
@@ -177,22 +247,69 @@ Regras IMPORTANTES:
       };
       const content = result.choices?.[0]?.message?.content || '';
       
-      logger.info(`[FunnelService] Raw AI response: ${content.substring(0, 200)}...`);
+      logger.info(`[FunnelService] ========== RESPOSTA DA IA ==========`);
+      logger.info(`[FunnelService] Tamanho total da resposta: ${content.length} caracteres`);
+      logger.info(`[FunnelService] Primeiros 500 caracteres: ${content.substring(0, 500)}`);
+      logger.info(`[FunnelService] Últimos 200 caracteres: ${content.substring(Math.max(0, content.length - 200))}`);
       
       // ✅ Limpar markdown se houver
       let jsonContent = content.trim();
+      logger.info(`[FunnelService] Limpando markdown...`);
+      const beforeClean = jsonContent.length;
       jsonContent = jsonContent.replace(/```json\n?/g, '').replace(/```\n?/g, '');
+      const afterClean = jsonContent.length;
+      logger.info(`[FunnelService] Tamanho antes: ${beforeClean}, depois: ${afterClean}`);
       
       // ✅ Tentar extrair JSON se houver texto antes/depois
+      logger.info(`[FunnelService] Extraindo JSON...`);
       const jsonMatch = jsonContent.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
         jsonContent = jsonMatch[0];
+        logger.info(`[FunnelService] ✅ JSON extraído com sucesso (${jsonContent.length} chars)`);
+      } else {
+        logger.error(`[FunnelService] ❌ ERRO: Não foi possível extrair JSON da resposta!`);
+        logger.error(`[FunnelService] Conteúdo após limpeza: ${jsonContent.substring(0, 500)}`);
       }
       
+      logger.info(`[FunnelService] Fazendo parse do JSON...`);
       const funnelData = JSON.parse(jsonContent);
+      logger.info(`[FunnelService] ✅ JSON parseado com sucesso`);
+      logger.info(`[FunnelService] Estrutura recebida:`);
+      logger.info(`  - description: ${funnelData.description || 'N/A'}`);
+      logger.info(`  - stages: ${funnelData.stages ? `${funnelData.stages.length} items` : 'N/A'}`);
+      logger.info(`  - connections: ${funnelData.connections ? `${funnelData.connections.length} items` : 'N/A'}`);
+
+      // ✅ Validar e logar stages ANTES do layout
+      if (funnelData.stages && Array.isArray(funnelData.stages)) {
+        logger.info(`[FunnelService] ========== STAGES ANTES DO LAYOUT ==========`);
+        funnelData.stages.forEach((stage: any, index: number) => {
+          logger.info(`[FunnelService] Stage ${index} (antes layout):`);
+          logger.info(`  - Title: ${stage.title}`);
+          logger.info(`  - WhatsAppGuidance: ${stage.whatsappGuidance ? `SIM (${stage.whatsappGuidance.length} chars)` : 'NÃO'}`);
+          logger.info(`  - PositionX original: ${stage.positionX}`);
+          logger.info(`  - PositionY original: ${stage.positionY}`);
+        });
+      }
+
+      // ✅ Aplicar layout automático para distribuir nodes de forma orgânica
+      logger.info(`[FunnelService] Aplicando layout orgânico...`);
+      funnelData.stages = this.applyOrganicLayout(funnelData.stages);
+      logger.info(`[FunnelService] ✅ Layout orgânico aplicado`);
+
+      // ✅ Validar e logar stages DEPOIS do layout
+      if (funnelData.stages && Array.isArray(funnelData.stages)) {
+        logger.info(`[FunnelService] ========== STAGES DEPOIS DO LAYOUT ==========`);
+        funnelData.stages.forEach((stage: any, index: number) => {
+          logger.info(`[FunnelService] Stage ${index} (depois layout):`);
+          logger.info(`  - Title: ${stage.title}`);
+          logger.info(`  - WhatsAppGuidance: ${stage.whatsappGuidance ? `SIM (${stage.whatsappGuidance.length} chars)` : 'NÃO'}`);
+          logger.info(`  - PositionX: ${stage.positionX}`);
+          logger.info(`  - PositionY: ${stage.positionY}`);
+        });
+      }
 
       logger.info('[FunnelService] ✅ Funnel generated by AI (OpenRouter + Gemini 2.0 Flash)');
-      logger.info(`[FunnelService] Generated ${funnelData.stages?.length || 0} stages`);
+      logger.info(`[FunnelService] Total de stages gerados: ${funnelData.stages?.length || 0}`);
       return funnelData;
     } catch (error: any) {
       logger.error('[FunnelService] Error calling OpenRouter API:', error?.message || error);
@@ -205,10 +322,57 @@ Regras IMPORTANTES:
   }
 
   /**
+   * Aplica layout orgânico aos stages, distribuindo-os de forma similar ao n8n
+   * Cada etapa fica em uma posição diferente, criando um fluxo visual interessante
+   */
+  private applyOrganicLayout(stages: any[]): any[] {
+    logger.info(`[FunnelService] applyOrganicLayout: Recebidos ${stages?.length || 0} stages`);
+    
+    if (!stages || stages.length === 0) {
+      logger.warn(`[FunnelService] applyOrganicLayout: Nenhum stage para processar`);
+      return stages;
+    }
+
+    const horizontalSpacing = 300; // Espaçamento horizontal entre nodes
+    const startX = 100;
+    const startY = 150;
+
+    logger.info(`[FunnelService] applyOrganicLayout: Aplicando layout com spacing=${horizontalSpacing}, startX=${startX}, startY=${startY}`);
+
+    // Distribuir nodes em um padrão orgânico (não linear)
+    // Criar um layout em "zigzag" ou "ondulado" para visual mais interessante
+    const result = stages.map((stage, index) => {
+      // Calcular posição X (progressão horizontal)
+      const x = startX + index * horizontalSpacing;
+      
+      // Calcular posição Y (variação vertical para criar movimento orgânico)
+      // Usar seno para criar um padrão ondulado
+      const waveOffset = Math.sin(index * 0.8) * 120; // Variação de ±120px
+      const y = startY + waveOffset + (index % 3) * 40; // Adicionar variação adicional
+      
+      const newStage = {
+        ...stage,
+        positionX: Math.round(x),
+        positionY: Math.round(y),
+      };
+      
+      logger.info(`[FunnelService] applyOrganicLayout: Stage ${index} "${stage.title}"`);
+      logger.info(`  - Posição original: X=${stage.positionX}, Y=${stage.positionY}`);
+      logger.info(`  - Posição calculada: X=${newStage.positionX}, Y=${newStage.positionY}`);
+      logger.info(`  - WhatsAppGuidance preservado: ${!!newStage.whatsappGuidance}`);
+      
+      return newStage;
+    });
+    
+    logger.info(`[FunnelService] applyOrganicLayout: ✅ Layout aplicado a ${result.length} stages`);
+    return result;
+  }
+
+  /**
    * Template padrão de funil (fallback se IA não estiver disponível)
    */
   private getDefaultFunnelTemplate(niche: string): any {
-    return {
+    const template = {
       description: `Funil de vendas estruturado para ${niche}`,
       stages: [
         {
@@ -218,8 +382,8 @@ Regras IMPORTANTES:
           icon: 'target',
           color: '#3B82F6',
           order: 0,
-          positionX: 100,
-          positionY: 100,
+          positionX: 0, // Será ajustado pelo applyOrganicLayout
+          positionY: 0,
         },
         {
           title: 'Captura',
@@ -228,8 +392,8 @@ Regras IMPORTANTES:
           icon: 'users',
           color: '#8B5CF6',
           order: 1,
-          positionX: 350,
-          positionY: 100,
+          positionX: 0,
+          positionY: 0,
         },
         {
           title: 'Nutrição',
@@ -238,8 +402,8 @@ Regras IMPORTANTES:
           icon: 'mail',
           color: '#10B981',
           order: 2,
-          positionX: 600,
-          positionY: 100,
+          positionX: 0,
+          positionY: 0,
         },
         {
           title: 'Qualificação',
@@ -248,8 +412,8 @@ Regras IMPORTANTES:
           icon: 'check-circle',
           color: '#F59E0B',
           order: 3,
-          positionX: 850,
-          positionY: 100,
+          positionX: 0,
+          positionY: 0,
         },
         {
           title: 'Oferta',
@@ -258,8 +422,8 @@ Regras IMPORTANTES:
           icon: 'dollar-sign',
           color: '#EF4444',
           order: 4,
-          positionX: 1100,
-          positionY: 100,
+          positionX: 0,
+          positionY: 0,
         },
         {
           title: 'Fechamento',
@@ -268,8 +432,8 @@ Regras IMPORTANTES:
           icon: 'star',
           color: '#EC4899',
           order: 5,
-          positionX: 1350,
-          positionY: 100,
+          positionX: 0,
+          positionY: 0,
         },
         {
           title: 'Pós-Venda',
@@ -278,8 +442,8 @@ Regras IMPORTANTES:
           icon: 'gift',
           color: '#06B6D4',
           order: 6,
-          positionX: 1600,
-          positionY: 100,
+          positionX: 0,
+          positionY: 0,
         },
       ],
       connections: [
@@ -291,6 +455,10 @@ Regras IMPORTANTES:
         { from: 5, to: 6, label: 'Fidelizar' },
       ],
     };
+
+    // ✅ Aplicar layout orgânico ao template padrão também
+    template.stages = this.applyOrganicLayout(template.stages);
+    return template;
   }
 
   /**
@@ -330,6 +498,8 @@ Regras IMPORTANTES:
    * Busca funil por ID
    */
   async getFunnelById(funnelId: string, userId: string): Promise<any> {
+    logger.info(`[FunnelService] getFunnelById: Buscando funil ${funnelId} para usuário ${userId}`);
+    
     const funnel = await this.prisma.funnel.findUnique({
       where: { id: funnelId },
       include: {
@@ -367,6 +537,20 @@ Regras IMPORTANTES:
         },
       },
     });
+    
+    logger.info(`[FunnelService] getFunnelById: Funil encontrado: ${!!funnel}`);
+    if (funnel) {
+      logger.info(`[FunnelService] getFunnelById: Total de stages: ${funnel.stages?.length || 0}`);
+      if (funnel.stages && Array.isArray(funnel.stages)) {
+        funnel.stages.forEach((stage: any, index: number) => {
+          logger.info(`[FunnelService] getFunnelById: Stage ${index} do banco:`);
+          logger.info(`  - ID: ${stage.id}`);
+          logger.info(`  - Title: ${stage.title}`);
+          logger.info(`  - WhatsAppGuidance no banco: ${stage.whatsappGuidance ? `SIM (${stage.whatsappGuidance.length} chars)` : 'NÃO'}`);
+          logger.info(`  - PositionX: ${stage.positionX}, PositionY: ${stage.positionY}`);
+        });
+      }
+    }
 
     if (!funnel) {
       throw new NotFoundError('Funnel not found');

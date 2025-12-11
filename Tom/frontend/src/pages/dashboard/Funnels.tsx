@@ -169,17 +169,36 @@ export function Funnels() {
 
   const loadFunnelToCanvas = useCallback((funnel: Funnel) => {
     // Converter stages para nodes do ReactFlow
-    const newNodes: Node[] = funnel.stages.map((stage) => ({
-      id: stage.id,
-      type: 'custom',
-      position: { x: stage.positionX, y: stage.positionY },
-      data: {
-        title: stage.title,
-        description: stage.description,
-        icon: stage.icon,
-        color: stage.color,
-      },
-    }));
+    const newNodes: Node[] = funnel.stages.map((stage, index) => {
+      // Se as posições forem 0 ou muito próximas, aplicar layout automático
+      let x = stage.positionX;
+      let y = stage.positionY;
+      
+      // Verificar se precisa aplicar layout automático
+      if (x === 0 && y === 0 || (index > 0 && Math.abs(x - funnel.stages[index - 1].positionX) < 50)) {
+        // Aplicar layout orgânico similar ao n8n
+        const horizontalSpacing = 300;
+        const startX = 100;
+        const startY = 150;
+        
+        x = startX + index * horizontalSpacing;
+        // Criar padrão ondulado para Y
+        const waveOffset = Math.sin(index * 0.8) * 120;
+        y = startY + waveOffset + (index % 3) * 40;
+      }
+      
+      return {
+        id: stage.id,
+        type: 'custom',
+        position: { x, y },
+        data: {
+          title: stage.title,
+          description: stage.description,
+          icon: stage.icon,
+          color: stage.color,
+        },
+      };
+    });
 
     // Converter connections para edges do ReactFlow
     const newEdges: Edge[] = [];
@@ -192,7 +211,7 @@ export function Funnels() {
           label: conn.label || undefined,
           type: 'smoothstep',
           animated: true,
-          style: { stroke: '#94a3b8', strokeWidth: 2, strokeDasharray: '5,5' },
+          style: { stroke: '#94a3b8', strokeWidth: 2 },
           markerEnd: {
             type: MarkerType.ArrowClosed,
             color: '#94a3b8',

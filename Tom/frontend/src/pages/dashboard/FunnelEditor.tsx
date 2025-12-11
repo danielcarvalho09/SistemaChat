@@ -128,18 +128,37 @@ export function FunnelEditor({ funnel, onUpdate }: FunnelEditorProps) {
   useEffect(() => {
     if (!funnel) return;
 
-    const newNodes: Node[] = funnel.stages.map((stage: any) => ({
-      id: stage.id,
-      type: 'custom',
-      position: { x: stage.positionX, y: stage.positionY },
-      data: {
-        title: stage.title,
-        description: stage.description,
-        whatsappGuidance: stage.whatsappGuidance || null,
-        icon: stage.icon,
-        color: stage.color,
-      },
-    }));
+    const newNodes: Node[] = funnel.stages.map((stage: any, index: number) => {
+      // Se as posições forem 0 ou muito próximas, aplicar layout automático
+      let x = stage.positionX;
+      let y = stage.positionY;
+      
+      // Verificar se precisa aplicar layout automático
+      if (x === 0 && y === 0 || (index > 0 && Math.abs(x - funnel.stages[index - 1].positionX) < 50)) {
+        // Aplicar layout orgânico similar ao n8n
+        const horizontalSpacing = 300;
+        const startX = 100;
+        const startY = 150;
+        
+        x = startX + index * horizontalSpacing;
+        // Criar padrão ondulado para Y
+        const waveOffset = Math.sin(index * 0.8) * 120;
+        y = startY + waveOffset + (index % 3) * 40;
+      }
+      
+      return {
+        id: stage.id,
+        type: 'custom',
+        position: { x, y },
+        data: {
+          title: stage.title,
+          description: stage.description,
+          whatsappGuidance: stage.whatsappGuidance || null,
+          icon: stage.icon,
+          color: stage.color,
+        },
+      };
+    });
 
     const newEdges: Edge[] = [];
     funnel.stages.forEach((stage: any) => {
@@ -151,7 +170,7 @@ export function FunnelEditor({ funnel, onUpdate }: FunnelEditorProps) {
           label: conn.label || undefined,
           type: 'smoothstep',
           animated: true,
-          style: { stroke: '#94a3b8', strokeWidth: 2, strokeDasharray: '5,5' },
+          style: { stroke: '#94a3b8', strokeWidth: 2 },
           markerEnd: {
             type: MarkerType.ArrowClosed,
             color: '#94a3b8',
@@ -370,6 +389,32 @@ export function FunnelEditor({ funnel, onUpdate }: FunnelEditorProps) {
           >
             <Plus className="w-4 h-4" />
             Adicionar Etapa
+          </button>
+          <button
+            onClick={() => {
+              // Reorganizar layout automaticamente
+              const horizontalSpacing = 300;
+              const startX = 100;
+              const startY = 150;
+              
+              const reorganizedNodes = nodes.map((node, index) => {
+                const x = startX + index * horizontalSpacing;
+                const waveOffset = Math.sin(index * 0.8) * 120;
+                const y = startY + waveOffset + (index % 3) * 40;
+                
+                return {
+                  ...node,
+                  position: { x, y },
+                };
+              });
+              
+              setNodes(reorganizedNodes);
+              toast.success('Layout reorganizado!');
+            }}
+            className="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg shadow-md flex items-center gap-2 transition-colors"
+          >
+            <Edit2 className="w-4 h-4" />
+            Reorganizar Layout
           </button>
           <button
             onClick={savePositions}

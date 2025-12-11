@@ -14,17 +14,38 @@ export class FunnelController {
     reply: FastifyReply
   ) => {
     try {
+      logger.info('[FunnelController] ========== RECEBENDO REQUEST DE GERAÇÃO ==========');
       const { niche, name } = request.body;
       const userId = request.user!.userId;
 
+      logger.info(`[FunnelController] Niche recebido: ${niche}`);
+      logger.info(`[FunnelController] Name recebido: ${name || 'não informado'}`);
+      logger.info(`[FunnelController] UserId: ${userId}`);
+
       if (!niche || niche.trim() === '') {
+        logger.warn('[FunnelController] ❌ Niche não fornecido');
         return reply.status(400).send({
           success: false,
           message: 'Niche is required',
         });
       }
 
+      logger.info('[FunnelController] Chamando funnelService.generateFunnel...');
       const funnel = await this.funnelService.generateFunnel({ niche, name }, userId);
+
+      logger.info('[FunnelController] ✅ Funil gerado com sucesso');
+      logger.info(`[FunnelController] Funil ID retornado: ${funnel?.id}`);
+      logger.info(`[FunnelController] Total de stages no retorno: ${funnel?.stages?.length || 0}`);
+      
+      // Logar stages no retorno do controller
+      if (funnel?.stages && Array.isArray(funnel.stages)) {
+        funnel.stages.forEach((stage: any, index: number) => {
+          logger.info(`[FunnelController] Stage ${index} no retorno:`);
+          logger.info(`  - Title: ${stage.title}`);
+          logger.info(`  - WhatsAppGuidance: ${stage.whatsappGuidance ? `SIM (${stage.whatsappGuidance.length} chars)` : 'NÃO'}`);
+          logger.info(`  - PositionX: ${stage.positionX}, PositionY: ${stage.positionY}`);
+        });
+      }
 
       return reply.status(201).send({
         success: true,
@@ -32,7 +53,8 @@ export class FunnelController {
         data: funnel,
       });
     } catch (error: any) {
-      logger.error('[FunnelController] Error generating funnel:', error);
+      logger.error('[FunnelController] ❌ ERRO ao gerar funil:', error);
+      logger.error('[FunnelController] Stack:', error?.stack);
       return reply.status(500).send({
         success: false,
         message: error.message || 'Error generating funnel',
