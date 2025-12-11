@@ -247,6 +247,10 @@ EXEMPLO de whatsappGuidance para uma etapa de "Qualificação" no nicho "E-comme
       };
       const content = result.choices?.[0]?.message?.content || '';
       
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/d14fd2c5-840b-4c87-b90e-3bfa45b7cf47',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'funnel.service.ts:248',message:'Raw content received from API',data:{contentLength:content.length,first500:content.substring(0,500),last200:content.substring(Math.max(0,content.length-200)),hasJsonMarkdown:content.includes('```json'),hasTripleBackticks:content.includes('```')},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+      // #endregion
+      
       logger.info(`[FunnelService] ========== RESPOSTA DA IA ==========`);
       logger.info(`[FunnelService] Tamanho total da resposta: ${content.length} caracteres`);
       logger.info(`[FunnelService] Primeiros 500 caracteres: ${content.substring(0, 500)}`);
@@ -254,25 +258,68 @@ EXEMPLO de whatsappGuidance para uma etapa de "Qualificação" no nicho "E-comme
       
       // ✅ Limpar markdown se houver
       let jsonContent = content.trim();
+      
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/d14fd2c5-840b-4c87-b90e-3bfa45b7cf47',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'funnel.service.ts:256',message:'Before markdown cleaning',data:{length:jsonContent.length,first100:jsonContent.substring(0,100)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+      // #endregion
+      
       logger.info(`[FunnelService] Limpando markdown...`);
       const beforeClean = jsonContent.length;
       jsonContent = jsonContent.replace(/```json\n?/g, '').replace(/```\n?/g, '');
       const afterClean = jsonContent.length;
+      
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/d14fd2c5-840b-4c87-b90e-3bfa45b7cf47',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'funnel.service.ts:259',message:'After markdown cleaning',data:{beforeLength:beforeClean,afterLength:afterClean,first100:jsonContent.substring(0,100),last100:jsonContent.substring(Math.max(0,jsonContent.length-100))},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+      // #endregion
+      
       logger.info(`[FunnelService] Tamanho antes: ${beforeClean}, depois: ${afterClean}`);
       
       // ✅ Tentar extrair JSON se houver texto antes/depois
       logger.info(`[FunnelService] Extraindo JSON...`);
+      
+      // #region agent log
+      const jsonMatches = jsonContent.match(/\{[\s\S]*\}/g);
+      fetch('http://127.0.0.1:7242/ingest/d14fd2c5-840b-4c87-b90e-3bfa45b7cf47',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'funnel.service.ts:265',message:'JSON extraction attempt',data:{allMatchesCount:jsonMatches?.length||0,hasFirstBrace:jsonContent.includes('{'),hasLastBrace:jsonContent.includes('}'),contentLength:jsonContent.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+      // #endregion
+      
       const jsonMatch = jsonContent.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
         jsonContent = jsonMatch[0];
+        
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/d14fd2c5-840b-4c87-b90e-3bfa45b7cf47',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'funnel.service.ts:267',message:'JSON extracted by regex',data:{extractedLength:jsonContent.length,first50:jsonContent.substring(0,50),last50:jsonContent.substring(Math.max(0,jsonContent.length-50)),startsWithBrace:jsonContent.startsWith('{'),endsWithBrace:jsonContent.endsWith('}')},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+        // #endregion
+        
         logger.info(`[FunnelService] ✅ JSON extraído com sucesso (${jsonContent.length} chars)`);
       } else {
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/d14fd2c5-840b-4c87-b90e-3bfa45b7cf47',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'funnel.service.ts:270',message:'JSON extraction failed',data:{contentLength:jsonContent.length,fullContent:jsonContent.substring(0,1000)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+        // #endregion
+        
         logger.error(`[FunnelService] ❌ ERRO: Não foi possível extrair JSON da resposta!`);
         logger.error(`[FunnelService] Conteúdo após limpeza: ${jsonContent.substring(0, 500)}`);
       }
       
       logger.info(`[FunnelService] Fazendo parse do JSON...`);
-      const funnelData = JSON.parse(jsonContent);
+      
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/d14fd2c5-840b-4c87-b90e-3bfa45b7cf47',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'funnel.service.ts:275',message:'Before JSON.parse',data:{jsonContentLength:jsonContent.length,first100:jsonContent.substring(0,100),last100:jsonContent.substring(Math.max(0,jsonContent.length-100)),braceCount:jsonContent.split('{').length-1,closeBraceCount:jsonContent.split('}').length-1},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+      // #endregion
+      
+      let funnelData;
+      try {
+        funnelData = JSON.parse(jsonContent);
+        
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/d14fd2c5-840b-4c87-b90e-3bfa45b7cf47',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'funnel.service.ts:275',message:'JSON.parse succeeded',data:{hasDescription:!!funnelData.description,stagesCount:funnelData.stages?.length||0,connectionsCount:funnelData.connections?.length||0},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+        // #endregion
+      } catch (parseError: any) {
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/d14fd2c5-840b-4c87-b90e-3bfa45b7cf47',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'funnel.service.ts:275',message:'JSON.parse failed',data:{errorMessage:parseError?.message||'unknown',errorName:parseError?.name||'unknown',jsonContentLength:jsonContent.length,jsonContentFirst500:jsonContent.substring(0,500),jsonContentLast500:jsonContent.substring(Math.max(0,jsonContent.length-500))},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+        // #endregion
+        
+        throw parseError;
+      }
       logger.info(`[FunnelService] ✅ JSON parseado com sucesso`);
       logger.info(`[FunnelService] Estrutura recebida:`);
       logger.info(`  - description: ${funnelData.description || 'N/A'}`);
