@@ -1,16 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import {
-  DndContext,
-  DragEndEvent,
-  DragOverlay,
-  DragStartEvent,
-  PointerSensor,
-  useSensor,
-  useSensors,
-  useDroppable,
-  useDraggable,
-} from '@dnd-kit/core';
-import { Plus, Trash2, X, Users as UsersIcon, ChevronRight, User } from 'lucide-react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Plus, X, Users as UsersIcon, ChevronRight, User, MessageCircle } from 'lucide-react';
 import { api } from '../../lib/api';
 import { toast } from 'sonner';
 import { GlassButton } from '../../components/ui/glass-button';
@@ -18,6 +7,8 @@ import { formatPhoneNumber } from '../../utils/formatPhone';
 import { MessageSidebar } from '../../components/kanban/MessageSidebar';
 import { useAuthStore } from '../../store/authStore';
 import { useNavigate } from 'react-router-dom';
+import { TrelloKanbanBoard, type KanbanColumn, type KanbanTask } from '../../components/ui/trello-kanban-board';
+import { cn } from '../../lib/utils';
 
 // Componente do ícone WhatsApp em cinza escuro
 const WhatsAppIcon = ({ className }: { className?: string }) => (
@@ -94,33 +85,27 @@ interface BoardColumn {
   conversations: KanbanConversation[];
 }
 
-// Componente para área droppable (coluna)
-function DroppableColumn({ id, children }: { id: string; children: React.ReactNode }) {
-  const { setNodeRef } = useDroppable({ id });
-  return <div ref={setNodeRef} className="flex-1">{children}</div>;
-}
-
-// Componente para card draggable
-function DraggableCard({ id, children }: { id: string; children: React.ReactNode }) {
-  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id });
+// Mapear conversas para tasks do Kanban
+const conversationToTask = (conversation: KanbanConversation): KanbanTask & { conversation: KanbanConversation } => {
+  const contactName = conversation.contact.pushName || conversation.contact.name || formatPhoneNumber(conversation.contact.phoneNumber);
+  const lastMessage = conversation.messages && conversation.messages.length > 0 
+    ? conversation.messages[0].content 
+    : undefined;
   
-  const style = transform ? {
-    transform: `translate3d(${transform.x}px, ${transform.y}px, 0)`,
-    opacity: isDragging ? 0.5 : 1,
-  } : undefined;
-
-  return (
-    <div ref={setNodeRef} style={style} {...listeners} {...attributes}>
-      {children}
-    </div>
-  );
-}
+  return {
+    id: conversation.id,
+    title: contactName,
+    description: lastMessage,
+    labels: conversation.tags?.map(ct => ct.tag.name) || [],
+    assignee: conversation.assignedUser?.name?.charAt(0).toUpperCase() || undefined,
+    conversation,
+  };
+};
 
 export function Kanban() {
   const { user } = useAuthStore();
   const [board, setBoard] = useState<BoardColumn[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeCard, setActiveCard] = useState<KanbanConversation | null>(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [newStageName, setNewStageName] = useState('');
   const [newStageColor, setNewStageColor] = useState('#3B82F6');
@@ -131,14 +116,6 @@ export function Kanban() {
   const navigate = useNavigate();
 
   const isAdmin = user?.roles?.some(role => role.name === 'admin') || false;
-
-  const sensors = useSensors(
-    useSensor(PointerSensor, {
-      activationConstraint: {
-        distance: 8,
-      },
-    })
-  );
 
   useEffect(() => {
     loadBoard();
@@ -193,63 +170,55 @@ export function Kanban() {
     }
   }, [isAdmin]);
 
-  const handleDragStart = (event: DragStartEvent) => {
-    const { active } = event;
-    const conversation = board
-      .flatMap((col) => col.conversations)
-      .find((conv) => conv.id === active.id);
-    setActiveCard(conversation || null);
-  };
+  // Transformar BoardColumn[] para KanbanColumn[]
+  const kanbanColumns: KanbanColumn[] = useMemo(() => {
+    return board.map((col) => ({
+      id: col.stage.id,
+      title: col.stage.name,
+      tasks: col.conversations.map(conversationToTask),
+    }));
+  }, [board]);
 
-  const handleDragEnd = async (event: DragEndEvent) => {
-    const { active, over } = event;
-    setActiveCard(null);
-
-    if (!over || active.id === over.id) return;
-
-    const conversationId = active.id as string;
-    const toStageId = over.id as string;
-
-    // Optimistic Update: Atualizar UI imediatamente
-    const conversationToMove = board
-      .flatMap((col) => col.conversations)
-      .find((conv) => conv.id === conversationId);
-
-    if (!conversationToMove) return;
-
-    // Remover da coluna atual e adicionar na nova
-    const newBoard = board.map((col) => {
-      if (col.stage.id === toStageId) {
-        // Adicionar na nova coluna
-        return {
-          ...col,
-          conversations: [...col.conversations, conversationToMove],
-        };
-      } else {
-        // Remover da coluna antiga
-        return {
-          ...col,
-          conversations: col.conversations.filter((c) => c.id !== conversationId),
-        };
-      }
+  // Mapear cores das colunas
+  const columnColors = useMemo(() => {
+    const colors: Record<string, string> = {};
+    board.forEach((col) => {
+      // Converter cor hex para classe Tailwind aproximada
+      const hex = col.stage.color.replace('#', '');
+      const r = parseInt(hex.substr(0, 2), 16);
+      const g = parseInt(hex.substr(2, 2), 16);
+      const b = parseInt(hex.substr(4, 2), 16);
+      
+      // Mapear para cores Tailwind mais próximas
+      if (r > 200 && g < 100 && b < 100) colors[col.stage.id] = 'bg-red-500';
+      else if (r < 100 && g > 200 && b < 100) colors[col.stage.id] = 'bg-green-500';
+      else if (r < 100 && g < 100 && b > 200) colors[col.stage.id] = 'bg-blue-500';
+      else if (r > 200 && g > 200 && b < 100) colors[col.stage.id] = 'bg-yellow-500';
+      else if (r > 200 && g < 100 && b > 200) colors[col.stage.id] = 'bg-purple-500';
+      else colors[col.stage.id] = 'bg-slate-500';
     });
+    return colors;
+  }, [board]);
 
-    // Atualizar UI imediatamente
-    setBoard(newBoard);
-
+  const handleTaskMove = async (taskId: string, fromColumnId: string, toColumnId: string) => {
     try {
-      await api.put(`/kanban/conversations/${conversationId}/move`, {
-        toStageId,
+      await api.put(`/kanban/conversations/${taskId}/move`, {
+        toStageId: toColumnId,
       });
 
       toast.success('Conversa movida com sucesso!');
-      // Recarregar para garantir sincronização
       loadBoard();
     } catch (error) {
       console.error('Erro ao mover conversa:', error);
       toast.error('Erro ao mover conversa');
-      // Reverter em caso de erro
       loadBoard();
+    }
+  };
+
+  const handleTaskClick = (task: KanbanTask & { conversation?: KanbanConversation }, columnId: string) => {
+    if (task.conversation) {
+      setSelectedConversation(task.conversation);
+      setSidebarOpen(true);
     }
   };
 
@@ -319,16 +288,16 @@ export function Kanban() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-full bg-white">
-        <div className="text-gray-900">Carregando Kanban...</div>
+      <div className="flex items-center justify-center h-full bg-background">
+        <div className="text-foreground">Carregando Kanban...</div>
       </div>
     );
   }
 
   if (board.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center h-full gap-4 bg-white">
-        <div className="text-gray-900">Nenhuma etapa encontrada</div>
+      <div className="flex flex-col items-center justify-center h-full gap-4 bg-background">
+        <div className="text-foreground">Nenhuma etapa encontrada</div>
         <div className="flex gap-3">
           <GlassButton onClick={initializeStages}>
             <Plus className="w-4 h-4 mr-2" />
@@ -347,17 +316,17 @@ export function Kanban() {
   }
 
   return (
-    <div className="h-full flex flex-col bg-white">
+    <div className="h-full flex flex-col bg-background">
       {/* Header */}
-      <div className="bg-white border-b border-gray-200 p-6">
+      <div className="bg-background border-b border-border p-6">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-3xl font-bold text-gray-900">
+            <h1 className="text-3xl font-bold text-foreground">
               {isAdmin && selectedUserId 
                 ? `Kanban - ${users.find(u => u.id === selectedUserId)?.name || 'Usuário'}` 
                 : 'Minhas Conversas - Kanban'}
             </h1>
-            <p className="text-gray-600 mt-1">
+            <p className="text-muted-foreground mt-1">
               {isAdmin && selectedUserId
                 ? `Visualizando conversas aceitas do usuário selecionado`
                 : 'Gerencie suas conversas em atendimento (apenas conversas aceitas das suas conexões)'}
@@ -369,7 +338,7 @@ export function Kanban() {
               <div className="relative">
                 <button
                   onClick={() => setShowUserSelector(!showUserSelector)}
-                  className="flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors"
+                  className="flex items-center gap-2 px-4 py-2 bg-muted text-muted-foreground rounded-lg hover:bg-muted/80 transition-colors"
                 >
                   <UsersIcon className="w-4 h-4" />
                   {selectedUserId 
@@ -377,15 +346,15 @@ export function Kanban() {
                     : 'Todos os Usuários'}
                 </button>
                 {showUserSelector && (
-                  <div className="absolute right-0 mt-2 w-64 bg-white border border-gray-200 rounded-lg shadow-lg z-50 max-h-96 overflow-y-auto">
+                  <div className="absolute right-0 mt-2 w-64 bg-card border border-border rounded-lg shadow-lg z-50 max-h-96 overflow-y-auto">
                     <div className="p-2">
                       <button
                         onClick={() => {
                           setSelectedUserId(undefined);
                           setShowUserSelector(false);
                         }}
-                        className={`w-full text-left px-3 py-2 rounded hover:bg-gray-100 ${
-                          !selectedUserId ? 'bg-blue-50 text-blue-700' : 'text-gray-700'
+                        className={`w-full text-left px-3 py-2 rounded hover:bg-muted ${
+                          !selectedUserId ? 'bg-primary/10 text-primary' : 'text-foreground'
                         }`}
                       >
                         Todos os Usuários
@@ -397,12 +366,12 @@ export function Kanban() {
                             setSelectedUserId(user.id);
                             setShowUserSelector(false);
                           }}
-                          className={`w-full text-left px-3 py-2 rounded hover:bg-gray-100 ${
-                            selectedUserId === user.id ? 'bg-blue-50 text-blue-700' : 'text-gray-700'
+                          className={`w-full text-left px-3 py-2 rounded hover:bg-muted ${
+                            selectedUserId === user.id ? 'bg-primary/10 text-primary' : 'text-foreground'
                           }`}
                         >
                           <div className="font-medium">{user.name}</div>
-                          <div className="text-xs text-gray-500">{user.email}</div>
+                          <div className="text-xs text-muted-foreground">{user.email}</div>
                         </button>
                       ))}
                     </div>
@@ -413,7 +382,7 @@ export function Kanban() {
             {/* Botão principal */}
             <button
               onClick={() => setShowCreateModal(true)}
-              className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+              className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors"
             >
               <Plus className="w-4 h-4" />
               Nova Etapa
@@ -423,167 +392,144 @@ export function Kanban() {
       </div>
 
       {/* Board */}
-      <div className="flex-1 overflow-x-auto p-6">
-        <DndContext
-          sensors={sensors}
-          onDragStart={handleDragStart}
-          onDragEnd={handleDragEnd}
-        >
-          <div className="flex gap-6 h-full min-w-max">
-            {board.map((column) => (
+      <div className="flex-1 overflow-x-auto p-6 bg-background">
+        <TrelloKanbanBoard
+          columns={kanbanColumns}
+          onTaskMove={handleTaskMove}
+          onTaskClick={handleTaskClick}
+          columnColors={columnColors}
+          allowAddTask={false}
+          className="h-full"
+          renderTask={(task, columnId, isDragging) => {
+            const conversation = (task as KanbanTask & { conversation?: KanbanConversation }).conversation;
+            if (!conversation) return null;
+
+            return (
               <div
-                key={column.stage.id}
-                className="flex flex-col w-80"
+                data-card-id={conversation.id}
+                className={cn(
+                  "relative rounded-lg border border-border bg-card p-3 shadow-sm transition-all duration-150",
+                  "hover:-translate-y-0.5 hover:shadow-md",
+                  isDragging && "rotate-2 opacity-50"
+                )}
               >
-                {/* Column Header - Nome da etapa ✅ CENTRALIZADO */}
-                <div className="mb-2">
-                  <h3 className="text-sm font-medium text-gray-900 mb-2 text-center">{column.stage.name}</h3>
-                  {/* Barra colorida */}
-                  <div
-                    className="h-1 rounded-full"
-                    style={{ backgroundColor: column.stage.color }}
-                  />
+                {/* Seta superior direita */}
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setSelectedConversation(conversation);
+                    const cardElement = (e.currentTarget.closest('[data-card-id]') as HTMLElement);
+                    if (cardElement) {
+                      setSelectedCardRef({ current: cardElement } as React.RefObject<HTMLDivElement>);
+                    }
+                    setSidebarOpen(true);
+                  }}
+                  className="absolute top-2 right-2 text-muted-foreground hover:text-foreground transition-colors z-10"
+                >
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+
+                {/* Tags */}
+                {conversation.tags && conversation.tags.length > 0 && (
+                  <div className="mb-2 flex flex-wrap gap-1">
+                    {conversation.tags.map((ct) => (
+                      <span
+                        key={ct.id}
+                        className="rounded px-1.5 py-0.5 text-[10px] font-semibold text-white"
+                        style={{ backgroundColor: ct.tag.color || '#6b7280' }}
+                      >
+                        {ct.tag.name}
+                      </span>
+                    ))}
+                  </div>
+                )}
+
+                {/* Layout horizontal: Avatar à esquerda, conteúdo à direita */}
+                <div className="flex gap-3 pr-6">
+                  {/* Avatar do contato */}
+                  <div className="flex-shrink-0 flex items-center">
+                    <div className="w-10 h-10 rounded-full bg-muted border-2 border-border flex items-center justify-center">
+                      <User className="w-5 h-5 stroke-[1.5] text-muted-foreground" />
+                    </div>
+                  </div>
+
+                  {/* Conteúdo */}
+                  <div className="flex-1 min-w-0">
+                    <h3 className="text-sm font-medium text-card-foreground mb-1 truncate">
+                      {task.title}
+                    </h3>
+
+                    {task.description && (
+                      <p className="text-xs text-muted-foreground line-clamp-2 mb-2">
+                        {task.description}
+                      </p>
+                    )}
+
+                    {/* Info adicional */}
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                      {conversation.unreadCount > 0 && (
+                        <span className="flex items-center gap-1">
+                          <MessageCircle className="w-3 h-3" />
+                          {conversation.unreadCount}
+                        </span>
+                      )}
+                      {conversation.assignedUser && (
+                        <div className="flex h-5 w-5 items-center justify-center rounded-full bg-primary text-[10px] font-semibold text-primary-foreground">
+                          {conversation.assignedUser.name.charAt(0).toUpperCase()}
+                        </div>
+                      )}
+                    </div>
+                  </div>
                 </div>
 
-                {/* Cards Container - Droppable */}
-                <DroppableColumn id={column.stage.id}>
-                  <div className="flex-1 overflow-y-auto space-y-3 min-h-[200px] max-h-[calc(100vh-260px)]">
-                    {column.conversations.map((conversation) => (
-                      <DraggableCard key={conversation.id} id={conversation.id}>
-                        <div 
-                          data-card-id={conversation.id}
-                          className="relative bg-white rounded-lg border border-gray-300 shadow-sm p-4 hover:shadow-md transition-shadow min-h-[120px]"
-                        >
-                          {/* Seta superior direita */}
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setSelectedConversation(conversation);
-                              // Buscar referência do card pelo data attribute
-                              const cardElement = (e.currentTarget.closest('[data-card-id]') as HTMLElement);
-                              if (cardElement) {
-                                setSelectedCardRef({ current: cardElement } as React.RefObject<HTMLDivElement>);
-                              }
-                              setSidebarOpen(true);
-                            }}
-                            className="absolute top-2 right-2 text-gray-600 hover:text-gray-900 transition-colors z-10"
-                          >
-                            <ChevronRight className="w-4 h-4" />
-                          </button>
-
-                          {/* Layout horizontal: Foto à esquerda, conteúdo à direita */}
-                          <div className="flex gap-3 pb-8">
-                            {/* Avatar do contato - lado esquerdo, centralizado verticalmente */}
-                            <div className="flex-shrink-0 flex items-center">
-                              <div className="w-12 h-12 rounded-full bg-white border-2 border-gray-200 flex items-center justify-center">
-                                <User className="w-7 h-7 stroke-[1.5] text-gray-900" />
-                              </div>
-                            </div>
-
-                            {/* Conteúdo à direita */}
-                            <div className="flex-1 min-w-0">
-                              {/* Nome do contato na parte superior */}
-                              <div className="mb-2">
-                                <h4 className="text-sm font-medium text-gray-900 truncate">
-                                  {conversation.contact.pushName || conversation.contact.name || formatPhoneNumber(conversation.contact.phoneNumber)}
-                                </h4>
-                              </div>
-
-                              {/* Resumo da conversa embaixo */}
-                              {conversation.messages && conversation.messages.length > 0 && (
-                                <p className="text-xs text-gray-600 mb-2 line-clamp-2">
-                                  {conversation.messages[0].content}
-                                </p>
-                              )}
-
-                              {/* Tags */}
-                              {conversation.tags && conversation.tags.length > 0 && (
-                                <div className="flex flex-wrap gap-1">
-                                  {conversation.tags.map((ct) => (
-                                    <span
-                                      key={ct.id}
-                                      className="px-2 py-0.5 text-xs bg-gray-200 text-gray-700 rounded"
-                                    >
-                                      {ct.tag.name}
-                                    </span>
-                                  ))}
-                                </div>
-                              )}
-                            </div>
-                          </div>
-
-                          {/* Ícone WhatsApp fixo no canto inferior direito */}
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              // Redirecionar para a conversa no dashboard
-                              navigate(`/dashboard?conversation=${conversation.id}`);
-                            }}
-                            className="absolute bottom-2 right-2 hover:opacity-80 transition-opacity z-10"
-                            title="Abrir conversa"
-                          >
-                            <WhatsAppIcon className="w-6 h-6" />
-                          </button>
-                        </div>
-                      </DraggableCard>
-                    ))}
-
-                    {column.conversations.length === 0 && (
-                      <div className="text-center text-gray-400 py-8 text-sm">
-                        Nenhuma conversa
-                      </div>
-                    )}
-                  </div>
-                </DroppableColumn>
+                {/* Ícone WhatsApp fixo no canto inferior direito */}
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    navigate(`/dashboard?conversation=${conversation.id}`);
+                  }}
+                  className="absolute bottom-2 right-2 hover:opacity-80 transition-opacity z-10"
+                  title="Abrir conversa"
+                >
+                  <WhatsAppIcon className="w-5 h-5" />
+                </button>
               </div>
-            ))}
-          </div>
-
-          {/* Drag Overlay */}
-          <DragOverlay>
-            {activeCard && (
-              <div className="bg-gray-50 border-2 border-blue-500 p-4 shadow-xl w-80 opacity-90">
-                <h4 className="font-medium text-gray-900">
-                  {activeCard.contact.name || 'Sem nome'}
-                </h4>
-                <p className="text-sm text-gray-600">{formatPhoneNumber(activeCard.contact.phoneNumber)}</p>
-              </div>
-            )}
-          </DragOverlay>
-        </DndContext>
+            );
+          }}
+        />
       </div>
 
       {/* Modal Criar Coluna */}
       {showCreateModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50">
-          <div className="bg-white border border-gray-300 rounded-lg p-6 w-96">
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-card border border-border rounded-lg p-6 w-96">
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-bold text-gray-900">Nova Coluna</h2>
-              <button onClick={() => setShowCreateModal(false)} className="text-gray-600 hover:text-gray-900">
+              <h2 className="text-xl font-bold text-foreground">Nova Coluna</h2>
+              <button onClick={() => setShowCreateModal(false)} className="text-muted-foreground hover:text-foreground">
                 <X className="w-5 h-5" />
               </button>
             </div>
             
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium mb-1 text-gray-900">Nome</label>
+                <label className="block text-sm font-medium mb-1 text-foreground">Nome</label>
                 <input
                   type="text"
                   value={newStageName}
                   onChange={(e) => setNewStageName(e.target.value)}
-                  className="w-full bg-white border border-gray-300 text-gray-900 rounded px-3 py-2 focus:border-gray-900"
+                  className="w-full bg-background border border-input text-foreground rounded px-3 py-2 focus:border-primary focus:outline-none"
                   placeholder="Ex: Em Andamento"
                   autoFocus
                 />
               </div>
               
               <div>
-                <label className="block text-sm font-medium mb-1 text-gray-900">Cor</label>
+                <label className="block text-sm font-medium mb-1 text-foreground">Cor</label>
                 <input
                   type="color"
                   value={newStageColor}
                   onChange={(e) => setNewStageColor(e.target.value)}
-                  className="w-full h-10 bg-white border border-gray-300 rounded cursor-pointer"
+                  className="w-full h-10 bg-background border border-input rounded cursor-pointer"
                 />
               </div>
             </div>
