@@ -21,6 +21,7 @@ export interface Task {
   attachments?: number;
   comments?: number;
   conversation?: any; // Para armazenar dados da conversa
+  contactInitial?: string; // Primeira letra do pushName para o avatar
 }
 
 export interface Column {
@@ -121,8 +122,16 @@ export function KanbanBoard({ columns: initialColumns, onTaskMove, onTaskClick, 
                 >
                   <CardContent className="p-5">
                     <div className="space-y-4">
-                      <div className="flex items-start justify-between">
-                        <div className="flex-1">
+                      <div className="flex items-start justify-between gap-3">
+                        {/* Avatar com primeira letra do pushName */}
+                        {task.contactInitial && (
+                          <Avatar className="w-10 h-10 ring-2 ring-white/50 dark:ring-neutral-700/50 flex-shrink-0">
+                            <AvatarFallback className="bg-primary text-primary-foreground font-semibold">
+                              {task.contactInitial.toUpperCase()}
+                            </AvatarFallback>
+                          </Avatar>
+                        )}
+                        <div className="flex-1 min-w-0">
                           <h4 className="font-semibold text-neutral-900 dark:text-neutral-100 leading-tight">
                             {task.title}
                           </h4>

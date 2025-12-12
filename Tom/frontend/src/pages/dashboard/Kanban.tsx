@@ -83,13 +83,19 @@ const conversationToTask = (conversation: KanbanConversation): Task => {
   // Data da primeira mensagem
   const firstMessageDate = conversation.firstMessageAt || conversation.lastMessageAt;
   
-  // Se for grupo, usar apenas o pushName (ou name) como título
-  // Se não for grupo, usar pushName como título e número formatado como subtítulo
+  // Para grupos: usar pushName do contato (nome do grupo)
+  // Para conversas individuais: usar pushName como título e número como subtítulo
+  const pushName = conversation.contact.pushName || conversation.contact.name;
   const title = isGroup 
-    ? (conversation.contact.pushName || conversation.contact.name || phoneNumber)
-    : (conversation.contact.pushName || conversation.contact.name || phoneNumber);
+    ? (pushName || phoneNumber) // Grupo: pushName ou número como fallback
+    : (pushName || phoneNumber); // Individual: pushName ou número como fallback
   
   const subtitle = isGroup ? undefined : phoneNumber;
+  
+  // Primeira letra do pushName para o avatar
+  const contactInitial = pushName 
+    ? pushName.charAt(0).toUpperCase()
+    : phoneNumber.charAt(0).toUpperCase();
   
   return {
     id: conversation.id,
@@ -104,6 +110,7 @@ const conversationToTask = (conversation: KanbanConversation): Task => {
     dueDate: firstMessageDate, // Data da primeira mensagem
     comments: conversation.unreadCount > 0 ? conversation.unreadCount : undefined,
     attachments: 0,
+    contactInitial, // Primeira letra do pushName
     conversation, // Armazenar dados completos da conversa
   };
 };
