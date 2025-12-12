@@ -9,6 +9,7 @@ import { ptBR } from 'date-fns/locale';
 export interface Task {
   id: string;
   title: string;
+  subtitle?: string; // Para número formatado (quando não for grupo)
   description?: string;
   priority?: 'low' | 'medium' | 'high';
   assignee?: {
@@ -121,9 +122,16 @@ export function KanbanBoard({ columns: initialColumns, onTaskMove, onTaskClick, 
                   <CardContent className="p-5">
                     <div className="space-y-4">
                       <div className="flex items-start justify-between">
-                        <h4 className="font-semibold text-neutral-900 dark:text-neutral-100 leading-tight">
-                          {task.title}
-                        </h4>
+                        <div className="flex-1">
+                          <h4 className="font-semibold text-neutral-900 dark:text-neutral-100 leading-tight">
+                            {task.title}
+                          </h4>
+                          {task.subtitle && (
+                            <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5">
+                              {task.subtitle}
+                            </p>
+                          )}
+                        </div>
                       </div>
 
                       {task.description && (

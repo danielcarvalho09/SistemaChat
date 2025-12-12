@@ -26,6 +26,7 @@ interface Contact {
   phoneNumber: string;
   pushName?: string;
   avatar?: string;
+  isGroup?: boolean;
 }
 
 interface AssignedUser {
@@ -73,6 +74,7 @@ interface BoardColumn {
 
 // Mapear conversas para tasks do Kanban
 const conversationToTask = (conversation: KanbanConversation): Task => {
+  const isGroup = conversation.contact.isGroup || false;
   const phoneNumber = formatPhoneNumber(conversation.contact.phoneNumber);
   const lastMessage = conversation.messages && conversation.messages.length > 0 
     ? conversation.messages[0].content 
@@ -81,9 +83,18 @@ const conversationToTask = (conversation: KanbanConversation): Task => {
   // Data da primeira mensagem
   const firstMessageDate = conversation.firstMessageAt || conversation.lastMessageAt;
   
+  // Se for grupo, usar apenas o pushName (ou name) como título
+  // Se não for grupo, usar pushName como título e número formatado como subtítulo
+  const title = isGroup 
+    ? (conversation.contact.pushName || conversation.contact.name || phoneNumber)
+    : (conversation.contact.pushName || conversation.contact.name || phoneNumber);
+  
+  const subtitle = isGroup ? undefined : phoneNumber;
+  
   return {
     id: conversation.id,
-    title: phoneNumber, // Número formatado ao invés do nome
+    title,
+    subtitle, // Número formatado (apenas se não for grupo)
     description: lastMessage,
     tags: conversation.tags?.map(ct => ct.tag.name) || [],
     assignee: conversation.assignedUser ? {
