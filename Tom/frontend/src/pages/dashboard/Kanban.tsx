@@ -200,7 +200,7 @@ export function Kanban() {
     return colors;
   }, [board]);
 
-  const handleTaskMove = async (taskId: string, fromColumnId: string, toColumnId: string) => {
+  const handleTaskMove = async (taskId: string, _fromColumnId: string, toColumnId: string) => {
     try {
       await api.put(`/kanban/conversations/${taskId}/move`, {
         toStageId: toColumnId,
@@ -215,7 +215,7 @@ export function Kanban() {
     }
   };
 
-  const handleTaskClick = (task: KanbanTask & { conversation?: KanbanConversation }, columnId: string) => {
+  const handleTaskClick = (task: KanbanTask & { conversation?: KanbanConversation }, _columnId: string) => {
     if (task.conversation) {
       setSelectedConversation(task.conversation);
       setSidebarOpen(true);
@@ -400,7 +400,7 @@ export function Kanban() {
           columnColors={columnColors}
           allowAddTask={false}
           className="h-full"
-          renderTask={(task, columnId, isDragging) => {
+          renderTask={(task, _columnId, isDragging) => {
             const conversation = (task as KanbanTask & { conversation?: KanbanConversation }).conversation;
             if (!conversation) return null;
 
