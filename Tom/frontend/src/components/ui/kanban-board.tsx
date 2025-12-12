@@ -122,16 +122,8 @@ export function KanbanBoard({ columns: initialColumns, onTaskMove, onTaskClick, 
                 >
                   <CardContent className="p-5">
                     <div className="space-y-4">
-                      <div className="flex items-start justify-between gap-3">
-                        {/* Avatar com primeira letra do pushName */}
-                        {task.contactInitial && (
-                          <Avatar className="w-10 h-10 ring-2 ring-white/50 dark:ring-neutral-700/50 flex-shrink-0">
-                            <AvatarFallback className="bg-primary text-primary-foreground font-semibold">
-                              {task.contactInitial.toUpperCase()}
-                            </AvatarFallback>
-                          </Avatar>
-                        )}
-                        <div className="flex-1 min-w-0">
+                      <div className="flex items-start justify-between">
+                        <div className="flex-1">
                           <h4 className="font-semibold text-neutral-900 dark:text-neutral-100 leading-tight">
                             {task.title}
                           </h4>
@@ -184,18 +176,10 @@ export function KanbanBoard({ columns: initialColumns, onTaskMove, onTaskClick, 
                           )}
                         </div>
 
-                        {task.assignee && (
+                        {task.contactInitial && (
                           <Avatar className="w-8 h-8 ring-2 ring-white/50 dark:ring-neutral-700/50">
-                            {task.assignee.avatar && (
-                              <AvatarImage src={task.assignee.avatar} />
-                            )}
-                            <AvatarFallback className="bg-neutral-200 dark:bg-neutral-700 text-neutral-800 dark:text-neutral-200 font-medium">
-                              {task.assignee.name
-                                .split(' ')
-                                .map((n) => n[0])
-                                .join('')
-                                .toUpperCase()
-                                .slice(0, 2)}
+                            <AvatarFallback className="bg-primary text-primary-foreground font-medium">
+                              {task.contactInitial}
                             </AvatarFallback>
                           </Avatar>
                         )}
